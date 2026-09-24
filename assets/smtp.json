@@ -1,0 +1,17 @@
+{
+  "name": "smtp",
+  "app_name": "SMTP",
+  "configuration": {
+    "port": 8446,
+    "server": "<<SET ME \u2014 this was the LAB's own internal address, not a real target address. Replace with your target system's real value.>>",
+    "encoding": false,
+    "ssl_config": "None",
+    "allow_smtputf8": false,
+    "sender_address": "<<SET ME \u2014 this was the LAB's own identity (account/client id), not a secret and not portable. Replace with the identity your target system expects; it must match the credential you enter.>>"
+  },
+  "redacted_fields": [
+    "server",
+    "sender_address"
+  ],
+  "note": "Reference for manually configuring this asset via Apps > Configure New Asset in the target SOAR GUI. Not a REST-postable creation payload \u2014 asset creation semantics differ from the read-merge-write update pattern used elsewhere in this toolchain, and this has not been verified as directly importable."
+}

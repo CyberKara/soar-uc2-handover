@@ -1,0 +1,22 @@
+{
+    "name": "proofpoint_trap_extract_incident_id",
+    "custom_function_id": "edcb8765d519c442b0535e30c31bffbbe55ae549",
+    "description": "Read the TRAP incident ID and raw TRAP Severity off the container's Event Info/Event Info Update artifacts.",
+    "draft_mode": false,
+    "inputs": [],
+    "outputs": [
+        {
+            "data_path": "incident_id",
+            "description": "TRAP incident ID, or None if not found.",
+            "contains_type": []
+        },
+        {
+            "data_path": "trap_severity",
+            "description": "Raw TRAP Severity value, or None if not found/not present.",
+            "contains_type": []
+        }
+    ],
+    "outputs_type": "item",
+    "platform_version": "6.4.1.361",
+    "python_version": "3.13"
+}

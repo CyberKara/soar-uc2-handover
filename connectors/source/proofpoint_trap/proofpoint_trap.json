@@ -1,0 +1,967 @@
+{
+    "appid": "a7c41f8e-3b2d-4e9a-bf56-1d8e9a4c2f7b",
+    "name": "Proofpoint TRAP",
+    "description": "Ingest and manage incidents from Proofpoint Threat Response Auto-Pull (TRAP) on-premises. NOTE: Before enabling polling, create a label (e.g. proofpoint_trap) in Administration > Event Settings > Labels, then select it in the asset Ingest Settings.",
+    "type": "siem",
+    "product_vendor": "Proofpoint",
+    "product_name": "Threat Response Auto-Pull",
+    "product_version_regex": ".*",
+    "logo": "logo.svg",
+    "logo_dark": "logo_dark.svg",
+    "publisher": "Ted",
+    "license": "Copyright (c) 2026",
+    "app_version": "1.0.34",
+    "utctime_updated": "2026-08-20T00:00:00.000000Z",
+    "package_name": "phantom_proofpoint_trap",
+    "main_module": "proofpoint_trap_connector.py",
+    "min_phantom_version": "6.4.1",
+    "app_wizard_version": "1.0.0",
+    "python_version": "3.13",
+    "pip_dependencies": {
+        "wheel": []
+    },
+    "configuration": {
+        "base_url": {
+            "description": "Proofpoint TRAP base URL (e.g. https://trap.example.com)",
+            "data_type": "string",
+            "required": true,
+            "order": 0
+        },
+        "api_key": {
+            "description": "API key for authentication (generate in TRAP > System Settings > API Keys)",
+            "data_type": "password",
+            "required": true,
+            "order": 1
+        },
+        "verify_ssl": {
+            "description": "Verify server SSL certificate",
+            "data_type": "boolean",
+            "required": false,
+            "default": true,
+            "order": 2
+        },
+        "timeout": {
+            "description": "Request timeout in seconds (default: 60)",
+            "data_type": "numeric",
+            "required": false,
+            "default": 60,
+            "order": 3
+        },
+        "ph_poll": {
+            "data_type": "ph",
+            "order": 4
+        },
+        "poll_state": {
+            "description": "TRAP incident state to poll. Valid: new, open, closed",
+            "data_type": "string",
+            "required": false,
+            "default": "new",
+            "order": 5
+        },
+        "abuse_disposition": {
+            "description": "Comma-separated Abuse Disposition values to ingest. Valid: Malicious, Suspicious, Spam, Bulk, Low Risk, False Negative, Known Good, Unknown",
+            "data_type": "string",
+            "required": false,
+            "default": "Unknown",
+            "order": 6
+        },
+        "sub_disposition": {
+            "description": "Comma-separated Sub Disposition values to ingest, applied in addition to abuse_disposition. Valid: Needs Manual Review, Likely Harmless. Only meaningful when abuse_disposition includes Unknown.",
+            "data_type": "string",
+            "required": false,
+            "default": "",
+            "order": 7
+        },
+        "poll_hours": {
+            "description": "How many hours back to poll on first run",
+            "data_type": "numeric",
+            "required": false,
+            "default": 1,
+            "order": 8
+        },
+        "severity": {
+            "description": "Initial severity of the created container (promoted later by proofpoint_trap_triage from the real TRAP Severity field)",
+            "data_type": "string",
+            "required": false,
+            "default": "low",
+            "order": 9
+        },
+        "sensitivity": {
+            "description": "Sensitivity of the created container",
+            "data_type": "string",
+            "required": false,
+            "value_list": ["white", "green", "amber", "red"],
+            "default": "amber",
+            "order": 10
+        }
+    },
+    "actions": [
+        {
+            "action": "test connectivity",
+            "identifier": "test_connectivity",
+            "description": "Validate the asset configuration for connectivity using supplied configuration (Incidents API, /api/incidents)",
+            "type": "test",
+            "read_only": true,
+            "parameters": {},
+            "output": [],
+            "versions": "EQ(*)"
+        },
+        {
+            "action": "on poll",
+            "identifier": "on_poll",
+            "description": "Ingest incidents from Proofpoint TRAP (Incidents API, /api/incidents)",
+            "type": "ingest",
+            "read_only": true,
+            "parameters": {},
+            "output": [
+                {
+                    "data_path": "action_result.data",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.summary",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.status",
+                    "data_type": "string",
+                    "example_values": [
+                        "success",
+                        "failed"
+                    ]
+                },
+                {
+                    "data_path": "action_result.message",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "summary.total_objects",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "summary.total_objects_successful",
+                    "data_type": "numeric"
+                }
+            ],
+            "render": {
+                "type": "table"
+            },
+            "versions": "EQ(*)"
+        },
+        {
+            "action": "list incidents",
+            "identifier": "list_incidents",
+            "description": "List/search TRAP incidents by state, time window, and Abuse/Sub Disposition \u2014 the same filtering On Poll uses for ingestion, exposed as an on-demand action (Incidents API, /api/incidents)",
+            "type": "investigate",
+            "read_only": true,
+            "parameters": {
+                "state": {
+                    "description": "TRAP incident state to list. Valid: new, open, closed",
+                    "data_type": "string",
+                    "required": false,
+                    "default": "new",
+                    "order": 0
+                },
+                "hours_back": {
+                    "description": "How many hours back (from now) to search, by created date. Capped at 30-day chunks per TRAP's API limit, chunked automatically for longer windows",
+                    "data_type": "numeric",
+                    "required": false,
+                    "default": 1,
+                    "order": 1
+                },
+                "abuse_disposition": {
+                    "description": "Comma-separated Abuse Disposition values to filter to. Valid: Malicious, Suspicious, Spam, Bulk, Low Risk, False Negative, Known Good, Unknown. Leave blank for any",
+                    "data_type": "string",
+                    "required": false,
+                    "order": 2
+                },
+                "sub_disposition": {
+                    "description": "Comma-separated Sub Disposition values to filter to, applied in addition to abuse_disposition. Valid: Needs Manual Review, Likely Harmless. Only meaningful when abuse_disposition includes Unknown",
+                    "data_type": "string",
+                    "required": false,
+                    "order": 3
+                },
+                "expand_events": {
+                    "description": "Include full event data per incident instead of just event IDs (slower for large result sets)",
+                    "data_type": "boolean",
+                    "required": false,
+                    "default": false,
+                    "order": 4
+                },
+                "max_results": {
+                    "description": "Cap the number of incidents returned (0 = no cap)",
+                    "data_type": "numeric",
+                    "required": false,
+                    "default": 0,
+                    "order": 5
+                }
+            },
+            "output": [
+                {
+                    "data_path": "action_result.parameter.state",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.parameter.hours_back",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "action_result.parameter.abuse_disposition",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.parameter.sub_disposition",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.parameter.expand_events",
+                    "data_type": "boolean"
+                },
+                {
+                    "data_path": "action_result.parameter.max_results",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "action_result.data.*.id",
+                    "data_type": "numeric",
+                    "contains": [
+                        "proofpoint trap incident id"
+                    ]
+                },
+                {
+                    "data_path": "action_result.data.*.summary",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.data.*.state",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.data.*.score",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "action_result.data.*.created_at",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.status",
+                    "data_type": "string",
+                    "example_values": [
+                        "success",
+                        "failed"
+                    ]
+                },
+                {
+                    "data_path": "action_result.message",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.summary.total_incidents",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "summary.total_objects",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "summary.total_objects_successful",
+                    "data_type": "numeric"
+                }
+            ],
+            "render": {
+                "type": "table"
+            },
+            "versions": "EQ(*)"
+        },
+        {
+            "action": "get incident",
+            "identifier": "get_incident",
+            "description": "Retrieve full details of one or more TRAP incidents including events and email data. Accepts a single incident ID or a list of IDs. (Incidents API, /api/incidents)",
+            "type": "investigate",
+            "read_only": true,
+            "parameters": {
+                "incident_id": {
+                    "description": "TRAP incident ID (single value or list of IDs)",
+                    "data_type": "string",
+                    "required": true,
+                    "order": 0,
+                    "allow_list": true,
+                    "contains": [
+                        "proofpoint trap incident id"
+                    ]
+                },
+                "expand_events": {
+                    "description": "Include full event data per incident instead of just event IDs (slower for large result sets)",
+                    "data_type": "boolean",
+                    "required": false,
+                    "default": true,
+                    "order": 1
+                }
+            },
+            "output": [
+                {
+                    "data_path": "action_result.parameter.incident_id",
+                    "data_type": "string",
+                    "contains": [
+                        "proofpoint trap incident id"
+                    ]
+                },
+                {
+                    "data_path": "action_result.data.*.id",
+                    "data_type": "numeric",
+                    "contains": [
+                        "proofpoint trap incident id"
+                    ]
+                },
+                {
+                    "data_path": "action_result.data.*.summary",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.data.*.state",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.data.*.score",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "action_result.data.*.event_count",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "action_result.data.*.created_at",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.data.*.assignee",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.status",
+                    "data_type": "string",
+                    "example_values": [
+                        "success",
+                        "failed"
+                    ]
+                },
+                {
+                    "data_path": "action_result.message",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.summary.event_count",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "summary.total_objects",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "summary.total_objects_successful",
+                    "data_type": "numeric"
+                }
+            ],
+            "render": {
+                "type": "table"
+            },
+            "versions": "EQ(*)"
+        },
+        {
+            "action": "download mime body",
+            "identifier": "download_mime_body",
+            "description": "Download the raw MIME body for one or all events of a TRAP incident and store it in the Vault (Incidents API, /api/incidents)",
+            "verbose": "Fetches the raw MIME (.eml) content for a specific event (or, if event_id is omitted, every event) on a TRAP incident, saves it to the SOAR Vault, and returns the vault_id so analysts/playbooks can review or attach the original email.",
+            "type": "investigate",
+            "read_only": true,
+            "parameters": {
+                "incident_id": {
+                    "description": "TRAP incident ID",
+                    "data_type": "numeric",
+                    "required": true,
+                    "primary": true,
+                    "order": 0,
+                    "contains": [
+                        "proofpoint trap incident id"
+                    ]
+                },
+                "event_id": {
+                    "description": "Specific event ID to fetch MIME for (omit to fetch MIME for every event on the incident)",
+                    "data_type": "string",
+                    "required": false,
+                    "order": 1
+                }
+            },
+            "output": [
+                {
+                    "data_path": "action_result.parameter.incident_id",
+                    "data_type": "numeric",
+                    "contains": [
+                        "proofpoint trap incident id"
+                    ]
+                },
+                {
+                    "data_path": "action_result.parameter.event_id",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.data.*.event_id",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.data.*.vault_id",
+                    "data_type": "string",
+                    "contains": [
+                        "vault id"
+                    ],
+                    "column_name": "Vault ID",
+                    "column_order": 0
+                },
+                {
+                    "data_path": "action_result.data.*.file_name",
+                    "data_type": "string",
+                    "contains": [
+                        "file name"
+                    ],
+                    "column_name": "File Name",
+                    "column_order": 1
+                },
+                {
+                    "data_path": "action_result.status",
+                    "data_type": "string",
+                    "example_values": [
+                        "success",
+                        "failed"
+                    ]
+                },
+                {
+                    "data_path": "action_result.message",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.summary.succeeded",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "action_result.summary.failed",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "action_result.summary.total",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "summary.total_objects",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "summary.total_objects_successful",
+                    "data_type": "numeric"
+                }
+            ],
+            "render": {
+                "type": "table"
+            },
+            "versions": "EQ(*)"
+        },
+        {
+            "action": "close incident",
+            "identifier": "close_incident",
+            "description": "Close a TRAP incident with a summary and detail (Incidents API, /api/incidents)",
+            "type": "generic",
+            "read_only": false,
+            "parameters": {
+                "incident_id": {
+                    "description": "TRAP incident ID to close",
+                    "data_type": "numeric",
+                    "required": true,
+                    "order": 0,
+                    "contains": [
+                        "proofpoint trap incident id"
+                    ]
+                },
+                "summary": {
+                    "description": "Closure summary (required by TRAP)",
+                    "data_type": "string",
+                    "required": true,
+                    "order": 1
+                },
+                "detail": {
+                    "description": "Closure detail/reason",
+                    "data_type": "string",
+                    "required": true,
+                    "order": 2
+                }
+            },
+            "output": [
+                {
+                    "data_path": "action_result.parameter.incident_id",
+                    "data_type": "numeric",
+                    "contains": [
+                        "proofpoint trap incident id"
+                    ]
+                },
+                {
+                    "data_path": "action_result.parameter.summary",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.parameter.detail",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.data.*.success",
+                    "data_type": "boolean"
+                },
+                {
+                    "data_path": "action_result.summary.incident_id",
+                    "data_type": "numeric",
+                    "contains": [
+                        "proofpoint trap incident id"
+                    ]
+                },
+                {
+                    "data_path": "action_result.status",
+                    "data_type": "string",
+                    "example_values": [
+                        "success",
+                        "failed"
+                    ]
+                },
+                {
+                    "data_path": "action_result.message",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "summary.total_objects",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "summary.total_objects_successful",
+                    "data_type": "numeric"
+                }
+            ],
+            "render": {
+                "type": "table"
+            },
+            "versions": "EQ(*)"
+        },
+        {
+            "action": "add comment",
+            "identifier": "add_comment",
+            "description": "Add a comment to a TRAP incident (Incidents API, /api/incidents)",
+            "type": "generic",
+            "read_only": false,
+            "parameters": {
+                "incident_id": {
+                    "description": "TRAP incident ID",
+                    "data_type": "numeric",
+                    "required": true,
+                    "order": 0,
+                    "contains": [
+                        "proofpoint trap incident id"
+                    ]
+                },
+                "summary": {
+                    "description": "Comment title/summary",
+                    "data_type": "string",
+                    "required": true,
+                    "order": 1
+                },
+                "detail": {
+                    "description": "Comment body (optional)",
+                    "data_type": "string",
+                    "required": false,
+                    "order": 2
+                }
+            },
+            "output": [
+                {
+                    "data_path": "action_result.parameter.incident_id",
+                    "data_type": "numeric",
+                    "contains": [
+                        "proofpoint trap incident id"
+                    ]
+                },
+                {
+                    "data_path": "action_result.parameter.summary",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.parameter.detail",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.data.*.success",
+                    "data_type": "boolean"
+                },
+                {
+                    "data_path": "action_result.summary.incident_id",
+                    "data_type": "numeric",
+                    "contains": [
+                        "proofpoint trap incident id"
+                    ]
+                },
+                {
+                    "data_path": "action_result.status",
+                    "data_type": "string",
+                    "example_values": [
+                        "success",
+                        "failed"
+                    ]
+                },
+                {
+                    "data_path": "action_result.message",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "summary.total_objects",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "summary.total_objects_successful",
+                    "data_type": "numeric"
+                }
+            ],
+            "render": {
+                "type": "table"
+            },
+            "versions": "EQ(*)"
+        },
+        {
+            "action": "add user to incident",
+            "identifier": "add_user_to_incident",
+            "description": "Add a user to a TRAP incident as a target and/or attacker (Incidents API, /api/incidents)",
+            "type": "generic",
+            "read_only": false,
+            "parameters": {
+                "incident_id": {
+                    "description": "TRAP incident ID",
+                    "data_type": "numeric",
+                    "required": true,
+                    "order": 0,
+                    "contains": [
+                        "proofpoint trap incident id"
+                    ]
+                },
+                "targets": {
+                    "description": "Comma-separated usernames to add as targets",
+                    "data_type": "string",
+                    "required": false,
+                    "order": 1
+                },
+                "attackers": {
+                    "description": "Comma-separated usernames to add as attackers",
+                    "data_type": "string",
+                    "required": false,
+                    "order": 2
+                }
+            },
+            "output": [
+                {
+                    "data_path": "action_result.parameter.incident_id",
+                    "data_type": "numeric",
+                    "contains": [
+                        "proofpoint trap incident id"
+                    ]
+                },
+                {
+                    "data_path": "action_result.parameter.targets",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.parameter.attackers",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.data.*.success",
+                    "data_type": "boolean"
+                },
+                {
+                    "data_path": "action_result.summary.incident_id",
+                    "data_type": "numeric",
+                    "contains": [
+                        "proofpoint trap incident id"
+                    ]
+                },
+                {
+                    "data_path": "action_result.status",
+                    "data_type": "string",
+                    "example_values": [
+                        "success",
+                        "failed"
+                    ]
+                },
+                {
+                    "data_path": "action_result.message",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "summary.total_objects",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "summary.total_objects_successful",
+                    "data_type": "numeric"
+                }
+            ],
+            "render": {
+                "type": "table"
+            },
+            "versions": "EQ(*)"
+        },
+        {
+            "action": "update incident description",
+            "identifier": "update_incident_description",
+            "description": "Update a TRAP incident's description (Incidents API, /api/incidents)",
+            "type": "generic",
+            "read_only": false,
+            "parameters": {
+                "incident_id": {
+                    "description": "TRAP incident ID",
+                    "data_type": "numeric",
+                    "required": true,
+                    "order": 0,
+                    "contains": [
+                        "proofpoint trap incident id"
+                    ]
+                },
+                "description": {
+                    "description": "Description text",
+                    "data_type": "string",
+                    "required": true,
+                    "order": 1
+                },
+                "overwrite": {
+                    "description": "true replaces the existing description; false (default) appends to it",
+                    "data_type": "boolean",
+                    "required": false,
+                    "default": false,
+                    "order": 2
+                }
+            },
+            "output": [
+                {
+                    "data_path": "action_result.parameter.incident_id",
+                    "data_type": "numeric",
+                    "contains": [
+                        "proofpoint trap incident id"
+                    ]
+                },
+                {
+                    "data_path": "action_result.parameter.description",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.parameter.overwrite",
+                    "data_type": "boolean"
+                },
+                {
+                    "data_path": "action_result.data.*.success",
+                    "data_type": "boolean"
+                },
+                {
+                    "data_path": "action_result.summary.incident_id",
+                    "data_type": "numeric",
+                    "contains": [
+                        "proofpoint trap incident id"
+                    ]
+                },
+                {
+                    "data_path": "action_result.status",
+                    "data_type": "string",
+                    "example_values": [
+                        "success",
+                        "failed"
+                    ]
+                },
+                {
+                    "data_path": "action_result.message",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "summary.total_objects",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "summary.total_objects_successful",
+                    "data_type": "numeric"
+                }
+            ],
+            "render": {
+                "type": "table"
+            },
+            "versions": "EQ(*)"
+        },
+        {
+            "action": "update team and assignee",
+            "identifier": "update_incident_assignee",
+            "description": "Update a TRAP incident's team and/or assignee (Incidents API, /api/incidents)",
+            "type": "generic",
+            "read_only": false,
+            "parameters": {
+                "incident_id": {
+                    "description": "TRAP incident ID",
+                    "data_type": "numeric",
+                    "required": true,
+                    "order": 0,
+                    "contains": [
+                        "proofpoint trap incident id"
+                    ]
+                },
+                "assignee": {
+                    "description": "New assignee. Required together with team -- the appliance rejects a request with only one set",
+                    "data_type": "string",
+                    "required": true,
+                    "order": 1
+                },
+                "team": {
+                    "description": "New team. Required together with assignee -- the appliance rejects a request with only one set",
+                    "data_type": "string",
+                    "required": true,
+                    "order": 2
+                }
+            },
+            "output": [
+                {
+                    "data_path": "action_result.parameter.incident_id",
+                    "data_type": "numeric",
+                    "contains": [
+                        "proofpoint trap incident id"
+                    ]
+                },
+                {
+                    "data_path": "action_result.parameter.assignee",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.parameter.team",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.data.*.success",
+                    "data_type": "boolean"
+                },
+                {
+                    "data_path": "action_result.data.*.no_op",
+                    "data_type": "boolean",
+                    "description": "True when the incident already had the requested team/assignee (real appliance returns HTTP 404 for this, treated as success)"
+                },
+                {
+                    "data_path": "action_result.summary.incident_id",
+                    "data_type": "numeric",
+                    "contains": [
+                        "proofpoint trap incident id"
+                    ]
+                },
+                {
+                    "data_path": "action_result.status",
+                    "data_type": "string",
+                    "example_values": [
+                        "success",
+                        "failed"
+                    ]
+                },
+                {
+                    "data_path": "action_result.message",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "summary.total_objects",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "summary.total_objects_successful",
+                    "data_type": "numeric"
+                }
+            ],
+            "render": {
+                "type": "table"
+            },
+            "versions": "EQ(*)"
+        },
+        {
+            "action": "set incident field value",
+            "identifier": "set_incident_field",
+            "description": "Set an arbitrary field value on a TRAP incident (Incidents API, /api/incidents)",
+            "type": "generic",
+            "read_only": false,
+            "parameters": {
+                "incident_id": {
+                    "description": "TRAP incident ID",
+                    "data_type": "numeric",
+                    "required": true,
+                    "order": 0,
+                    "contains": [
+                        "proofpoint trap incident id"
+                    ]
+                },
+                "field": {
+                    "description": "Field name to set (e.g. 'status')",
+                    "data_type": "string",
+                    "required": true,
+                    "order": 1
+                },
+                "value": {
+                    "description": "Value to set the field to (e.g. 'open' for the status field)",
+                    "data_type": "string",
+                    "required": true,
+                    "order": 2
+                }
+            },
+            "output": [
+                {
+                    "data_path": "action_result.parameter.incident_id",
+                    "data_type": "numeric",
+                    "contains": [
+                        "proofpoint trap incident id"
+                    ]
+                },
+                {
+                    "data_path": "action_result.parameter.field",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.parameter.value",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.data.*.success",
+                    "data_type": "boolean"
+                },
+                {
+                    "data_path": "action_result.summary.incident_id",
+                    "data_type": "numeric",
+                    "contains": [
+                        "proofpoint trap incident id"
+                    ]
+                },
+                {
+                    "data_path": "action_result.status",
+                    "data_type": "string",
+                    "example_values": [
+                        "success",
+                        "failed"
+                    ]
+                },
+                {
+                    "data_path": "action_result.message",
+                    "data_type": "string"
+                },
+                {
+                    "data_path": "summary.total_objects",
+                    "data_type": "numeric"
+                },
+                {
+                    "data_path": "summary.total_objects_successful",
+                    "data_type": "numeric"
+                }
+            ],
+            "render": {
+                "type": "table"
+            },
+            "versions": "EQ(*)"
+        }
+    ]
+}

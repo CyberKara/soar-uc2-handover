@@ -1,0 +1,17 @@
+{
+  "name": "proofpoint_trap_recheck",
+  "app_name": "Timer",
+  "configuration": {
+    "ingest": {
+      "poll": true,
+      "interval_mins": "15",
+      "container_label": "proofpoint_trap_recheck",
+      "polling_strategy": "interval"
+    },
+    "severity": "low",
+    "event_name": "$label created on $now",
+    "sensitivity": "amber"
+  },
+  "redacted_fields": [],
+  "note": "Reference for manually configuring this asset via Apps > Configure New Asset in the target SOAR GUI. Not a REST-postable creation payload \u2014 asset creation semantics differ from the read-merge-write update pattern used elsewhere in this toolchain, and this has not been verified as directly importable."
+}

@@ -1,0 +1,27 @@
+{
+  "name": "proofpoint_trap_mock",
+  "app_name": "Proofpoint TRAP",
+  "configuration": {
+    "ingest": {
+      "poll": true,
+      "interval_mins": "15",
+      "container_label": "proofpoint_trap",
+      "polling_strategy": "interval"
+    },
+    "api_key": "<<SET ME \u2014 see HANDOVER.md, re-enter from your vault/CMDB>>",
+    "timeout": 60,
+    "base_url": "<<SET ME \u2014 this was the LAB's own internal address, not a real target address. Replace with your target system's real value.>>",
+    "severity": "low",
+    "poll_hours": 4000,
+    "poll_state": "new",
+    "verify_ssl": false,
+    "sensitivity": "amber",
+    "sub_disposition": "",
+    "abuse_disposition": ""
+  },
+  "redacted_fields": [
+    "api_key",
+    "base_url"
+  ],
+  "note": "Reference for manually configuring this asset via Apps > Configure New Asset in the target SOAR GUI. Not a REST-postable creation payload \u2014 asset creation semantics differ from the read-merge-write update pattern used elsewhere in this toolchain, and this has not been verified as directly importable. SOURCE ASSET IS A LAB MOCK/TEST ASSET: only fields in `redacted_fields` are guaranteed placeholders \u2014 other values (poll intervals, disposition filters, timeouts, etc.) reflect this lab's test tuning, not necessarily your production requirements. Review every field before reuse."
+}

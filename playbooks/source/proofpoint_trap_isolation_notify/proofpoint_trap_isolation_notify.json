@@ -1,0 +1,293 @@
+{
+    "blockly": false,
+    "blockly_xml": "<xml></xml>",
+    "category": "Email Abuse",
+    "coa": {
+        "data": {
+            "hash": "",
+            "edges": [
+                {
+                    "id": "port_0_to_port_2",
+                    "sourceNode": "0",
+                    "sourcePort": "0_out",
+                    "targetNode": "2",
+                    "targetPort": "2_in"
+                },
+                {
+                    "id": "port_2_to_port_3",
+                    "sourceNode": "2",
+                    "sourcePort": "2_out",
+                    "targetNode": "3",
+                    "targetPort": "3_in"
+                },
+                {
+                    "id": "port_3_to_port_4",
+                    "sourceNode": "3",
+                    "sourcePort": "3_out",
+                    "targetNode": "4",
+                    "targetPort": "4_in"
+                },
+                {
+                    "id": "port_4_to_port_5",
+                    "sourceNode": "4",
+                    "sourcePort": "4_out",
+                    "targetNode": "5",
+                    "targetPort": "5_in"
+                },
+                {
+                    "id": "port_5_to_port_6",
+                    "sourceNode": "5",
+                    "sourcePort": "5_out",
+                    "targetNode": "6",
+                    "targetPort": "6_in"
+                },
+                {
+                    "id": "port_6_to_port_1",
+                    "sourceNode": "6",
+                    "sourcePort": "6_out",
+                    "targetNode": "1",
+                    "targetPort": "1_in"
+                }
+            ],
+            "nodes": {
+                "0": {
+                    "x": 190,
+                    "y": 0,
+                    "id": "0",
+                    "data": {
+                        "id": "0",
+                        "type": "start",
+                        "advanced": {
+                            "join": []
+                        },
+                        "functionName": "on_start"
+                    },
+                    "type": "start",
+                    "errors": {}
+                },
+                "1": {
+                    "x": 190,
+                    "y": 1300,
+                    "id": "1",
+                    "data": {
+                        "id": "1",
+                        "type": "end",
+                        "advanced": {
+                            "join": []
+                        },
+                        "functionId": 1,
+                        "functionName": "on_finish"
+                    },
+                    "type": "end",
+                    "errors": {}
+                },
+                "2": {
+                    "x": 190,
+                    "y": 100,
+                    "id": "2",
+                    "data": {
+                        "id": "2",
+                        "type": "utility",
+                        "values": {
+                            "proofpoint_trap_extract_incident_id": {}
+                        },
+                        "advanced": {
+                            "join": [],
+                            "customName": "extract incident id",
+                            "description": "Extract TRAP incident ID via the shared proofpoint_trap_extract_incident_id custom function.",
+                            "customNameId": 0
+                        },
+                        "utilities": {
+                            "proofpoint_trap_extract_incident_id": {
+                                "name": "proofpoint_trap_extract_incident_id",
+                                "label": "proofpoint_trap_extract_incident_id",
+                                "fields": [],
+                                "description": "Read the TRAP incident ID and raw TRAP Severity off the container's Event Info/Event Info Update artifacts."
+                            }
+                        },
+                        "functionId": 1,
+                        "selectMore": false,
+                        "utilityType": "custom_function",
+                        "functionName": "extract_incident_id",
+                        "customFunction": {
+                            "name": "proofpoint_trap_extract_incident_id",
+                            "repoName": "local",
+                            "draftMode": false
+                        }
+                    },
+                    "type": "utility",
+                    "errors": {}
+                },
+                "3": {
+                    "x": 190,
+                    "y": 250,
+                    "id": "3",
+                    "data": {
+                        "id": "3",
+                        "type": "code",
+                        "advanced": {
+                            "join": [],
+                            "note": "Reads incident_id from the extract_incident_id CF result.",
+                            "customName": "read incident id",
+                            "description": "Bridge block: read extract_incident_id CF result (same pattern as cyberark_rotation_orchestrator.py read_discover_result).",
+                            "customNameId": 0
+                        },
+                        "functionId": 2,
+                        "functionName": "read_incident_id",
+                        "inputParameters": [
+                            "extract_incident_id:custom_function_result.data.incident_id"
+                        ],
+                        "outputVariables": [
+                            "incident_id"
+                        ]
+                    },
+                    "type": "code",
+                    "errors": {},
+                    "userCode": "    ################################################################################\n\n    result_rows = phantom.collect2(\n        container=container,\n        datapath=[\"extract_incident_id:custom_function_result.data.incident_id\"],\n    )\n    incident_id_val = result_rows[0][0] if result_rows else None\n\n    if not incident_id_val:\n        phantom.error(\"Could not find Incident ID (cef.incidentId) on the 'Event Info' artifact\")\n        phantom.add_note(\n            container=container,\n            note_type=\"general\",\n            title=\"TRAP Isolation Notify - Error\",\n            content=\"Could not find Incident ID on the 'Event Info' artifact\"\n        )\n        return\n\n    read_incident_id__incident_id = str(incident_id_val)\n    phantom.debug(\"Extracted incident ID: {}\".format(read_incident_id__incident_id))\n\n    ################################################################################\n"
+                },
+                "4": {
+                    "x": 190,
+                    "y": 450,
+                    "id": "4",
+                    "data": {
+                        "id": "4",
+                        "type": "code",
+                        "advanced": {
+                            "join": [],
+                            "note": "No email is sent if owner is unset, status != 'open', or the owner has no email -- see module docstring.",
+                            "customName": "resolve recipient and build links",
+                            "description": "Fail-fast owner+status precondition, resolve owner id -> email via GET /rest/ph_user, collect unique Threat Domain cef.url values, build isolation-wrapped links for the container URL + each threat URL, format email subject/body.",
+                            "customNameId": 0
+                        },
+                        "functionId": 3,
+                        "functionName": "resolve_recipient_and_build_links",
+                        "inputParameters": [
+                            "read_incident_id:custom_function:incident_id"
+                        ],
+                        "outputVariables": [
+                            "recipient_email",
+                            "subject",
+                            "body"
+                        ]
+                    },
+                    "type": "code",
+                    "errors": {},
+                    "userCode": "    ################################################################################\n\n    incident_id = json.loads(phantom.get_run_data(key=\"read_incident_id:incident_id\") or '\"\"')\n\n    owner_id = container.get(\"owner\")\n    status = container.get(\"status\")\n\n    if not owner_id or status != \"open\":\n        msg = (\n            \"Container has no assigned owner or is not status 'open' \"\n            \"(owner={}, status={}) -- self-assign this container as owner \"\n            \"and set its status to Open in the SOAR UI first, so a real \"\n            \"recipient can be resolved.\".format(owner_id, status)\n        )\n        phantom.error(msg)\n        phantom.add_note(\n            container=container,\n            note_type=\"general\",\n            title=\"TRAP Isolation Notify - Error\",\n            content=msg\n        )\n        return\n\n    # container['owner'] is the username string inside playbook execution\n    # context, NOT the numeric REST-API id the raw GET /rest/container\n    # response shows (confirmed live 2026-08-17, container 1661: REST showed\n    # owner=1/owner_name=\"soar_local_admin\", but this block saw\n    # owner=\"soar_local_admin\") -- filter by username instead of assuming a\n    # path-friendly numeric id.\n    try:\n        resp = phantom.requests.get(\n            uri=phantom.build_phantom_rest_url(\"ph_user\") + '?_filter_username=\"{}\"&page_size=1'.format(owner_id),\n            verify=False,\n        ).json()\n        rows = resp.get(\"data\") or []\n        recipient_email = rows[0].get(\"email\") if rows else None\n    except Exception as e:\n        recipient_email = None\n        phantom.debug(\"Could not fetch ph_user for owner '{}': {}\".format(owner_id, str(e)))\n\n    if not recipient_email:\n        msg = \"Could not resolve an email address for owner user id {}\".format(owner_id)\n        phantom.error(msg)\n        phantom.add_note(\n            container=container,\n            note_type=\"general\",\n            title=\"TRAP Isolation Notify - Error\",\n            content=msg\n        )\n        return\n\n    # playbook_input: must be its own collect2 call -- mixing playbook_input:\n    # datapaths with other datapaths in one collect2 call throws TypeError\n    # (constraints.md).\n    input_rows = phantom.collect2(container=container, datapath=[\"playbook_input:isolation_browser_url\"])\n    isolation_browser_url = (input_rows[0][0] if input_rows and input_rows[0][0] else None) or DEFAULT_ISOLATION_BROWSER_URL\n\n    # Threat Domain artifacts are the only ones with cef.url set -- collect\n    # across the whole container (scope=\"all\", required when re-running on\n    # an existing container per constraints.md) and drop the Nones instead\n    # of also fetching artifact:*.name to filter by.\n    url_rows = phantom.collect2(container=container, datapath=[\"artifact:*.cef.url\"], scope=\"all\")\n    threat_urls = sorted({row[0] for row in url_rows if row and row[0]}) if url_rows else []\n\n    soar_base = phantom.get_base_url() or \"\"\n    container_url = \"{}/mission/{}\".format(soar_base, container.get(\"id\"))\n\n    targets = [(\"Container\", container_url)] + [(\"Threat URL\", u) for u in threat_urls]\n    link_lines = [\n        \"- {}: {}{}\".format(label, isolation_browser_url, urllib.parse.quote(target, safe=\"\"))\n        for label, target in targets\n    ]\n\n    resolve_recipient_and_build_links__recipient_email = recipient_email\n    resolve_recipient_and_build_links__subject = \"TRAP Incident {} - Isolation Browser Links\".format(incident_id or \"unknown\")\n    resolve_recipient_and_build_links__body = (\n        \"Isolation-browser links for TRAP incident {}.\\n\\n\"\n        \"Open these instead of the raw URLs -- each opens in a sandboxed \"\n        \"browser rather than directly:\\n\\n{}\\n\"\n    ).format(incident_id or \"unknown\", \"\\n\".join(link_lines))\n\n    phantom.debug(\"Resolved recipient {}, {} link(s)\".format(recipient_email, len(targets)))\n\n    ################################################################################\n"
+                },
+                "5": {
+                    "x": 190,
+                    "y": 700,
+                    "id": "5",
+                    "data": {
+                        "id": "5",
+                        "type": "action",
+                        "action": "send email",
+                        "advanced": {
+                            "join": [],
+                            "customName": "send isolation email",
+                            "description": "Sends the isolation-link email via the smtp asset (phsmtp reference connector).",
+                            "customNameId": 0
+                        },
+                        "connector": "SMTP",
+                        "actionType": "generic",
+                        "functionId": 4,
+                        "parameters": {
+                            "to": {
+                                "template": "{0}",
+                                "functionId": 4,
+                                "parameters": [
+                                    "resolve_recipient_and_build_links:custom_function:recipient_email"
+                                ]
+                            },
+                            "body": {
+                                "template": "{0}",
+                                "functionId": 4,
+                                "parameters": [
+                                    "resolve_recipient_and_build_links:custom_function:body"
+                                ]
+                            },
+                            "subject": {
+                                "template": "{0}",
+                                "functionId": 4,
+                                "parameters": [
+                                    "resolve_recipient_and_build_links:custom_function:subject"
+                                ]
+                            }
+                        },
+                        "connectorId": "45bb6f37-4478-499b-b4a3-51ecfa62b78c",
+                        "functionName": "send_isolation_email",
+                        "connectorConfigs": [
+                            "smtp"
+                        ],
+                        "connectorVersion": "v1",
+                        "requiredParameters": [
+                            {
+                                "field": "to",
+                                "default": "",
+                                "data_type": "string"
+                            },
+                            {
+                                "field": "body",
+                                "default": "",
+                                "data_type": "string"
+                            }
+                        ]
+                    },
+                    "type": "action",
+                    "errors": {}
+                },
+                "6": {
+                    "x": 190,
+                    "y": 950,
+                    "id": "6",
+                    "data": {
+                        "id": "6",
+                        "type": "code",
+                        "advanced": {
+                            "join": [],
+                            "customName": "add isolation note",
+                            "description": "Add a summary note recording who the links were sent to and whether the send succeeded.",
+                            "customNameId": 0
+                        },
+                        "functionId": 5,
+                        "functionName": "add_isolation_note",
+                        "inputParameters": [
+                            "read_incident_id:custom_function:incident_id",
+                            "resolve_recipient_and_build_links:custom_function:recipient_email",
+                            "send_isolation_email:action_result.status",
+                            "send_isolation_email:action_result.message"
+                        ],
+                        "outputVariables": []
+                    },
+                    "type": "code",
+                    "errors": {},
+                    "userCode": "    ################################################################################\n\n    incident_id = json.loads(phantom.get_run_data(key=\"read_incident_id:incident_id\") or '\"\"')\n    recipient_email = json.loads(phantom.get_run_data(key=\"resolve_recipient_and_build_links:recipient_email\") or 'null')\n    link_count = phantom.get_run_data(key=\"resolve_recipient_and_build_links:link_count\") or \"0\"\n\n    send_data = phantom.collect2(container=container, datapath=[\"send_isolation_email:action_result.status\", \"send_isolation_email:action_result.message\"])\n    send_status = send_data[0][0] if send_data and send_data[0][0] else \"not run\"\n    send_message = send_data[0][1] if send_data and len(send_data[0]) > 1 and send_data[0][1] else \"\"\n\n    note_content = \"\\n\".join([\n        \"# TRAP Isolation Notify\",\n        \"**Incident ID:** {}\".format(incident_id),\n        \"**Recipient:** {}\".format(recipient_email),\n        \"**Links sent:** {}\".format(link_count),\n        \"**Send status:** {}\".format(send_status),\n        \"**Send message:** {}\".format(send_message),\n    ])\n\n    phantom.add_note(\n        container=container,\n        note_type=\"general\",\n        title=\"TRAP Isolation Notify\",\n        content=note_content\n    )\n\n    phantom.debug(\"Isolation notify note added\")\n\n    ################################################################################\n"
+                }
+            },
+            "notes": "",
+            "description": "Email the container owner isolation-browser links for the container URL and every threat URL found in the TRAP incident."
+        },
+        "input_spec": [
+            {
+                "name": "isolation_browser_url",
+                "contains": [],
+                "description": "Remote-browser-isolation URL prefix, e.g. https://my_isolated_browser/browser?url= -- each target URL is percent-encoded and appended. Defaults to the placeholder value if not provided."
+            }
+        ],
+        "output_spec": [],
+        "playbook_type": "data",
+        "python_version": "3.13",
+        "schema": "5.0.5",
+        "version": "6.4.1.100"
+    },
+    "create_time": "2026-09-22T22:57:05.303922Z",
+    "draft_mode": false,
+    "labels": [
+        "proofpoint_trap"
+    ],
+    "tags": [
+        "proofpoint_trap",
+        "email-abuse",
+        "isolation-notify"
+    ]
+}

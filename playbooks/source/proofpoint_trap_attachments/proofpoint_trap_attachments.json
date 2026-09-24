@@ -1,0 +1,107 @@
+{
+    "blockly": false,
+    "blockly_xml": "<xml></xml>",
+    "category": "Email Abuse",
+    "coa": {
+        "data": {
+            "hash": "",
+            "edges": [
+                {
+                    "id": "port_0_to_port_2",
+                    "sourceNode": "0",
+                    "sourcePort": "0_out",
+                    "targetNode": "2",
+                    "targetPort": "2_in"
+                },
+                {
+                    "id": "port_2_to_port_1",
+                    "sourceNode": "2",
+                    "sourcePort": "2_out",
+                    "targetNode": "1",
+                    "targetPort": "1_in"
+                }
+            ],
+            "nodes": {
+                "0": {
+                    "x": 190,
+                    "y": 0,
+                    "id": "0",
+                    "data": {
+                        "id": "0",
+                        "type": "start",
+                        "advanced": {
+                            "join": []
+                        },
+                        "functionName": "on_start"
+                    },
+                    "type": "start",
+                    "errors": {}
+                },
+                "1": {
+                    "x": 190,
+                    "y": 300,
+                    "id": "1",
+                    "data": {
+                        "id": "1",
+                        "type": "end",
+                        "advanced": {
+                            "join": []
+                        },
+                        "functionId": 1,
+                        "functionName": "on_finish"
+                    },
+                    "type": "end",
+                    "errors": {},
+                    "userCode": "\n"
+                },
+                "2": {
+                    "x": 190,
+                    "y": 150,
+                    "id": "2",
+                    "data": {
+                        "id": "2",
+                        "type": "code",
+                        "advanced": {
+                            "join": [],
+                            "note": "Re-scans all MIME Body artifacts on every run, skips any already marked processed via data.attachments_extracted.",
+                            "customName": "extract attachments",
+                            "description": "Find MIME Body artifacts not yet processed, parse each .eml from the vault, and vault out any file attachments as their own artifacts.",
+                            "customNameId": 0
+                        },
+                        "functionId": 1,
+                        "functionName": "extract_attachments",
+                        "inputParameters": [
+                            "artifact:*.name",
+                            "artifact:*.id",
+                            "artifact:*.cef.vaultId",
+                            "artifact:*.cef.fileName"
+                        ],
+                        "outputVariables": []
+                    },
+                    "type": "code",
+                    "errors": {},
+                    "userCode": "    ################################################################################\n\n    # Local re-imports \u2014 GUI edits recompile/lint each code block in isolation\n    # and don't see module-level imports (same gap already documented for\n    # urllib.parse/uuid elsewhere in this UC's playbooks).\n    import os\n    import hashlib\n    import html\n    import mimetypes\n    import tempfile\n    import email\n    import email.policy\n    from email.utils import getaddresses, parseaddr\n\n    container_id = container.get(\"id\")\n\n    mime_rows = phantom.collect2(\n        container=container,\n        datapath=[\"artifact:*.name\", \"artifact:*.id\", \"artifact:*.cef.vaultId\", \"artifact:*.cef.fileName\"],\n    )\n\n    mime_artifacts = [\n        {\"artifact_id\": row[1], \"vault_id\": row[2], \"file_name\": row[3]}\n        for row in (mime_rows or [])\n        if row[0] == \"MIME Body\" and row[2]\n    ]\n\n    if not mime_artifacts:\n        phantom.debug(\"No MIME Body artifacts on this container yet\")\n        return\n\n    total_extracted = 0\n    per_email_summary = []\n\n    for mime in mime_artifacts:\n        artifact_id = mime[\"artifact_id\"]\n\n        # Skip artifacts already processed (re-entry guard \u2014 see module docstring)\n        try:\n            resp = phantom.requests.get(uri=phantom.build_phantom_rest_url(\"artifact\", artifact_id), verify=False).json()\n            current_data = resp.get(\"data\") if isinstance(resp.get(\"data\"), dict) else {}\n        except Exception as e:\n            phantom.debug(\"Could not read artifact {}: {}\".format(artifact_id, str(e)))\n            continue\n\n        if current_data.get(\"attachments_extracted\"):\n            continue\n\n        source_file_name = mime[\"file_name\"] or \"trap-{}.eml\".format(artifact_id)\n        # source_data_identifier on the MIME Body artifact is \"trap-{incident_id}-mime-{event_id}\"\n        # (see proofpoint_trap_connector.py _build_mime_artifact) \u2014 recover both IDs from it.\n        sdi = resp.get(\"source_data_identifier\") or \"\"\n        sdi_parts = sdi.split(\"-mime-\")\n        incident_id = sdi_parts[0].replace(\"trap-\", \"\", 1) if sdi_parts else \"?\"\n        event_id = sdi_parts[1] if len(sdi_parts) > 1 else \"?\"\n\n        try:\n            vi_result = phantom.vault_info(vault_id=mime[\"vault_id\"])\n        except Exception as e:\n            phantom.debug(\"vault_info() raised for vault_id {}: {}\".format(mime[\"vault_id\"], str(e)))\n            continue\n\n        # phantom.vault_info()'s return shape isn't independently verified anywhere\n        # in this repo yet (see memory project_soar85_vault_api_quirks \u2014 only the\n        # official-docs signature was confirmed, not a live return value). Handle\n        # both the documented 3-tuple form (success, message, info_list) and a\n        # bare list-of-dicts return defensively, and log the raw shape on mismatch\n        # so a real run pins this down for good.\n        vault_entries = None\n        if isinstance(vi_result, tuple) and len(vi_result) == 3:\n            vi_success, vi_message, vi_entries = vi_result\n            if vi_success:\n                vault_entries = list(vi_entries) if vi_entries else []\n            else:\n                phantom.debug(\"vault_info failed for vault_id {}: {}\".format(mime[\"vault_id\"], vi_message))\n        elif isinstance(vi_result, (list, tuple)):\n            vault_entries = list(vi_result)\n        else:\n            phantom.debug(\"Unexpected vault_info() return type {} for vault_id {}: {!r}\".format(type(vi_result), mime[\"vault_id\"], vi_result))\n\n        if not vault_entries:\n            continue\n\n        first_entry = vault_entries[0]\n        file_path = first_entry.get(\"path\") if isinstance(first_entry, dict) else None\n        if not file_path or not os.path.exists(file_path):\n            phantom.debug(\"No usable local path from vault_info for vault_id {}: {!r}\".format(mime[\"vault_id\"], first_entry))\n            continue\n\n        try:\n            with open(file_path, \"rb\") as fp:\n                parsed = email.message_from_binary_file(fp, policy=email.policy.default)\n        except Exception as e:\n            phantom.debug(\"Failed to parse MIME body {}: {}\".format(source_file_name, str(e)))\n            continue\n\n        extracted_this_email = 0\n        for part in parsed.walk():\n            content_type = part.get_content_type()\n            is_forwarded_email = content_type == \"message/rfc822\"\n\n            # message/rfc822 (a forwarded/embedded email) reports\n            # is_multipart()=True since it wraps one Message object rather\n            # than raw bytes \u2014 skip genuine multipart/* container parts, but\n            # not this one.\n            if part.is_multipart() and not is_forwarded_email:\n                continue\n\n            filename = part.get_filename()\n            disposition = (part.get_content_disposition() or \"\").lower()\n            if not filename or disposition != \"attachment\":\n                continue\n\n            if is_forwarded_email:\n                try:\n                    embedded = part.get_payload()[0]\n                    payload = embedded.as_bytes()\n                except Exception as e:\n                    phantom.debug(\"Could not serialize forwarded message {}: {}\".format(filename, str(e)))\n                    continue\n            else:\n                payload = part.get_payload(decode=True)\n\n            if not payload:\n                continue\n\n            sha256 = hashlib.sha256(payload).hexdigest()\n\n            guessed_type, _ = mimetypes.guess_type(filename)\n            type_mismatch = bool(guessed_type) and guessed_type != content_type\n\n            tmp_fd, tmp_path = tempfile.mkstemp(prefix=\"trap_attach_\")\n            os.close(tmp_fd)\n            try:\n                with open(tmp_path, \"wb\") as tmp_fp:\n                    tmp_fp.write(payload)\n\n                success_va, msg_va, attachment_vault_id = phantom.vault_add(\n                    container=container_id,\n                    file_location=tmp_path,\n                    file_name=filename,\n                )\n            finally:\n                try:\n                    os.remove(tmp_path)\n                except OSError:\n                    pass\n\n            if not success_va:\n                phantom.debug(\"vault_add failed for {}: {}\".format(filename, msg_va))\n                continue\n\n            attachment_cef = {\n                \"vaultId\": attachment_vault_id,\n                \"fileName\": filename,\n                \"fileHashSha256\": sha256,\n                \"fileType\": content_type,\n            }\n            if type_mismatch:\n                attachment_cef[\"mimeTypeMismatch\"] = \"declared {}, expected {} from filename\".format(content_type, guessed_type)\n\n            attachment_artifact = {\n                \"name\": \"Email Attachment\",\n                \"description\": \"{}Attachment '{}' from TRAP incident {} event {}\".format(\n                    \"Forwarded email \" if is_forwarded_email else \"\", filename, incident_id, event_id\n                ),\n                \"source_data_identifier\": \"trap-{}-{}-attachment-{}-{}\".format(incident_id, event_id, filename, sha256[:12]),\n                \"label\": \"event\",\n                \"cef\": attachment_cef,\n                \"cef_types\": {\"vaultId\": [\"vault id\"], \"fileHashSha256\": [\"sha256\"]},\n                \"container_id\": container_id,\n                \"run_automation\": False,\n            }\n            try:\n                resp2 = phantom.requests.post(\n                    uri=phantom.build_phantom_rest_url(\"artifact\"),\n                    data=json.dumps(attachment_artifact),\n                    verify=False,\n                ).json()\n                if resp2.get(\"success\") or resp2.get(\"id\"):\n                    extracted_this_email += 1\n                    total_extracted += 1\n                else:\n                    phantom.debug(\"Failed to create attachment artifact: {}\".format(resp2.get(\"message\", \"\")))\n            except Exception as e:\n                phantom.debug(\"Error creating attachment artifact: {}\".format(str(e)))\n\n        # Cc recipients \u2014 from the raw MIME headers, not TRAP's structured API\n        # (PB1 also tries this from the structured response's headers dict but\n        # real payloads never populate it there, per its own comment; same\n        # artifact shape/SDI pattern here so a duplicate from PB1 would just\n        # dedupe cleanly if that ever changes).\n        cc_addrs = sorted({addr for _, addr in getaddresses(parsed.get_all(\"Cc\") or []) if addr})\n        for cc_addr in cc_addrs:\n            cc_artifact = {\n                \"name\": \"Recipient Email\",\n                \"description\": \"Cc recipient from TRAP incident {} event {}\".format(incident_id, event_id),\n                \"source_data_identifier\": \"trap-{}-{}-cc-{}\".format(incident_id, event_id, cc_addr),\n                \"label\": \"event\",\n                \"cef\": {\n                    \"emailAddress\": cc_addr,\n                    \"emailRole\": \"cc\",\n                },\n                \"cef_types\": {\"emailAddress\": [\"email\"]},\n                \"container_id\": container_id,\n                \"run_automation\": False,\n            }\n            try:\n                phantom.requests.post(\n                    uri=phantom.build_phantom_rest_url(\"artifact\"),\n                    data=json.dumps(cc_artifact),\n                    verify=False,\n                )\n            except Exception as e:\n                phantom.debug(\"Error creating Cc artifact for {}: {}\".format(cc_addr, str(e)))\n\n        # Rendered body + auth/routing headers \u2014 only exist in the raw MIME,\n        # not in TRAP's structured \"get incident\" response.\n        try:\n            body_part = parsed.get_body(preferencelist=(\"html\", \"plain\"))\n        except Exception as e:\n            body_part = None\n            phantom.debug(\"get_body() failed for {}: {}\".format(source_file_name, str(e)))\n\n        body_html = None\n        if body_part is not None:\n            try:\n                body_content = body_part.get_content()\n            except Exception as e:\n                body_content = None\n                phantom.debug(\"Could not decode body for {}: {}\".format(source_file_name, str(e)))\n            if body_content:\n                if body_part.get_content_type() == \"text/html\":\n                    body_html = body_content\n                else:\n                    # <pre> is stripped by phantom.add_note()'s sanitizer (see\n                    # docstring) \u2014 use <p>/<br>, the confirmed-safe equivalent\n                    # for preserving line breaks in plain text.\n                    body_html = \"<p>{}</p>\".format(html.escape(body_content).replace(\"\\n\", \"<br>\\n\"))\n\n        auth_results = parsed.get_all(\"Authentication-Results\") or []\n        received_chain = parsed.get_all(\"Received\") or []\n        reply_to = parsed.get(\"Reply-To\", \"\")\n        x_originating_ip = parsed.get(\"X-Originating-IP\", \"\")\n        return_path = parsed.get(\"Return-Path\", \"\")\n        from_header = parsed.get(\"From\", \"\")\n\n        _, return_path_addr = parseaddr(return_path)\n        _, from_addr = parseaddr(from_header)\n        return_path_mismatch = bool(return_path_addr) and bool(from_addr) and return_path_addr.lower() != from_addr.lower()\n\n        header_lines = [\"<h1>Email Content \u2014 {} (event {})</h1>\".format(html.escape(source_file_name), html.escape(event_id))]\n        if return_path:\n            mismatch_note = \" \u2014 <b>does not match From ({})</b>\".format(html.escape(from_addr)) if return_path_mismatch else \"\"\n            header_lines.append(\"<p><b>Return-Path:</b> {}{}</p>\".format(html.escape(return_path), mismatch_note))\n        if reply_to:\n            header_lines.append(\"<p><b>Reply-To:</b> {}</p>\".format(html.escape(reply_to)))\n        if x_originating_ip:\n            header_lines.append(\"<p><b>X-Originating-IP:</b> {}</p>\".format(html.escape(x_originating_ip)))\n        if auth_results:\n            header_lines.append(\"<p><b>Authentication-Results:</b></p><ul>\")\n            for ar in auth_results:\n                header_lines.append(\"<li>{}</li>\".format(html.escape(ar)))\n            header_lines.append(\"</ul>\")\n        if received_chain:\n            # <details>/<summary> (for a collapsible view) and <pre> are both\n            # stripped by phantom.add_note()'s sanitizer (see docstring) \u2014\n            # print the chain directly instead.\n            header_lines.append(\"<p><b>Received chain ({} hop(s)):</b></p>\".format(len(received_chain)))\n            for hop in received_chain:\n                header_lines.append(\"<p>{}</p>\".format(html.escape(hop).replace(\"\\n\", \"<br>\\n\")))\n\n        note_html = \"\\n\".join(header_lines)\n        if body_html:\n            note_html += \"\\n<hr>\\n\" + body_html\n        else:\n            note_html += \"\\n<p><i>No readable body part found in this MIME message.</i></p>\"\n\n        try:\n            phantom.add_note(\n                container=container,\n                note_type=\"general\",\n                title=\"Email Content \u2014 {}\".format(source_file_name),\n                content=note_html,\n            )\n        except Exception as e:\n            phantom.debug(\"Could not add Email Content note for {}: {}\".format(source_file_name, str(e)))\n\n        per_email_summary.append(\"**{}** (event {}): {} attachment(s)\".format(source_file_name, event_id, extracted_this_email))\n\n        # Mark this MIME Body artifact processed regardless of whether it had\n        # attachments, so future artifact-created triggers on this container\n        # don't re-parse it.\n        merged_data = dict(current_data)\n        merged_data[\"attachments_extracted\"] = True\n        merged_data[\"attachments_extracted_count\"] = extracted_this_email\n        try:\n            phantom.requests.post(\n                uri=phantom.build_phantom_rest_url(\"artifact\", artifact_id),\n                data=json.dumps({\"data\": merged_data}),\n                verify=False,\n            )\n        except Exception as e:\n            phantom.debug(\"Could not mark MIME Body artifact {} as processed: {}\".format(artifact_id, str(e)))\n\n    if per_email_summary:\n        note_content = (\n            \"# Email Attachment Extraction\\n\"\n            \"**Total attachments extracted:** {}\\n\\n\"\n            \"{}\"\n        ).format(total_extracted, \"\\n\".join(\"- \" + line for line in per_email_summary))\n        phantom.add_note(\n            container=container,\n            note_type=\"general\",\n            title=\"Attachment Extraction\",\n            content=note_content,\n        )\n\n    phantom.debug(\"Attachment extraction complete: {} attachment(s) across {} MIME body/bodies\".format(total_extracted, len(mime_artifacts)))\n\n    ################################################################################\n"
+                }
+            },
+            "notes": "",
+            "description": "Automation playbook triggered on artifact creation for label 'proofpoint_trap'. Scans the container for 'MIME Body' artifacts (vaulted raw .eml, created by the connector's on_poll -- see FR-21), parses each one for file attachments, and vaults each attachment as its own 'Email Attachment' artifact (vaultId, fileName, fileHashSha256)."
+        },
+        "input_spec": [],
+        "output_spec": [],
+        "playbook_type": "automation",
+        "python_version": "3.13",
+        "schema": "5.0.5",
+        "version": "6.4.1.100"
+    },
+    "create_time": "2026-09-22T22:56:56.410399Z",
+    "draft_mode": false,
+    "labels": [
+        "proofpoint_trap"
+    ],
+    "tags": [
+        "proofpoint_trap",
+        "email-abuse",
+        "attachment",
+        "vault"
+    ]
+}

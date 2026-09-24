@@ -1,0 +1,151 @@
+{
+    "blockly": false,
+    "blockly_xml": "<xml></xml>",
+    "category": "Email Abuse",
+    "coa": {
+        "data": {
+            "hash": "",
+            "edges": [
+                {
+                    "id": "port_0_to_port_2",
+                    "sourceNode": "0",
+                    "sourcePort": "0_out",
+                    "targetNode": "2",
+                    "targetPort": "2_in"
+                },
+                {
+                    "id": "port_2_to_port_3",
+                    "sourceNode": "2",
+                    "sourcePort": "2_out",
+                    "targetNode": "3",
+                    "targetPort": "3_in"
+                },
+                {
+                    "id": "port_3_to_port_1",
+                    "sourceNode": "3",
+                    "sourcePort": "3_out",
+                    "targetNode": "1",
+                    "targetPort": "1_in"
+                }
+            ],
+            "nodes": {
+                "0": {
+                    "x": 190,
+                    "y": 0,
+                    "id": "0",
+                    "data": {
+                        "id": "0",
+                        "type": "start",
+                        "advanced": {
+                            "join": []
+                        },
+                        "functionName": "on_start"
+                    },
+                    "type": "start",
+                    "errors": {}
+                },
+                "1": {
+                    "x": 190,
+                    "y": 300,
+                    "id": "1",
+                    "data": {
+                        "id": "1",
+                        "type": "end",
+                        "advanced": {
+                            "join": []
+                        },
+                        "functionId": 1,
+                        "functionName": "on_finish"
+                    },
+                    "type": "end",
+                    "errors": {},
+                    "userCode": "\n"
+                },
+                "2": {
+                    "x": 190,
+                    "y": 100,
+                    "id": "2",
+                    "data": {
+                        "id": "2",
+                        "type": "utility",
+                        "values": {
+                            "proofpoint_trap_extract_incident_id": {}
+                        },
+                        "advanced": {
+                            "join": [],
+                            "customName": "extract incident id",
+                            "description": "Extract TRAP incident ID (+ raw TRAP Severity) via the shared proofpoint_trap_extract_incident_id custom function.",
+                            "customNameId": 0
+                        },
+                        "utilities": {
+                            "proofpoint_trap_extract_incident_id": {
+                                "name": "proofpoint_trap_extract_incident_id",
+                                "label": "proofpoint_trap_extract_incident_id",
+                                "fields": [],
+                                "description": "Read the TRAP incident ID and raw TRAP Severity off the container's Event Info/Event Info Update artifacts."
+                            }
+                        },
+                        "functionId": 1,
+                        "selectMore": false,
+                        "utilityType": "custom_function",
+                        "functionName": "extract_incident_id",
+                        "customFunction": {
+                            "name": "proofpoint_trap_extract_incident_id",
+                            "repoName": "local",
+                            "draftMode": false
+                        }
+                    },
+                    "type": "utility",
+                    "errors": {}
+                },
+                "3": {
+                    "x": 190,
+                    "y": 200,
+                    "id": "3",
+                    "data": {
+                        "id": "3",
+                        "type": "code",
+                        "advanced": {
+                            "join": [],
+                            "note": "Reads incident_id/trap_severity from the extract_incident_id CF result; promotes container severity from trap_severity.",
+                            "customName": "read incident id",
+                            "description": "Bridge block: read extract_incident_id CF result (incident_id + trap_severity) and promote container severity.",
+                            "customNameId": 0
+                        },
+                        "functionId": 2,
+                        "functionName": "read_incident_id",
+                        "inputParameters": [
+                            "extract_incident_id:custom_function_result.data.incident_id",
+                            "extract_incident_id:custom_function_result.data.trap_severity"
+                        ],
+                        "outputVariables": [
+                            "incident_id"
+                        ]
+                    },
+                    "type": "code",
+                    "errors": {},
+                    "userCode": "    ################################################################################\n\n    result_rows = phantom.collect2(\n        container=container,\n        datapath=[\"extract_incident_id:custom_function_result.data.incident_id\", \"extract_incident_id:custom_function_result.data.trap_severity\"],\n    )\n    incident_id_val, trap_severity = result_rows[0] if result_rows else (None, None)\n\n    if not incident_id_val:\n        phantom.error(\"Could not find Incident ID (cef.incidentId) on the 'Event Info' artifact\")\n        phantom.add_note(\n            container=container,\n            note_type=\"general\",\n            title=\"TRAP Triage - Error\",\n            content=\"Could not find Incident ID on the 'Event Info' artifact\"\n        )\n        return\n\n    read_incident_id__incident_id = str(incident_id_val)\n    phantom.debug(\"Extracted incident ID: {}\".format(read_incident_id__incident_id))\n\n    severity_map = {\"Critical\": \"high\", \"High\": \"medium\", \"Informational\": \"low\"}\n    mapped_severity = severity_map.get(trap_severity, \"low\")\n    phantom.set_severity(container=container, severity=mapped_severity)\n    phantom.debug(\n        \"Promoted container severity to '{}' (TRAP Severity: '{}')\".format(\n            mapped_severity, trap_severity\n        )\n    )\n\n    ################################################################################\n"
+                }
+            },
+            "notes": "",
+            "description": "Automation playbook (PB2) triggered on container creation. Extracts the TRAP incident ID from container data and stops. Analyst-driven actions (comment/assignee/status, close) live in separate manually-launched playbooks: proofpoint_trap_acknowledge, proofpoint_trap_close."
+        },
+        "input_spec": [],
+        "output_spec": [],
+        "playbook_type": "automation",
+        "python_version": "3.13",
+        "schema": "5.0.5",
+        "version": "6.4.1.100"
+    },
+    "create_time": "2026-09-22T22:56:54.116865Z",
+    "draft_mode": false,
+    "labels": [
+        "proofpoint_trap"
+    ],
+    "tags": [
+        "proofpoint_trap",
+        "email-abuse",
+        "triage",
+        "extraction"
+    ]
+}

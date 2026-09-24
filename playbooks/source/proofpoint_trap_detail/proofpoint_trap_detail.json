@@ -1,0 +1,633 @@
+{
+    "blockly": false,
+    "blockly_xml": "<xml></xml>",
+    "category": "Email Abuse",
+    "coa": {
+        "data": {
+            "hash": "",
+            "edges": [
+                {
+                    "id": "port_0_to_port_2",
+                    "sourceNode": "0",
+                    "sourcePort": "0_out",
+                    "targetNode": "2",
+                    "targetPort": "2_in"
+                },
+                {
+                    "id": "port_2_to_port_3",
+                    "conditions": [
+                        {
+                            "index": 0
+                        }
+                    ],
+                    "sourceNode": "2",
+                    "sourcePort": "2_out",
+                    "targetNode": "3",
+                    "targetPort": "3_in"
+                },
+                {
+                    "id": "port_3_to_port_10",
+                    "sourceNode": "3",
+                    "sourcePort": "3_out",
+                    "targetNode": "10",
+                    "targetPort": "10_in"
+                },
+                {
+                    "id": "port_10_to_port_4",
+                    "sourceNode": "10",
+                    "sourcePort": "10_out",
+                    "targetNode": "4",
+                    "targetPort": "4_in"
+                },
+                {
+                    "id": "port_5_to_port_6",
+                    "sourceNode": "5",
+                    "sourcePort": "5_out",
+                    "targetNode": "6",
+                    "targetPort": "6_in"
+                },
+                {
+                    "id": "port_6_to_port_7",
+                    "sourceNode": "6",
+                    "sourcePort": "6_out",
+                    "targetNode": "7",
+                    "targetPort": "7_in"
+                },
+                {
+                    "id": "port_4_to_port_8",
+                    "sourceNode": "4",
+                    "sourcePort": "4_out",
+                    "targetNode": "8",
+                    "targetPort": "8_in"
+                },
+                {
+                    "id": "port_8_to_port_5",
+                    "sourceNode": "8",
+                    "sourcePort": "8_out",
+                    "targetNode": "5",
+                    "targetPort": "5_in"
+                },
+                {
+                    "id": "port_7_to_port_9",
+                    "sourceNode": "7",
+                    "sourcePort": "7_out",
+                    "targetNode": "9",
+                    "targetPort": "9_in"
+                },
+                {
+                    "id": "port_9_to_port_1",
+                    "sourceNode": "9",
+                    "sourcePort": "9_out",
+                    "targetNode": "1",
+                    "targetPort": "1_in"
+                }
+            ],
+            "nodes": {
+                "0": {
+                    "x": 190,
+                    "y": 0,
+                    "id": "0",
+                    "data": {
+                        "id": "0",
+                        "type": "start",
+                        "advanced": {
+                            "join": []
+                        },
+                        "functionName": "on_start"
+                    },
+                    "type": "start",
+                    "errors": {}
+                },
+                "1": {
+                    "x": 190,
+                    "y": 1300,
+                    "id": "1",
+                    "data": {
+                        "id": "1",
+                        "type": "end",
+                        "advanced": {
+                            "join": []
+                        },
+                        "functionId": 1,
+                        "functionName": "on_finish"
+                    },
+                    "type": "end",
+                    "errors": {},
+                    "userCode": "    ################################################################################\n\n    # dispatch_enrichment_complete is terminal (no callback), so its result\n    # is only visible here. Surface a failure instead of letting the run read\n    # as a clean success; with no \"Enrichment Complete\" artifact the re-entry\n    # guard already lets a later run redo the enrichment.\n    signal_rows = phantom.collect2(\n        container=container,\n        datapath=[\n            \"dispatch_enrichment_complete:action_result.status\",\n            \"dispatch_enrichment_complete:action_result.message\",\n        ],\n    )\n    signal_failed = [\n        row for row in (signal_rows or [])\n        if row and row[0] == \"failed\" and \"already exists\" not in str(row[1] or \"\").lower()\n    ]\n    if signal_failed:\n        msg = \"Enrichment Complete signal write failed; a later PB1 run can redo the enrichment\"\n        phantom.error(msg)\n        phantom.add_note(container=container, note_type=\"general\", title=\"TRAP Detail - Write failures\", content=msg)\n\n    ################################################################################\n"
+                },
+                "2": {
+                    "x": 190,
+                    "y": 150,
+                    "id": "2",
+                    "data": {
+                        "id": "2",
+                        "type": "filter",
+                        "advanced": {
+                            "join": [],
+                            "note": "Native filter block -- replaces the raw wildcard artifact:*.cef.incidentId binding, which resolved to 'None' whenever this playbook ran on anything other than a full container-level artifact_created fan-out. Found live 2026-08-14.",
+                            "customName": "filter event info",
+                            "description": "Narrow artifacts to the Event Info one so get_trap_incident's incident_id binds to a single reliable cef.incidentId value.",
+                            "customNameId": 0
+                        },
+                        "conditions": [
+                            {
+                                "logic": "and",
+                                "customName": "Event Info",
+                                "comparisons": [
+                                    {
+                                        "op": "==",
+                                        "param": "artifact:*.name",
+                                        "value": "Event Info",
+                                        "conditionIndex": 0
+                                    }
+                                ],
+                                "conditionIndex": 0
+                            }
+                        ],
+                        "functionId": 9,
+                        "functionName": "filter_event_info"
+                    },
+                    "type": "filter",
+                    "errors": {}
+                },
+                "3": {
+                    "x": 190,
+                    "y": 300,
+                    "id": "3",
+                    "data": {
+                        "id": "3",
+                        "type": "action",
+                        "action": "get incident",
+                        "advanced": {
+                            "join": [],
+                            "note": "Fetch full incident details from TRAP with expand_events=true. incident_id bound to the filtered Event Info datapath -- replaces the old raw wildcard artifact:*.cef.incidentId binding, which resolved to 'None' whenever this playbook ran on anything other than a full container-level artifact_created fan-out. Found live 2026-08-14.",
+                            "customName": "get trap incident",
+                            "description": "Fetch full incident details from Proofpoint TRAP.",
+                            "customNameId": 0
+                        },
+                        "connector": "Proofpoint TRAP",
+                        "actionType": "investigate",
+                        "functionId": 2,
+                        "parameters": {
+                            "incident_id": {
+                                "template": "{0}",
+                                "functionId": 2,
+                                "parameters": [
+                                    "filtered-data:filter_event_info:condition_1:artifact:*.cef.incidentId"
+                                ]
+                            }
+                        },
+                        "connectorId": "a7c41f8e-3b2d-4e9a-bf56-1d8e9a4c2f7b",
+                        "functionName": "get_trap_incident",
+                        "connectorConfigs": [
+                            "proofpoint_trap_mock"
+                        ],
+                        "connectorVersion": "v1",
+                        "requiredParameters": [
+                            {
+                                "field": "incident_id",
+                                "default": "",
+                                "data_type": "string"
+                            }
+                        ]
+                    },
+                    "type": "action",
+                    "errors": {}
+                },
+                "4": {
+                    "x": 190,
+                    "y": 500,
+                    "id": "4",
+                    "data": {
+                        "id": "4",
+                        "type": "code",
+                        "advanced": {
+                            "join": [],
+                            "note": "Parse expanded events and create artifacts: emails, domains, click IPs, MIME bodies. Display name matches the actual functionName (was 'create event artifacts', renamed 2026-08-14 -- user request).",
+                            "customName": "extract data to artifacts",
+                            "description": "Create enriched artifacts from TRAP incident events.",
+                            "customNameId": 0
+                        },
+                        "functionId": 3,
+                        "functionName": "extract_data_to_artifacts",
+                        "inputParameters": [
+                            "get_trap_incident:action_result.status",
+                            "get_trap_incident:action_result.data",
+                            "container:source_data_identifier",
+                            "dispatch_mime_download:action_result.status",
+                            "dispatch_mime_download:action_result.data.*.event_id",
+                            "dispatch_mime_download:action_result.data.*.vault_id",
+                            "dispatch_mime_download:action_result.data.*.file_name"
+                        ],
+                        "outputVariables": [
+                            "name",
+                            "label",
+                            "cef_dictionary",
+                            "contains",
+                            "incident_id",
+                            "count"
+                        ]
+                    },
+                    "type": "code",
+                    "errors": {},
+                    "userCode": "    ################################################################################\n\n    def _create_enrichment_failure_signal(msg):\n        # Uses the documented \"Signal artifact pattern\" (playbook-patterns.md)\n        # instead of a raw REST POST -- synchronous, no asset. No explicit\n        # identifier -- SOAR auto-generates one (user decision 2026-08-15,\n        # accepted tradeoff: duplicate artifacts possible on re-run).\n        # Named \"Enrichment Failed\", not \"Enrichment Complete\": on_start's\n        # re-entry guard only counts the latter, so a later run can retry.\n        success, message, artifact_id = phantom.add_artifact(\n            container=container,\n            raw_data={},\n            cef_data={\n                \"message\": \"TRAP incident {} detail extraction failed: {}\".format(incident_id, msg),\n                \"artifactsCreated\": 0,\n            },\n            label=\"enrichment_failed\",\n            name=\"Enrichment Failed\",\n            severity=\"low\",\n            run_automation=False,\n        )\n        if not success:\n            phantom.error(\"Failed to create enrichment_failed artifact: {}\".format(message))\n\n    # Collect get_incident result\n    result_data = phantom.collect2(\n        container=container,\n        datapath=[\n            \"get_trap_incident:action_result.status\",\n            \"get_trap_incident:action_result.data\",\n        ]\n    )\n\n    # incident_id from the container's own native source_data_identifier\n    # field, independent of whether the fetch below succeeded, so the\n    # failure-signal paths still have a real ID for their message/SDI\n    # instead of \"unknown\".\n    sdi_rows = phantom.collect2(container=container, datapath=[\"container:source_data_identifier\"])\n    incident_id = sdi_rows[0][0] if sdi_rows and sdi_rows[0] and sdi_rows[0][0] else \"unknown\"\n\n    if not result_data or result_data[0][0] != \"success\":\n        msg = \"get_incident failed\"\n        phantom.error(msg)\n        phantom.add_note(\n            container=container, note_type=\"general\",\n            title=\"TRAP Detail - Error\", content=msg\n        )\n        _create_enrichment_failure_signal(msg)\n        return\n\n    # result_data[0][1] is the list of data items; take the first\n    incident_list = result_data[0][1]\n    if isinstance(incident_list, list) and incident_list:\n        incident = incident_list[0]\n    elif isinstance(incident_list, dict):\n        incident = incident_list\n    else:\n        msg = \"No incident data returned\"\n        phantom.error(msg)\n        phantom.add_note(\n            container=container, note_type=\"general\",\n            title=\"TRAP Detail - Error\", content=msg\n        )\n        _create_enrichment_failure_signal(msg)\n        return\n\n    import urllib.parse  # local import \u2014 GUI edits recompile/lint each code block in\n                          # isolation, a shared module-level import isn't visible to it\n                          # (see uc2_dev_notes.md)\n\n    # Headers is a free-form dict per email (no fixed schema, contents vary\n    # by mail client) -- pull only these specific ones when present, doing a\n    # case-insensitive match since real-world casing varies (vendor sample\n    # shows \"MIME-Version\", not \"Mime-Version\").\n    _WANTED_HEADERS = [\n        \"To\", \"Date\", \"From\", \"Subject\", \"Return-Path\", \"Content-Type\",\n        \"MIME-Version\", \"Received-SPF\", \"DKIM-Signature\",\n        \"X-Google-DKIM-Signature\",\n        \"X-MS-Exchange-CrossTenant-OriginalAttributedTenantConnectingIp\",\n    ]\n\n    def _extract_selected_headers(headers):\n        lower_map = {k.lower(): v for k, v in headers.items()}\n        result = {}\n        for name in _WANTED_HEADERS:\n            val = lower_map.get(name.lower())\n            if val is not None:\n                result[name] = val\n        return result\n\n    def _stringify_delivery_time(value):\n        # messageDeliveryTime isn't always a plain string \u2014 a real captured\n        # response (XSOAR ProofpointThreatResponse test fixture, 2026-08-06)\n        # showed it as a full Joda-time-style object instead:\n        # {\"millis\": 1617103759000, \"zone\": {...}, \"chronology\": {...}, ...}.\n        # Stringifying defensively here avoids putting a raw dict into a CEF\n        # field value.\n        if isinstance(value, dict):\n            millis = value.get(\"millis\")\n            if isinstance(millis, (int, float)):\n                from datetime import datetime as _dt\n                return _dt.utcfromtimestamp(millis / 1000.0).strftime(\"%Y-%m-%dT%H:%M:%SZ\")\n            return str(value)\n        return value or \"\"\n\n    events = incident.get(\"events\", [])\n    phantom.debug(\"Processing {} events from incident {}\".format(len(events), incident.get(\"id\", \"?\")))\n\n    # Separate dedup sets per role so an address playing both sender and\n    # recipient across different alerts gets an artifact for each role,\n    # not just whichever one was seen first.\n    seen_sender_emails = set()\n    seen_recipient_emails = set()\n    seen_cc_emails = set()\n    seen_domains = set()\n    seen_ips = set()\n    artifacts = []\n    id_value = container.get(\"id\")\n    # incident_id from the container's own native source_data_identifier\n    # field (set by the connector at ingestion), not re-derived from the\n    # fetched incident's own \"id\" field -- same value, one fewer redundant\n    # re-parse of the API response.\n    sdi_rows = phantom.collect2(container=container, datapath=[\"container:source_data_identifier\"])\n    incident_id_val = sdi_rows[0][0] if sdi_rows and sdi_rows[0] and sdi_rows[0][0] else incident.get(\"id\")\n\n    # Incident-level (not per-event) threat URLs. Moved here 2026-08-18 from\n    # the connector's on_poll, which used to create one \"URL Artifact\" per\n    # entry in hosts.url directly at ingestion -- this fetch (get_trap_incident,\n    # expand_events=true) also carries hosts, and this is where the rest of\n    # the incident's derived per-item artifacts already get built, so it\n    # joins them here instead of staying connector-side. hosts.attacker /\n    # hosts.forensics were the original (mock/Swimlane-derived) guess for\n    # this object's shape -- CONFIRMED ABSENT 2026-08-06 against real\n    # incident data -- hosts only ever has `url`.\n    hosts = incident.get(\"hosts\") or {}\n    for url_val in hosts.get(\"url\") or []:\n        artifacts.append({\n            \"name\": \"URL Artifact\",\n            \"description\": \"Threat URL from incident {}\".format(incident_id_val),\n            \"label\": \"event\",\n            \"cef\": {\"requestURL\": url_val},\n            \"cef_types\": {\"requestURL\": [\"url\"]},\n            \"run_automation\": False,\n        })\n\n    # MIME Body artifacts -- moved here 2026-08-20 from the connector's\n    # on_poll (removed, user decision: connector stays a thin generic API\n    # wrapper, MIME-fetch belongs with the rest of PB1's derived per-item\n    # artifacts, same reasoning as the URL Artifact move above). A failed\n    # or empty download just means fewer MIME Body artifacts, not a hard\n    # failure of this whole extraction -- mirrors how the hosts.url\n    # handling above tolerates a missing/empty field.\n    mime_status_rows = phantom.collect2(\n        container=container,\n        datapath=[\"dispatch_mime_download:action_result.status\"],\n    )\n    mime_status = mime_status_rows[0][0] if mime_status_rows and mime_status_rows[0] else \"failed\"\n\n    if mime_status == \"success\":\n        mime_rows = phantom.collect2(\n            container=container,\n            datapath=[\n                \"dispatch_mime_download:action_result.data.*.event_id\",\n                \"dispatch_mime_download:action_result.data.*.vault_id\",\n                \"dispatch_mime_download:action_result.data.*.file_name\",\n            ],\n        )\n        # On a re-run (proofpoint_trap_recheck triggers one on a changed\n        # incident) the container already carries MIME Body artifacts for the\n        # events seen before, and PB7 has just built the new event's. SOAR does\n        # not dedup them away: its content hash covers cef_types, which the two\n        # builders set differently, so the same MIME lands twice. Skip what is\n        # already there, by source_data_identifier.\n        existing_rows = phantom.collect2(\n            container=container,\n            datapath=[\"artifact:*.name\", \"artifact:*.source_data_identifier\"],\n            scope=\"all\",\n        )\n        existing_mime_sdis = {\n            row[1] for row in (existing_rows or [])\n            if row and row[0] == \"MIME Body\" and row[1]\n        }\n        for row in (mime_rows or []):\n            mime_event_id, vault_id, file_name = row[0], row[1], row[2]\n            if not vault_id:\n                continue\n            if \"trap-{}-mime-{}\".format(incident_id_val, mime_event_id) in existing_mime_sdis:\n                continue\n            artifacts.append({\n                \"name\": \"MIME Body\",\n                \"description\": \"Raw MIME body from incident {} event {}\".format(incident_id_val, mime_event_id),\n                \"label\": \"event\",\n                \"cef\": {\"vaultId\": vault_id, \"fileName\": file_name},\n                \"cef_types\": {\"vaultId\": [\"vault id\"]},\n                \"run_automation\": False,\n                # Per-event SDI, NOT the shared incident_id_val every other\n                # artifact in this batch uses -- proofpoint_trap_attachments\n                # (PB3) parses \"trap-{incident}-mime-{event}\" back out of\n                # this exact field to recover event_id (see its own\n                # comment); a shared SDI would degrade every MIME Body's\n                # event_id to \"?\" there. Format matches the connector's old\n                # (now-removed) _build_mime_artifact() exactly, just built\n                # here now.\n                \"source_data_identifier\": \"trap-{}-mime-{}\".format(incident_id_val, mime_event_id),\n            })\n    else:\n        phantom.debug(\n            \"MIME download for incident {} did not succeed ({}) -- no MIME \"\n            \"Body artifacts this run\".format(incident_id_val, mime_status)\n        )\n\n    for event in events:\n        event_id = event.get(\"id\", \"\")\n        emails = event.get(\"emails\", [])\n\n        for email in emails:\n            subject = email.get(\"subject\", \"\")\n            message_id = email.get(\"messageId\", \"\")\n            delivery_time = _stringify_delivery_time(email.get(\"messageDeliveryTime\"))\n            headers = email.get(\"headers\") or {}\n\n            # Sender email\n            sender = email.get(\"sender\") or {}\n            from_addr = sender.get(\"email\", \"\")\n            if from_addr and from_addr not in seen_sender_emails:\n                seen_sender_emails.add(from_addr)\n                body_type = email.get(\"bodyType\", \"\")\n                abuse_copy = email.get(\"abuseCopy\")\n                abuse_copy_str = \"true\" if abuse_copy is True else (\"false\" if abuse_copy is False else \"\")\n                selected_headers = _extract_selected_headers(headers)\n                artifacts.append({\n                    \"name\": \"Sender Email\",\n                    \"description\": \"Sender from alert {} (subject: {})\".format(event_id, subject),\n                    \"label\": \"event\",\n                    \"cef\": {\n                        \"emailAddress\": from_addr,\n                        \"emailRole\": \"sender\",\n                        \"emailSubject\": subject,\n                        \"bodyType\": body_type,\n                        \"messageId\": message_id,\n                        \"deliveryTime\": delivery_time,\n                        \"abuseCopy\": abuse_copy_str,\n                        \"emailHeaders\": selected_headers,\n                    },\n                    \"cef_types\": {\"emailAddress\": [\"email\"]},\n                    \"run_automation\": False,\n                })\n                # Extract domain from sender\n                domain = from_addr.split(\"@\")[-1] if \"@\" in from_addr else \"\"\n                if domain and domain not in seen_domains:\n                    seen_domains.add(domain)\n                    artifacts.append({\n                        \"name\": \"Sender Domain\",\n                        \"description\": \"Domain from sender {}\".format(from_addr),\n                        \"label\": \"event\",\n                        \"cef\": {\"sourceDnsDomain\": domain},\n                        \"cef_types\": {\"sourceDnsDomain\": [\"domain\"]},\n                        \"run_automation\": False,\n                    })\n\n            # Recipient email\n            recipient = email.get(\"recipient\") or {}\n            to_addr = recipient.get(\"email\", \"\")\n            if to_addr and to_addr not in seen_recipient_emails:\n                seen_recipient_emails.add(to_addr)\n                artifacts.append({\n                    \"name\": \"Recipient Email\",\n                    \"description\": \"Recipient from alert {} (subject: {})\".format(event_id, subject),\n                    \"label\": \"event\",\n                    \"cef\": {\n                        \"emailAddress\": to_addr,\n                        \"emailRole\": \"recipient\",\n                    },\n                    \"cef_types\": {\"emailAddress\": [\"email\"]},\n                    \"run_automation\": False,\n                })\n\n            # Cc \u2014 best-effort from raw headers. A full field-by-field walk of a\n            # real incident payload (2026-08-06) confirmed no structured `cc`\n            # field exists anywhere in the get-incident response -- if a real\n            # tenant ever has cc data, it would only be inside the raw MIME\n            # body (a separate data path: the `download mime body` action /\n            # vault attachment, not this structured response), which is out\n            # of scope for this function. Left as a harmless no-op rather than\n            # removed, in case `headers` ever does carry one on some tenant.\n            cc_raw = headers.get(\"Cc\") or headers.get(\"CC\") or headers.get(\"cc\") or \"\"\n            for cc_addr in [a.strip() for a in cc_raw.split(\",\") if a.strip()]:\n                if cc_addr not in seen_cc_emails:\n                    seen_cc_emails.add(cc_addr)\n                    artifacts.append({\n                        \"name\": \"Recipient Email\",\n                        \"description\": \"Cc recipient from alert {} (subject: {})\".format(event_id, subject),\n                        \"label\": \"event\",\n                        \"cef\": {\n                            \"emailAddress\": cc_addr,\n                            \"emailRole\": \"cc\",\n                        },\n                        \"cef_types\": {\"emailAddress\": [\"email\"]},\n                        \"run_automation\": False,\n                    })\n\n            # Threat URL domains \u2014 CONFIRMED (2026-08-06) via the real\n            # ProofpointThreatResponse integration's own source\n            # (get_emails_context: email.get(\"urls\")), not just docs/guesses.\n            # Per-email list, not the flat event-level field this originally\n            # guessed at.\n            for url_val in email.get(\"urls\") or []:\n                url_domain = urllib.parse.urlparse(url_val).hostname\n                if url_domain and url_domain not in seen_domains:\n                    seen_domains.add(url_domain)\n                    artifacts.append({\n                        \"name\": \"Threat Domain\",\n                        \"description\": \"Domain from URL in alert {} (subject: {})\".format(event_id, subject),\n                        \"label\": \"event\",\n                        \"cef\": {\n                            \"destinationDnsDomain\": url_domain,\n                            \"url\": url_val,\n                        },\n                        \"cef_types\": {\"destinationDnsDomain\": [\"domain\"]},\n                        \"run_automation\": False,\n                    })\n\n        # Click IP / event-level threatURL \u2014 a full field-by-field walk of a\n        # real \"reported by user\" incident (2026-08-06) confirmed neither\n        # exists on that source type; `events[]` there is just {id, emails}.\n        # Real TRAP events also come from a richer \"email flow\" (Proofpoint\n        # TAP) source with additional fields (category/severity/attackers/\n        # etc., per a captured XSOAR integration fixture) that this lab\n        # doesn't ingest -- click/threat data may live there instead, under\n        # `events[].attackers[].location`, unexplored. Both left as harmless\n        # no-ops rather than removed, since a TAP-sourced incident could\n        # arrive here in principle even though none has yet.\n        threat_url = event.get(\"threatURL\", \"\")\n        if threat_url:\n            url_domain = urllib.parse.urlparse(threat_url).hostname\n            if url_domain and url_domain not in seen_domains:\n                seen_domains.add(url_domain)\n                artifacts.append({\n                    \"name\": \"Threat Domain\",\n                    \"description\": \"Domain from threat URL in alert {}\".format(event_id),\n                    \"label\": \"event\",\n                    \"cef\": {\n                        \"destinationDnsDomain\": url_domain,\n                        \"url\": threat_url,\n                    },\n                    \"cef_types\": {\"destinationDnsDomain\": [\"domain\"]},\n                    \"run_automation\": False,\n                })\n\n        click_ip = event.get(\"clickIP\", \"\")\n        if click_ip and click_ip not in seen_ips:\n            seen_ips.add(click_ip)\n            artifacts.append({\n                \"name\": \"Click Source IP\",\n                \"description\": \"IP that clicked threat URL in alert {}\".format(event_id),\n                \"label\": \"event\",\n                \"cef\": {\"sourceAddress\": click_ip},\n                \"cef_types\": {\"sourceAddress\": [\"ip\"]},\n                \"run_automation\": False,\n            })\n\n    phantom.debug(\"Creating {} artifacts from events\".format(len(artifacts)))\n\n    # Native \"add artifact\" action parameters (Phantom app, asset \"soar8\"),\n    # one call per event artifact via dispatch_event_artifacts. Exposed as\n    # parallel per-field LISTS (not one list-of-dicts blob) so that block's\n    # JSON can map each field to a real output variable\n    # (extract_data_to_artifacts:custom_function:<field>) -- declared before\n    # the loop and .append()-ed inside it, the canonical parallel-output-\n    # variable-list shape (matches community playbook\n    # Splunk_Attack_Analyzer_Dynamic_Analysis's normalized_file_summary_output,\n    # see code-blocks.md).\n    #\n    # Fields that vary per artifact get a list: name, cef_dictionary,\n    # contains (cef_types differs by artifact type -- email/domain/ip).\n    # container_id is a single constant (bound to container:id on node 8's\n    # JSON) -- container_id confirmed live 2026-08-15\n    # it's technically omittable (falls back to the run's own container\n    # context), but left explicit since the VPE editor flags the action node\n    # \"Unconfigured\" without it (found live 2026-08-16). run_automation/\n    # determine_contains are omitted, falling back to the action's own\n    # declared `false` defaults -- that omission does not trigger the same\n    # \"Unconfigured\" flag.\n    #\n    # source_data_identifier is genuinely mandatory on this action --\n    # confirmed live 2026-08-15 omitting it entirely fails with \"Required\n    # parameters are not specified or are blank: ['source_data_identifier']\".\n    # A per-artifact uuid4 suffix was used earlier to guarantee uniqueness,\n    # but a live dedup test (2026-08-16: two artifacts posted to the same\n    # container with identical container_id + source_data_identifier + name,\n    # differing only in cef content) created two distinct artifacts with no\n    # merge/collision -- SOAR does not dedup on this key combination, so\n    # reusing the container's own source_data_identifier is safe for most of\n    # this batch. MIME Body artifacts are the one exception (per-item\n    # override via artifacts[i][\"source_data_identifier\"]) -- see the\n    # comment where they're built above; proofpoint_trap_attachments (PB3)\n    # parses that per-event SDI back apart, so it can't collapse to the\n    # shared incident_id_val like everything else here.\n    extract_data_to_artifacts__name = []\n    extract_data_to_artifacts__label = []\n    extract_data_to_artifacts__cef_dictionary = []\n    extract_data_to_artifacts__contains = []\n\n    for a in artifacts:\n        extract_data_to_artifacts__name.append(a[\"name\"])\n        extract_data_to_artifacts__label.append(a.get(\"label\", \"event\"))\n        extract_data_to_artifacts__cef_dictionary.append(json.dumps(a.get(\"cef\", {})))\n        extract_data_to_artifacts__contains.append(json.dumps(a.get(\"cef_types\", {})))\n\n    action_params = [\n        {\n            \"container_id\": id_value,\n            \"name\": extract_data_to_artifacts__name[i],\n            \"label\": extract_data_to_artifacts__label[i],\n            \"source_data_identifier\": artifacts[i].get(\"source_data_identifier\") or incident_id_val,\n            \"cef_dictionary\": extract_data_to_artifacts__cef_dictionary[i],\n            \"contains\": extract_data_to_artifacts__contains[i],\n        }\n        for i in range(len(artifacts))\n    ]\n\n    phantom.save_run_data(key=\"extract_data_to_artifacts:action_params\", value=json.dumps(action_params))\n    phantom.save_run_data(key=\"extract_data_to_artifacts:name\", value=json.dumps(extract_data_to_artifacts__name))\n    phantom.save_run_data(key=\"extract_data_to_artifacts:label\", value=json.dumps(extract_data_to_artifacts__label))\n    phantom.save_run_data(key=\"extract_data_to_artifacts:cef_dictionary\", value=json.dumps(extract_data_to_artifacts__cef_dictionary))\n    phantom.save_run_data(key=\"extract_data_to_artifacts:contains\", value=json.dumps(extract_data_to_artifacts__contains))\n    # Ground-truth incident_id from the actually-fetched incident (not the\n    # pre-fetch artifact scan above) -- downstream blocks read this instead\n    # of re-deriving it a second time.\n    phantom.save_run_data(key=\"extract_data_to_artifacts:incident_id\", value=json.dumps(incident_id_val))\n    # Attempted count, not verified-success count -- dispatch_event_artifacts\n    # no longer checks per-app_run status after the native \"add artifact\"\n    # call (see its comment), so this is how many artifacts were built here,\n    # not how many the platform confirmed landing.\n    phantom.save_run_data(key=\"extract_data_to_artifacts:count\", value=str(len(artifacts)))\n\n    # Also exposed as real output variables (not just run_data) so native\n    # blocks downstream can bind to them directly via\n    # extract_data_to_artifacts:custom_function:* datapaths, per\n    # constraints.md's \"output variables, not save_run_data, when data\n    # feeds native blocks downstream\" rule.\n    extract_data_to_artifacts__incident_id = incident_id_val\n    extract_data_to_artifacts__count = len(artifacts)\n\n    ################################################################################\n"
+                },
+                "5": {
+                    "x": 190,
+                    "y": 750,
+                    "id": "5",
+                    "data": {
+                        "id": "5",
+                        "type": "code",
+                        "advanced": {
+                            "join": [],
+                            "note": "Prepares note_title/note_content output variables consumed by dispatch_detail_note (native action). inputParameters declares the get_trap_incident summary/event_count/score/state fields this block reads via phantom.collect2() -- previously undeclared (found live 2026-08-16), matches the same-datapath-family declaration already used on node 4/7.",
+                            "customName": "prepare detail note",
+                            "description": "Build the detail note title/content for the native add note action.",
+                            "customNameId": 0
+                        },
+                        "functionId": 4,
+                        "functionName": "prepare_detail_note",
+                        "inputParameters": [
+                            "get_trap_incident:action_result.data.*.summary",
+                            "get_trap_incident:action_result.data.*.event_count",
+                            "get_trap_incident:action_result.data.*.score",
+                            "get_trap_incident:action_result.data.*.state"
+                        ],
+                        "outputVariables": [
+                            "note_title",
+                            "note_content"
+                        ]
+                    },
+                    "type": "code",
+                    "errors": {},
+                    "userCode": "    ################################################################################\n\n    incident_id = json.loads(phantom.get_run_data(key=\"extract_data_to_artifacts:incident_id\") or '\"unknown\"')\n    artifact_count = phantom.get_run_data(key=\"extract_data_to_artifacts:count\") or \"0\"\n\n    # Collect incident summary from get_incident\n    result_data = phantom.collect2(\n        container=container,\n        datapath=[\n            \"get_trap_incident:action_result.data.*.summary\",\n            \"get_trap_incident:action_result.data.*.event_count\",\n            \"get_trap_incident:action_result.data.*.score\",\n            \"get_trap_incident:action_result.data.*.state\",\n        ]\n    )\n\n    summary = result_data[0][0] if result_data else \"?\"\n    event_count = result_data[0][1] if result_data else \"?\"\n    score = result_data[0][2] if result_data else \"?\"\n    state = result_data[0][3] if result_data else \"?\"\n\n    prepare_detail_note__note_title = \"TRAP Detail - Incident {}\".format(incident_id)\n    prepare_detail_note__note_content = (\n        \"# TRAP Incident Detail\\n\"\n        \"**Incident ID:** {}\\n\"\n        \"**Summary:** {}\\n\"\n        \"**State:** {} | **Score:** {} | **Events:** {}\\n\"\n        \"**Artifacts created from events:** {}\\n\\n\"\n        \"Event artifacts (emails, domains, IPs) have been created on this container.\"\n    ).format(incident_id, summary, state, score, event_count, artifact_count)\n\n    ################################################################################\n"
+                },
+                "6": {
+                    "x": 190,
+                    "y": 900,
+                    "id": "6",
+                    "data": {
+                        "id": "6",
+                        "type": "action",
+                        "action": "add note",
+                        "advanced": {
+                            "join": [],
+                            "note": "EXPERIMENT 2026-08-13: native action at the tail of a callback chain, testing constraints.md's async-race claim. title/content bound to prepare_detail_note's output variables.",
+                            "customName": "dispatch detail note",
+                            "description": "Add the detail summary note via the native Phantom app action.",
+                            "customNameId": 0
+                        },
+                        "connector": "Phantom",
+                        "actionType": "generic",
+                        "functionId": 5,
+                        "parameters": {
+                            "title": {
+                                "template": "{0}",
+                                "functionId": 5,
+                                "parameters": [
+                                    "prepare_detail_note:custom_function:note_title"
+                                ]
+                            },
+                            "content": {
+                                "template": "{0}",
+                                "functionId": 5,
+                                "parameters": [
+                                    "prepare_detail_note:custom_function:note_content"
+                                ]
+                            }
+                        },
+                        "connectorId": "deb82aa9-22cc-4675-9cf1-534b8d006eb7",
+                        "functionName": "dispatch_detail_note",
+                        "connectorConfigs": [
+                            "soar8"
+                        ],
+                        "connectorVersion": "v1",
+                        "requiredParameters": [
+                            {
+                                "field": "title",
+                                "default": "",
+                                "data_type": "string"
+                            }
+                        ]
+                    },
+                    "type": "action",
+                    "errors": {}
+                },
+                "7": {
+                    "x": 190,
+                    "y": 1100,
+                    "id": "7",
+                    "data": {
+                        "id": "7",
+                        "type": "code",
+                        "advanced": {
+                            "join": [],
+                            "note": "Prepares cef_dictionary output variable consumed by dispatch_enrichment_complete (native action) -- the only field that needs code (JSON encoding). name/label/contains/run_automation/determine_contains are literal constants on that action step directly; no explicit source_data_identifier (user decision 2026-08-15, accepted tradeoff: duplicate artifacts possible on re-run). incident_id read from container:source_data_identifier, not re-derived via extract_data_to_artifacts run data.",
+                            "customName": "finalize detail",
+                            "description": "Build the Enrichment Complete artifact fields for the native add artifact action.",
+                            "customNameId": 0
+                        },
+                        "functionId": 6,
+                        "functionName": "finalize_detail",
+                        "inputParameters": [
+                            "dispatch_detail_note:action_result.status",
+                            "container:source_data_identifier"
+                        ],
+                        "outputVariables": [
+                            "cef_dictionary"
+                        ]
+                    },
+                    "type": "code",
+                    "errors": {},
+                    "userCode": "    ################################################################################\n\n    # incident_id from the container's own native source_data_identifier\n    # field (set by the connector at ingestion) -- declared as a real input\n    # datapath (container:source_data_identifier) instead of reached into\n    # implicitly via container.get(), same as container:id already is on\n    # dispatch_event_artifacts/dispatch_enrichment_complete.\n    sdi_rows = phantom.collect2(container=container, datapath=[\"container:source_data_identifier\"])\n    incident_id = sdi_rows[0][0] if sdi_rows and sdi_rows[0] and sdi_rows[0][0] else \"unknown\"\n    artifact_count = phantom.get_run_data(key=\"extract_data_to_artifacts:count\") or \"0\"\n\n    note_result = phantom.collect2(container=container, datapath=[\"dispatch_detail_note:action_result.status\"])\n    note_status = note_result[0][0] if note_result and note_result[0] else \"unknown\"\n    phantom.debug(\"Native add note action result: {}\".format(note_status))\n\n    # A failed platform write must not read as success. If the event\n    # artifacts or the detail note failed, record an error note and an\n    # \"Enrichment Failed\" signal through the synchronous API (which runs as\n    # the playbook, not through the soar8 asset that just failed) and stop\n    # before \"Enrichment Complete\" is written, so the re-entry guard lets a\n    # later run retry.\n    # A re-run (after proofpoint_trap_recheck flags a change) re-posts artifacts\n    # an earlier run already created; SOAR rejects those with \"already exists\",\n    # which is the dedup this UC relies on -- not a failed write.\n    event_rows = phantom.collect2(\n        container=container,\n        datapath=[\n            \"dispatch_event_artifacts:action_result.status\",\n            \"dispatch_event_artifacts:action_result.message\",\n        ],\n    )\n    event_statuses = [row[0] for row in (event_rows or []) if row]\n    failed_event_writes = sum(\n        1 for row in (event_rows or [])\n        if row and row[0] == \"failed\" and \"already exists\" not in str(row[1] or \"\").lower()\n    )\n    if failed_event_writes or note_status == \"failed\":\n        msg = \"TRAP incident {}: {} of {} event-artifact writes failed; detail note write {}\".format(\n            incident_id, failed_event_writes, len(event_statuses), note_status)\n        phantom.error(msg)\n        phantom.add_note(container=container, note_type=\"general\", title=\"TRAP Detail - Write failures\", content=msg)\n        signal_ok, signal_message, _signal_id = phantom.add_artifact(\n            container=container,\n            raw_data={},\n            cef_data={\"message\": msg, \"artifactsCreated\": 0},\n            label=\"enrichment_failed\",\n            name=\"Enrichment Failed\",\n            severity=\"low\",\n            run_automation=False,\n        )\n        if not signal_ok:\n            phantom.error(\"Failed to create enrichment_failed artifact: {}\".format(signal_message))\n        return\n\n    # name/label/contains/run_automation/determine_contains/\n    # source_data_identifier never vary for this artifact -- those are\n    # literal defaults / omitted on the action step itself\n    # (dispatch_enrichment_complete) instead of being routed through here.\n    # Only cef_dictionary (JSON encoding -- native \"add artifact\" takes cef\n    # as a string, not a structured object) actually needs code.\n    # Native \"add artifact\" has no \"description\" parameter (same gap\n    # extract_data_to_artifacts's own event artifacts already have -- see\n    # dispatch_event_artifacts) -- folded the old description text into\n    # cef.message instead so it isn't lost outright.\n    # runIndex makes each run's Enrichment Complete artifact distinct content,\n    # so a re-run's signal is not rejected as a duplicate of the previous one --\n    # what on_start's count-based guard assumes (it compares how many\n    # \"Enrichment Complete\" artifacts exist against \"Event Info Update\" ones).\n    run_index = phantom.get_run_data(key=\"on_start:run_index\") or \"0\"\n\n    finalize_detail__cef_dictionary = json.dumps({\n        \"message\": \"TRAP incident {} detail extraction complete. {} artifacts created.\".format(incident_id, artifact_count),\n        \"artifactsCreated\": int(artifact_count),\n        \"runIndex\": int(run_index),\n    })\n\n    ################################################################################\n"
+                },
+                "8": {
+                    "x": 190,
+                    "y": 600,
+                    "id": "8",
+                    "data": {
+                        "id": "8",
+                        "type": "action",
+                        "action": "add artifact",
+                        "advanced": {
+                            "join": [],
+                            "note": "Native action, fields mapped to extract_data_to_artifacts's output variables (parallel per-field lists) or single constants (container:id, container:source_data_identifier). run_automation/determine_contains omitted, falling back to the action's own declared 'false' defaults. container_id is technically omittable too (falls back to the run's own container context, confirmed live 2026-08-15) but left explicit -- omitting it flags the action node 'Unconfigured' in the VPE editor (found live 2026-08-16). source_data_identifier is genuinely mandatory on this action (confirmed live 2026-08-15: omitting it fails with 'Required parameters are not specified or are blank') but does NOT need to be unique per artifact -- a live dedup test (2026-08-16, two artifacts same container_id+source_data_identifier+name, different cef) created two distinct artifacts with no merge -- so it's bound directly to container:source_data_identifier, same value for every artifact in this batch.",
+                            "customName": "dispatch event artifacts",
+                            "description": "Create event artifacts via the native Phantom app action.",
+                            "customNameId": 0
+                        },
+                        "connector": "Phantom",
+                        "actionType": "generic",
+                        "functionId": 7,
+                        "parameters": {
+                            "name": {
+                                "template": "{0}",
+                                "functionId": 7,
+                                "parameters": [
+                                    "extract_data_to_artifacts:custom_function:name"
+                                ]
+                            },
+                            "label": {
+                                "template": "{0}",
+                                "functionId": 7,
+                                "parameters": [
+                                    "extract_data_to_artifacts:custom_function:label"
+                                ]
+                            },
+                            "contains": {
+                                "template": "{0}",
+                                "functionId": 7,
+                                "parameters": [
+                                    "extract_data_to_artifacts:custom_function:contains"
+                                ]
+                            },
+                            "container_id": "container:id",
+                            "cef_dictionary": {
+                                "template": "{0}",
+                                "functionId": 7,
+                                "parameters": [
+                                    "extract_data_to_artifacts:custom_function:cef_dictionary"
+                                ]
+                            },
+                            "run_automation": {
+                                "template": "false",
+                                "parameters": []
+                            },
+                            "determine_contains": {
+                                "template": "false",
+                                "parameters": []
+                            },
+                            "source_data_identifier": {
+                                "template": "{0}",
+                                "functionId": 7,
+                                "parameters": [
+                                    "container:source_data_identifier"
+                                ]
+                            }
+                        },
+                        "connectorId": "deb82aa9-22cc-4675-9cf1-534b8d006eb7",
+                        "functionName": "dispatch_event_artifacts",
+                        "connectorConfigs": [
+                            "soar8"
+                        ],
+                        "connectorVersion": "v1",
+                        "requiredParameters": [
+                            {
+                                "field": "container_id",
+                                "default": "",
+                                "data_type": "numeric"
+                            },
+                            {
+                                "field": "name",
+                                "default": "",
+                                "data_type": "string"
+                            },
+                            {
+                                "field": "label",
+                                "default": "event",
+                                "data_type": "string"
+                            },
+                            {
+                                "field": "source_data_identifier",
+                                "default": "",
+                                "data_type": "string"
+                            },
+                            {
+                                "field": "cef_dictionary",
+                                "default": "",
+                                "data_type": "string"
+                            },
+                            {
+                                "field": "contains",
+                                "default": "",
+                                "data_type": "string"
+                            },
+                            {
+                                "field": "run_automation",
+                                "default": false,
+                                "data_type": "boolean"
+                            },
+                            {
+                                "field": "determine_contains",
+                                "default": false,
+                                "data_type": "boolean"
+                            }
+                        ]
+                    },
+                    "type": "action",
+                    "errors": {}
+                },
+                "9": {
+                    "x": 190,
+                    "y": 900,
+                    "id": "9",
+                    "data": {
+                        "id": "9",
+                        "type": "action",
+                        "action": "add artifact",
+                        "advanced": {
+                            "join": [],
+                            "note": "True last step of PB1. Same native add artifact action dispatch_event_artifacts already uses. No callback -- terminal, matches cyberark_rotation_orchestrator add_note_no_targets precedent. container_id bound to container:id -- technically omittable (falls back to the run's own container context, confirmed live 2026-08-15) but left explicit, since omitting it flags the action node 'Unconfigured' in the VPE editor (found live 2026-08-16). source_data_identifier bound directly to container:source_data_identifier (single artifact per run, so the container's own native field maps 1:1 -- unlike dispatch_event_artifacts, which creates several differently-typed artifacts per run and has no single native field to map).",
+                            "customName": "dispatch enrichment complete",
+                            "description": "Create the Enrichment Complete signal artifact via the native Phantom app action.",
+                            "customNameId": 0
+                        },
+                        "connector": "Phantom",
+                        "actionType": "generic",
+                        "functionId": 8,
+                        "parameters": {
+                            "name": {
+                                "template": "Enrichment Complete",
+                                "parameters": []
+                            },
+                            "label": {
+                                "template": "enrichment_complete",
+                                "parameters": []
+                            },
+                            "contains": {
+                                "template": "{}",
+                                "parameters": []
+                            },
+                            "container_id": "container:id",
+                            "cef_dictionary": {
+                                "template": "{0}",
+                                "functionId": 8,
+                                "parameters": [
+                                    "finalize_detail:custom_function:cef_dictionary"
+                                ]
+                            },
+                            "run_automation": {
+                                "template": "false",
+                                "parameters": []
+                            },
+                            "determine_contains": {
+                                "template": "false",
+                                "parameters": []
+                            },
+                            "source_data_identifier": {
+                                "template": "{0}",
+                                "functionId": 8,
+                                "parameters": [
+                                    "container:source_data_identifier"
+                                ]
+                            }
+                        },
+                        "connectorId": "deb82aa9-22cc-4675-9cf1-534b8d006eb7",
+                        "functionName": "dispatch_enrichment_complete",
+                        "connectorConfigs": [
+                            "soar8"
+                        ],
+                        "connectorVersion": "v1",
+                        "requiredParameters": [
+                            {
+                                "field": "container_id",
+                                "default": "",
+                                "data_type": "numeric"
+                            },
+                            {
+                                "field": "name",
+                                "default": "",
+                                "data_type": "string"
+                            },
+                            {
+                                "field": "label",
+                                "default": "event",
+                                "data_type": "string"
+                            },
+                            {
+                                "field": "source_data_identifier",
+                                "default": "",
+                                "data_type": "string"
+                            },
+                            {
+                                "field": "cef_dictionary",
+                                "default": "",
+                                "data_type": "string"
+                            },
+                            {
+                                "field": "contains",
+                                "default": "",
+                                "data_type": "string"
+                            },
+                            {
+                                "field": "run_automation",
+                                "default": false,
+                                "data_type": "boolean"
+                            },
+                            {
+                                "field": "determine_contains",
+                                "default": false,
+                                "data_type": "boolean"
+                            }
+                        ]
+                    },
+                    "type": "action",
+                    "errors": {}
+                },
+                "10": {
+                    "x": 190,
+                    "y": 400,
+                    "id": "10",
+                    "data": {
+                        "id": "10",
+                        "type": "action",
+                        "action": "download mime body",
+                        "advanced": {
+                            "join": [],
+                            "note": "Moved off the connector's on_poll (removed 2026-08-20, user decision: connector stays a thin generic API wrapper, MIME-fetch belongs with the rest of PB1's derived per-item artifacts -- same reasoning already applied to URL Artifact 2026-08-18). event_id omitted -- fetches MIME for every event on the incident in one action_result, one row per event (event_id/vault_id/file_name), consumed by extract_data_to_artifacts to build MIME Body artifacts. incident_id bound to the same filtered Event Info datapath get_trap_incident uses.",
+                            "customName": "dispatch mime download",
+                            "description": "Fetch + vault the raw MIME (.eml) body for every event on this incident.",
+                            "customNameId": 0
+                        },
+                        "connector": "Proofpoint TRAP",
+                        "actionType": "investigate",
+                        "functionId": 10,
+                        "parameters": {
+                            "incident_id": {
+                                "template": "{0}",
+                                "functionId": 10,
+                                "parameters": [
+                                    "filtered-data:filter_event_info:condition_1:artifact:*.cef.incidentId"
+                                ]
+                            }
+                        },
+                        "connectorId": "a7c41f8e-3b2d-4e9a-bf56-1d8e9a4c2f7b",
+                        "functionName": "dispatch_mime_download",
+                        "connectorConfigs": [
+                            "proofpoint_trap_mock"
+                        ],
+                        "connectorVersion": "v1",
+                        "requiredParameters": [
+                            {
+                                "field": "incident_id",
+                                "default": "",
+                                "data_type": "numeric"
+                            }
+                        ]
+                    },
+                    "type": "action",
+                    "errors": {}
+                }
+            },
+            "notes": "",
+            "description": "Automation playbook triggered on container creation. Fetches full TRAP incident details with expanded events, downloads + vaults the raw MIME body for every event, creates enriched artifacts (emails, domains, IPs, MIME bodies), and signals downstream playbooks with an enrichment_complete artifact."
+        },
+        "input_spec": [],
+        "output_spec": [],
+        "playbook_type": "automation",
+        "python_version": "3.13",
+        "schema": "5.0.5",
+        "version": "6.4.1.100"
+    },
+    "create_time": "2026-09-22T22:56:51.290155Z",
+    "draft_mode": false,
+    "labels": [
+        "proofpoint_trap"
+    ],
+    "tags": [
+        "proofpoint_trap",
+        "email-abuse",
+        "detail"
+    ]
+}

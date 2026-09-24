@@ -1,0 +1,249 @@
+{
+    "blockly": false,
+    "blockly_xml": "<xml></xml>",
+    "category": "Email Abuse",
+    "coa": {
+        "data": {
+            "hash": "",
+            "edges": [
+                {
+                    "id": "port_0_to_port_2",
+                    "sourceNode": "0",
+                    "sourcePort": "0_out",
+                    "targetNode": "2",
+                    "targetPort": "2_in"
+                },
+                {
+                    "id": "port_2_to_port_3",
+                    "sourceNode": "2",
+                    "sourcePort": "2_out",
+                    "targetNode": "3",
+                    "targetPort": "3_in"
+                },
+                {
+                    "id": "port_3_to_port_4",
+                    "sourceNode": "3",
+                    "sourcePort": "3_out",
+                    "targetNode": "4",
+                    "targetPort": "4_in"
+                },
+                {
+                    "id": "port_4_to_port_5",
+                    "sourceNode": "4",
+                    "sourcePort": "4_out",
+                    "targetNode": "5",
+                    "targetPort": "5_in"
+                },
+                {
+                    "id": "port_5_to_port_1",
+                    "sourceNode": "5",
+                    "sourcePort": "5_out",
+                    "targetNode": "1",
+                    "targetPort": "1_in"
+                }
+            ],
+            "nodes": {
+                "0": {
+                    "x": 190,
+                    "y": 0,
+                    "id": "0",
+                    "data": {
+                        "id": "0",
+                        "type": "start",
+                        "advanced": {
+                            "join": []
+                        },
+                        "functionName": "on_start"
+                    },
+                    "type": "start",
+                    "errors": {}
+                },
+                "1": {
+                    "x": 190,
+                    "y": 1000,
+                    "id": "1",
+                    "data": {
+                        "id": "1",
+                        "type": "end",
+                        "advanced": {
+                            "join": []
+                        },
+                        "functionId": 1,
+                        "functionName": "on_finish"
+                    },
+                    "type": "end",
+                    "errors": {},
+                    "userCode": "\n"
+                },
+                "2": {
+                    "x": 190,
+                    "y": 200,
+                    "id": "2",
+                    "data": {
+                        "id": "2",
+                        "type": "action",
+                        "action": "list incidents",
+                        "advanced": {
+                            "join": [],
+                            "note": "state left as a literal empty string, not the action's own 'new' default -- confirmed (mock_api_gateway.py's parse_qs drops an empty-valued query param, same as omitted) to mean 'all states'. hours_back a literal constant, matching the connector's old recheck-pass default of 7 days (168h).",
+                            "customName": "list incidents",
+                            "description": "List all TRAP incidents (any state) created within the lookback window.",
+                            "customNameId": 0
+                        },
+                        "connector": "Proofpoint TRAP",
+                        "actionType": "investigate",
+                        "functionId": 2,
+                        "parameters": {
+                            "state": {
+                                "template": "",
+                                "parameters": []
+                            },
+                            "hours_back": {
+                                "template": "168",
+                                "parameters": []
+                            }
+                        },
+                        "connectorId": "a7c41f8e-3b2d-4e9a-bf56-1d8e9a4c2f7b",
+                        "functionName": "list_incidents",
+                        "connectorConfigs": [
+                            "proofpoint_trap_mock"
+                        ],
+                        "connectorVersion": "v1",
+                        "requiredParameters": [
+                            {
+                                "field": "state",
+                                "default": "new",
+                                "data_type": "string"
+                            },
+                            {
+                                "field": "hours_back",
+                                "default": 1,
+                                "data_type": "numeric"
+                            }
+                        ]
+                    },
+                    "type": "action",
+                    "errors": {}
+                },
+                "3": {
+                    "x": 190,
+                    "y": 400,
+                    "id": "3",
+                    "data": {
+                        "id": "3",
+                        "type": "code",
+                        "advanced": {
+                            "join": [],
+                            "note": "Duplicates proofpoint_trap_connector.py's _build_event_info_cef/_incident_signature (the connector no longer runs this itself as of 2026-08-18 -- see uc2_implementation_plan.md's 'fold into pb' entry). Keep both in sync if either changes.",
+                            "customName": "process incidents",
+                            "description": "Diff each listed incident's signature against the recheck state list; incidents that changed and already have a container go to the recheck batch.",
+                            "customNameId": 0
+                        },
+                        "functionId": 3,
+                        "functionName": "process_incidents",
+                        "inputParameters": [
+                            "list_incidents:action_result.status",
+                            "list_incidents:action_result.data"
+                        ],
+                        "outputVariables": [
+                            "incident_id"
+                        ]
+                    },
+                    "type": "code",
+                    "errors": {},
+                    "userCode": "    ################################################################################\n\n    result_data = phantom.collect2(\n        container=container,\n        datapath=[\n            \"list_incidents:action_result.status\",\n            \"list_incidents:action_result.data\",\n        ]\n    )\n\n    if not result_data or result_data[0][0] != \"success\":\n        phantom.error(\"list_incidents failed -- skipping this recheck cycle\")\n        return\n\n    incidents = result_data[0][1] or []\n    phantom.debug(\"Recheck cycle: {} incident(s) in window\".format(len(incidents)))\n\n    # Read prior state. Row 0 is the header (\"incident_id\") -- skip it,\n    # same convention as cyberark_rotation_orchestrator's STATE_LIST_NAME\n    # read-modify-write pattern.\n    known_signatures = {}\n    read_success, _read_msg, rows = phantom.get_list(list_name=STATE_LIST_NAME)\n    if read_success and rows:\n        for row in rows:\n            if row and len(row) >= 2 and row[0] != \"incident_id\":\n                known_signatures[row[0]] = row[1]\n\n    to_recheck = []  # [{incident_id, container_id, new_signature, event_info_cef}]\n    new_state = dict(known_signatures)\n\n    if not known_signatures:\n        phantom.debug(\"No prior state -- recording signatures this cycle, nothing to recheck\")\n\n    for incident in incidents:\n        inc_id = str(incident.get(\"id\", \"\"))\n        if not inc_id:\n            continue\n        sig = _incident_signature(incident)\n\n        # An incident this playbook has not seen before is RECORDED, not\n        # rechecked. On the first cycle that is the whole window -- otherwise a\n        # fresh deployment re-runs proofpoint_trap_detail over the entire\n        # backlog on tick one. Afterwards it is an incident on_poll has just\n        # ingested, which proofpoint_trap_detail has already enriched on its\n        # own trigger. Rechecks start when a known incident comes back with a\n        # different signature.\n        if inc_id not in known_signatures:\n            new_state[inc_id] = sig\n            continue\n\n        if known_signatures[inc_id] == sig:\n            continue  # unchanged since last recheck cycle -- nothing to do\n\n        # Only incidents ALREADY ingested (have a container) are this\n        # playbook's job -- first-time ingestion stays on_poll's main pass.\n        # An incident with no container yet is either brand new (on_poll\n        # will pick it up on its own schedule) or outside on_poll's own\n        # filters entirely (not this playbook's call to override that).\n        try:\n            resp = phantom.requests.get(\n                uri=phantom.build_phantom_rest_url(\"container\"),\n                params={\"_filter_source_data_identifier\": '\"{}\"'.format(inc_id), \"page_size\": 1},\n                verify=False,\n            ).json()\n            existing = resp.get(\"data\") or []\n        except Exception as e:\n            phantom.debug(\"Container lookup failed for incident {}: {}\".format(inc_id, str(e)))\n            continue\n\n        if not existing:\n            # Known incident that changed but has no container: nothing to\n            # write the update onto. Leave its recorded signature alone so the\n            # change is still pending the next time round, once on_poll has\n            # ingested it.\n            continue\n\n        container_id = existing[0][\"id\"]\n        to_recheck.append({\n            \"incident_id\": inc_id,\n            \"container_id\": container_id,\n            \"event_info_cef\": _build_event_info_cef(incident),\n        })\n        new_state[inc_id] = sig\n\n    phantom.debug(\"{} incident(s) changed and already have a container\".format(len(to_recheck)))\n\n    action_params = [{\"incident_id\": row[\"incident_id\"]} for row in to_recheck]\n\n    phantom.save_run_data(key=\"process_incidents:to_recheck\", value=json.dumps(to_recheck))\n    phantom.save_run_data(key=\"process_incidents:new_state\", value=json.dumps(new_state))\n    phantom.save_run_data(key=\"process_incidents:action_params\", value=json.dumps(action_params))\n\n    # Real output variable (not just save_run_data) so dispatch_mime_refetch\n    # (a native action node) can bind its list-fan-out parameter to it\n    # directly -- constraints.md's \"output variables, not save_run_data,\n    # when data feeds native blocks downstream\" rule, same convention as\n    # extract_data_to_artifacts's __name/__label/etc in proofpoint_trap_detail.py.\n    process_incidents__incident_id = [row[\"incident_id\"] for row in to_recheck]\n\n    ################################################################################\n"
+                },
+                "4": {
+                    "x": 190,
+                    "y": 600,
+                    "id": "4",
+                    "data": {
+                        "id": "4",
+                        "type": "action",
+                        "action": "download mime body",
+                        "advanced": {
+                            "join": [],
+                            "note": "Native action, one app_run per to_recheck row via a list-bound incident_id (parallel-list fan-out, same mechanism as proofpoint_trap_detail.py's dispatch_event_artifacts). event_id deliberately omitted -- fetches all events for the incident; relies on the already-proven SDI-based artifact dedup instead of tracking per-incident event_ids (simplification, see this playbook's module docstring).",
+                            "customName": "dispatch mime refetch",
+                            "description": "Re-fetch and vault all MIME bodies for each changed incident.",
+                            "customNameId": 0
+                        },
+                        "connector": "Proofpoint TRAP",
+                        "actionType": "generic",
+                        "functionId": 4,
+                        "parameters": {
+                            "incident_id": {
+                                "template": "{0}",
+                                "functionId": 4,
+                                "parameters": [
+                                    "process_incidents:custom_function:incident_id"
+                                ]
+                            }
+                        },
+                        "connectorId": "a7c41f8e-3b2d-4e9a-bf56-1d8e9a4c2f7b",
+                        "functionName": "dispatch_mime_refetch",
+                        "connectorConfigs": [
+                            "proofpoint_trap_mock"
+                        ],
+                        "connectorVersion": "v1",
+                        "requiredParameters": [
+                            {
+                                "field": "incident_id",
+                                "default": "",
+                                "data_type": "numeric"
+                            }
+                        ]
+                    },
+                    "type": "action",
+                    "errors": {}
+                },
+                "5": {
+                    "x": 190,
+                    "y": 800,
+                    "id": "5",
+                    "data": {
+                        "id": "5",
+                        "type": "code",
+                        "advanced": {
+                            "join": [],
+                            "note": "Raw REST POST /rest/artifact, not phantom.add_artifact() -- this playbook's own container is the Timer tick's, not the target TRAP incident's, so this is a genuine cross-container write. Same idiom proofpoint_trap_attachments.py already uses for the same reason.",
+                            "customName": "dispatch updates",
+                            "description": "Build MIME Body + Event Info Update artifacts on each changed incident's container (raw REST, cross-container write), then persist the new signatures to the recheck state list.",
+                            "customNameId": 0
+                        },
+                        "functionId": 5,
+                        "functionName": "dispatch_updates",
+                        "inputParameters": [
+                            "dispatch_mime_refetch:action_result.parameter.incident_id",
+                            "dispatch_mime_refetch:action_result.data.*.event_id",
+                            "dispatch_mime_refetch:action_result.data.*.vault_id",
+                            "dispatch_mime_refetch:action_result.data.*.file_name"
+                        ],
+                        "outputVariables": []
+                    },
+                    "type": "code",
+                    "errors": {},
+                    "userCode": "    ################################################################################\n\n    try:\n        to_recheck = json.loads(phantom.get_run_data(key=\"process_incidents:to_recheck\") or \"[]\")\n    except Exception:\n        to_recheck = []\n\n    # dispatch_mime_refetch fanned out one app_run per to_recheck row\n    # (same order as the parameters list built in process_incidents) --\n    # action_result.parameter.incident_id ties each app_run's MIME results\n    # back to the right incident, since app_runs aren't guaranteed to\n    # complete in dispatch order.\n    mime_rows = phantom.collect2(\n        container=container,\n        datapath=[\n            \"dispatch_mime_refetch:action_result.parameter.incident_id\",\n            \"dispatch_mime_refetch:action_result.data.*.event_id\",\n            \"dispatch_mime_refetch:action_result.data.*.vault_id\",\n            \"dispatch_mime_refetch:action_result.data.*.file_name\",\n        ],\n    )\n\n    mime_by_incident = {}\n    for row in (mime_rows or []):\n        if not row or not row[0]:\n            continue\n        inc_id, event_id, vault_id, file_name = row[0], row[1], row[2], row[3]\n        if not event_id or not vault_id:\n            continue\n        mime_by_incident.setdefault(str(inc_id), []).append((event_id, vault_id, file_name))\n\n    # phantom.add_artifact() targets the CURRENT run's own container in\n    # every existing usage in this repo -- this playbook's own `container`\n    # is the Timer tick's container, not the target TRAP incident's, so\n    # this is a genuine cross-container write. Raw REST POST instead, same\n    # idiom PB3 (proofpoint_trap_attachments) already uses for exactly this\n    # reason -- container_id goes explicitly in the body, no ambiguity\n    # about execution context.\n    total_artifacts = 0\n    for row in to_recheck:\n        inc_id = row[\"incident_id\"]\n        container_id = row[\"container_id\"]\n        event_info_cef = row[\"event_info_cef\"]\n\n        # A raw REST POST does NOT no-op on a duplicate source_data_identifier\n        # (verified on 8.6: the same MIME Body posted twice yields two\n        # artifacts), so without this every recheck piles another copy of every\n        # event's MIME onto the container -- and proofpoint_trap_attachments\n        # re-processes each copy. Skip what the container already carries.\n        existing_mime_sdis = set()\n        try:\n            existing_resp = phantom.requests.get(\n                uri=phantom.build_phantom_rest_url(\"artifact\"),\n                params={\n                    \"_filter_container\": container_id,\n                    \"_filter_name\": '\"MIME Body\"',\n                    \"page_size\": 0,\n                },\n                verify=False,\n            ).json()\n            existing_mime_sdis = {\n                a.get(\"source_data_identifier\") for a in (existing_resp.get(\"data\") or [])\n            }\n        except Exception as e:\n            phantom.debug(\"Could not list existing MIME Body artifacts on container {}: {}\".format(container_id, str(e)))\n\n        for event_id, vault_id, file_name in mime_by_incident.get(inc_id, []):\n            if \"trap-{}-mime-{}\".format(inc_id, event_id) in existing_mime_sdis:\n                phantom.debug(\"MIME Body for incident {} event {} already on container {} -- skipping\".format(inc_id, event_id, container_id))\n                continue\n            mime_artifact = {\n                \"name\": \"MIME Body\",\n                \"source_data_identifier\": \"trap-{}-mime-{}\".format(inc_id, event_id),\n                \"label\": \"event\",\n                \"cef\": {\"vaultId\": vault_id, \"fileName\": file_name},\n                \"cef_types\": {\"vaultId\": [\"vault id\"]},\n                \"container_id\": container_id,\n                \"run_automation\": False,\n            }\n            try:\n                resp = phantom.requests.post(\n                    uri=phantom.build_phantom_rest_url(\"artifact\"),\n                    data=json.dumps(mime_artifact),\n                    verify=False,\n                ).json()\n                if not (resp.get(\"success\") or resp.get(\"id\")):\n                    phantom.debug(\"Failed to create MIME Body artifact for incident {} event {}: {}\".format(inc_id, event_id, resp.get(\"message\", \"\")))\n            except Exception as e:\n                phantom.debug(\"Error creating MIME Body artifact for incident {} event {}: {}\".format(inc_id, event_id, str(e)))\n            total_artifacts += 1\n\n        sig_suffix = hashlib.sha256(json.dumps(event_info_cef, sort_keys=True).encode(\"utf-8\")).hexdigest()[:16]\n        update_cef = dict(event_info_cef)\n        update_cef[\"message\"] = \"TRAP incident {} changed since last enrichment\".format(inc_id)\n        update_artifact = {\n            \"name\": \"Event Info Update\",\n            \"source_data_identifier\": \"trap-{}-recheck-{}\".format(inc_id, sig_suffix),\n            \"label\": \"event\",\n            \"cef\": update_cef,\n            \"container_id\": container_id,\n            \"run_automation\": True,\n        }\n        try:\n            resp = phantom.requests.post(\n                uri=phantom.build_phantom_rest_url(\"artifact\"),\n                data=json.dumps(update_artifact),\n                verify=False,\n            ).json()\n            if not (resp.get(\"success\") or resp.get(\"id\")):\n                phantom.debug(\"Failed to create Event Info Update for incident {}: {}\".format(inc_id, resp.get(\"message\", \"\")))\n        except Exception as e:\n            phantom.debug(\"Error creating Event Info Update for incident {}: {}\".format(inc_id, str(e)))\n        total_artifacts += 1\n\n    phantom.debug(\"Created {} artifact(s) across {} rechecked incident(s)\".format(total_artifacts, len(to_recheck)))\n\n    # Update state only after the artifact dispatch attempt above -- best\n    # effort, matching this UC's existing \"attempted work, not\n    # platform-verified landed\" convention (see PB1's finalize_event_artifacts\n    # removal, uc2_implementation_plan.md 2026-08-13).\n    try:\n        new_state = json.loads(phantom.get_run_data(key=\"process_incidents:new_state\") or \"{}\")\n        content = [[\"incident_id\", \"signature\"]] + [[k, v] for k, v in sorted(new_state.items())]\n        phantom.set_list(list_name=STATE_LIST_NAME, values=content)\n    except Exception as e:\n        phantom.debug(\"Failed to update recheck state list: {}\".format(str(e)))\n\n    ################################################################################\n"
+                }
+            },
+            "notes": "",
+            "description": "Periodically re-scans the whole in-window TRAP incident backlog (all states) for already-ingested incidents that changed since ingestion -- a field edit, disposition change, or newly-linked event that on_poll's checkpoint-based main pass can't see again once a container exists. Triggered by a Timer asset (label proofpoint_trap_recheck), not real TRAP incidents."
+        },
+        "input_spec": [],
+        "output_spec": [],
+        "playbook_type": "automation",
+        "python_version": "3.13",
+        "schema": "5.0.5",
+        "version": "6.4.1.100"
+    },
+    "create_time": "2026-09-22T22:57:07.895171Z",
+    "draft_mode": false,
+    "labels": [
+        "proofpoint_trap_recheck"
+    ],
+    "tags": [
+        "proofpoint_trap",
+        "email-abuse",
+        "recheck"
+    ]
+}
