@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Paquet de transfert (déploiement air-gapped)
 
-Généré le 2026-09-28 16:25 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
+Généré le 2026-09-28 17:50 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
 
 Ce paquet est autonome — tout ce qu'il faut pour déployer ce cas d'usage manuellement
 dans un environnement sans accès réseau vers ce dépôt ni vers `soar8`.
@@ -28,6 +28,8 @@ d'installation.
 
 - **Le connecteur v1.0.36 corrige `download mime body`, qui échouait sur chaque événement face à une vraie appliance TRAP** (les versions v1.0.34 et antérieures appelaient un point d'accès que TRAP ne possède pas ; la v1.0.35 échouait aussi sur chaque événement lancée depuis le panneau d'actions de l'actif, qui n'a pas de conteneur où stocker l'e-mail — elle télécharge et vérifie désormais chaque e-mail à cet endroit, en affichant sa taille et son objet, sans le stocker). Installez-le par-dessus l'application Proofpoint TRAP existante : mise à jour normale, sur place. L'actif (asset), sa clé d'API et tous les playbooks restent tels quels — rien à réimporter, rien à ressaisir. **Les incidents traités avant la mise à jour restent sans leurs e-mails :** `proofpoint_trap_detail` les a marqués `Enrichment Complete` bien que le téléchargement des e-mails ait échoué, et il ne s'exécute plus sur un conteneur déjà traité. Les nouveaux incidents, ainsi que tout incident dont `proofpoint_trap_recheck` détecte une modification, reçoivent normalement leurs e-mails et pièces jointes. Pour récupérer à la main les e-mails d'un incident antérieur, lancez `download mime body` sur son conteneur avec l'identifiant de l'incident : les fichiers `.eml` arrivent dans les fichiers (Vault) du conteneur, mais aucun artefact `MIME Body` n'est créé, donc `proofpoint_trap_attachments` ne les traite pas.
 
+- **`proofpoint_trap_detail` doit être réimporté (2026-09-28) — contrairement à la mise à jour du connecteur ci-dessus.** Il résiste désormais à un enregistrement dans le VPE et ses réexécutions ne publient que les nouveaux artefacts. Réimportez-le depuis `playbooks/` — la nouvelle copie remplace la vôtre, y compris tout bloc renommé avec `_0` par un enregistrement antérieur — puis réactivez-le. Après l'import, vous pouvez rediriger ses blocs d'action vers vos propres noms d'assets et enregistrer : il ne casse plus. Deux blocs changent de nom (`build_artifact_list`, `dispatch_artifact_list`). Une réexécution, que `proofpoint_trap_recheck` déclenche à chaque modification d'un incident, ne publie plus que les artefacts absents du conteneur au lieu de toute la liste, et la note de détail indique « N new, M already on the container ». L'artefact `Enrichment Complete` ajoute `alertCount` (alertes traitées), `eventCount` (le décompte de TRAP) et `artifactsAlreadyPresent` ; `artifactsCreated` ne compte plus que les nouveaux artefacts.
+
 ## Ordre d'installation
 
 1. **Installer l'application/les applications connecteur** — Apps > Install App, charger
@@ -51,11 +53,11 @@ d'installation.
      de passe associé à un nom d'utilisateur résiduel de l'environnement source ne
      s'authentifie auprès de rien et renvoie une erreur HTTP 401.
 
-   **Nommez chaque asset exactement comme ci-dessous.** Les playbooks choisissent leurs
-   assets par leur nom, fixé à leur construction. Un asset nommé autrement les laisse
-   pointer vers rien, et les rediriger oblige à modifier le playbook dans le VPE — ce qui
-   casse tout playbook listé plus bas sous « Ne pas réenregistrer ces playbooks dans le
-   VPE ».
+   **Les playbooks sont livrés pointant vers les noms d'assets ci-dessous.** Créez vos
+   assets avec ces noms, ou gardez vos propres noms et redirigez les blocs d'action de
+   chaque playbook vers vos assets dans le VPE, puis enregistrez. L'enregistrement est
+   sans risque pour tous les playbooks **sauf** ceux listés plus bas sous « Ne pas
+   réenregistrer ces playbooks dans le VPE » — pour ceux-là, utilisez les noms de ce tableau.
 
    | Nom de l'asset | Application | Utilisé par | Modèle |
    |---|---|---|---|
@@ -99,15 +101,16 @@ playbook y stocke et à quel moment.
 Consulter un playbook dans le VPE ne pose aucun problème. L'**enregistrer** fait
 régénérer son code par SOAR à partir de sa définition, et pour les blocs ci-dessous le
 code régénéré est faux. Chacun a été écrit pour lancer une action par élément ; le bloc
-régénéré est renommé avec un suffixe `_0` et envoie une **seule** action, tous les
-éléments étant joints par des virgules en une seule valeur. Cette action échoue alors —
+régénéré envoie une **seule** action, tous les éléments étant joints par des virgules
+en une seule valeur. Cette action échoue alors —
 par exemple `Could not load JSON from CEF parameter ... Extra data` — ou crée en silence
 un seul élément mal formé au lieu de plusieurs.
 
-- `proofpoint_trap_detail` — bloc `dispatch_event_artifacts`
 - `proofpoint_trap_recheck` — bloc `dispatch_mime_refetch`
 
-Une action `<bloc>_0` dans une exécution de playbook en est le signe. Pour corriger,
+Le signe : l'action de ce bloc échoue ainsi dans une exécution de playbook (son nom peut
+aussi recevoir un suffixe `_0`, mais seulement si son libellé se termine par
+« artifacts » ou « container »). Pour corriger,
 importez de nouveau le `.tgz` de ce playbook depuis `playbooks/`, comme à l'étape
 d'installation ci-dessus, puis réactivez-le s'il s'agit d'un playbook d'automatisation.
 Modifiez ce qui entoure le playbook — les noms d'assets avant tout — plutôt que le

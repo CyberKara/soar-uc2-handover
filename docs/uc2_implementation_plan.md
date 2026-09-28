@@ -15,6 +15,39 @@ failures` note and marks a failed enrichment `Enrichment Failed`, which the re-e
 not count, so it can be retried. PB7 was live-verified later that day (Timer asset, 15 min;
 see "PB7 live-verified 2026-09-22" below). Open: PB4 stays on hold. Details: `docs/next-steps.md`, "UC2 audit (2026-09-21)".
 
+**PB1 rewritten 2026-09-28 — a VPE save no longer breaks it; re-runs post only what is new.**
+User requirement: saving must never break the playbook, and an importer always picks their own
+asset names in the action blocks (a save). On the real appliance a save had turned
+`dispatch_event_artifacts` into a failing `dispatch_event_artifacts_0`. Now (block names as of v10):
+- Every block is written in the VPE's generated shape with all logic in its Custom Code section.
+  The re-entry guard moved out of `on_start` (regenerated on save) into a new first code block,
+  `check_reentry`. The per-artifact fan-out moved into `dispatch_artifact_list`' own Custom Code,
+  which rebuilds `parameters` one set per artifact before the generated `phantom.act()`.
+  `filter_event_info` carries `advanced.scope: "all"` so a re-run still finds `Event Info`. Assets are
+  set only by each action block's selection. Rules: `constraints.md` and `playbook-patterns.md`
+  ("Save-safe blocks").
+- Two blocks renamed: `extract_data_to_artifacts` → `build_artifact_list`, `dispatch_event_artifacts`
+  → `dispatch_artifact_list`. The VPE appends `_<id>` to any label ending in "artifacts" or
+  "container" when the playbook is opened (why the appliance showed `dispatch_event_artifacts_0`),
+  and a save would then rename the action out from under `finalize_detail`'s write check.
+- **Real VPE save test (user, PB1 v11, 2026-09-28):** custom code, labels and `active` all
+  survived. It showed two gaps, both fixed in v12 (the repo is now that saved version + the fixes):
+  the `add artifact` blocks listed all 8 fields in `requiredParameters` ("Unconfigured" triangle), and
+  the two TRAP action blocks lost `scope="all"` on their filtered-data read because only the filter,
+  not the blocks themselves, had `advanced.scope: "all"`. `check_vpe_shape.py` now checks both.
+  A second save (id 93, v13) regenerated **byte-identical Python**; only JSON details differed
+  (`"default": ""` on `requiredParameters`, a float canvas position, the VPE's `hash`), now folded in —
+  the repo equals live id 93. A PB7-triggered re-run on that user-saved id 93 (container 1202,
+  17:41Z) posted 3 new artifacts, recognised 6 as present (incl. PB7's MIME Body), all actions success.
+- **Re-runs post only new artifacts.** A re-run (PB7 flags a changed incident, usually one that
+  gained alerts) used to re-post the whole list — 180 → 323 `add artifact` calls per run on a real
+  appliance incident, nearly all rejected as duplicates. `build_artifact_list` now skips any
+  artifact whose name and identifying value (address+role, domain, URL, IP, or MIME SDI) is
+  already on the container, and drops repeats within a run (a URL listed twice in `hosts.url`).
+- `Enrichment Complete` CEF gains `alertCount` (alerts processed this run), `eventCount` (TRAP's
+  `event_count`) and `artifactsAlreadyPresent`; `artifactsCreated` now counts new artifacts only.
+  The detail note shows "Alerts processed" and "N new, M already on the container".
+
 ---
 
 ## Context

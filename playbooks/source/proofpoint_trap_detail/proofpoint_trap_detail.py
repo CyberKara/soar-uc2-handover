@@ -1,109 +1,81 @@
 """
-Proofpoint TRAP Detail
-
-Automation playbook triggered on container creation for label 'proofpoint_trap'.
-Fetches full incident details (with expanded events) from Proofpoint TRAP,
-downloads + vaults the raw MIME body for every event, then creates enriched
-artifacts: email addresses, domains, click IPs, threat URLs, MIME bodies.
-
-Creates a final 'Enrichment Complete' artifact on success. When the TRAP fetch
-or a platform write fails it instead adds an error note and an 'Enrichment
-Failed' artifact, which the re-entry guard does not count, so a later run can
-retry.
-
-Trigger: Container created on label 'proofpoint_trap'
+Automation playbook for label proofpoint_trap. Fetches the TRAP incident with its events, downloads each event&#39;s original email, and creates the derived artifacts (sender/recipient emails, domains, threat URLs, click IPs, MIME bodies), a detail note, and a final Enrichment Complete artifact. A failed fetch or platform write adds an error note and an Enrichment Failed artifact instead, so a later run can retry. Assets are selected in each action block, never in code, so an importer can point them at their own asset names.
 """
 
 
 import phantom.rules as phantom
 import json
-import urllib.parse
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 @phantom.playbook_block()
 def on_start(container):
     phantom.debug('on_start() called')
 
-    # Count-based re-entry guard (was existence-based — see
-    # uc2_implementation_plan.md's Known Limitations "post-ingestion
-    # incident updates" entry). scope="all" required: "Enrichment Complete"/
-    # "Event Info Update" are created by proofpoint_trap_recheck (PB7) or a prior
-    # run of this playbook, not by whatever artifact triggers this
-    # particular run (see constraints.md). "Enrichment Failed" is
-    # deliberately NOT counted, so a run that failed (TRAP fetch or a
-    # platform write) can be retried by a later run.
-    rows = phantom.collect2(container=container, datapath=["artifact:*.name"], scope="all")
-    names = [row[0] for row in (rows or []) if row and row[0]]
-    enrichment_complete_count = names.count("Enrichment Complete")
-    recheck_requested_count = names.count("Event Info Update")
-
-    if enrichment_complete_count > 0 and recheck_requested_count < enrichment_complete_count:
-        phantom.debug(
-            "Enrichment already complete ({} run(s)) with no unconsumed Event Info Update "
-            "artifact ({} total) -- skipping".format(enrichment_complete_count, recheck_requested_count)
-        )
-        return
-
-    # recheck_requested_count doubles as this run's index: 0 for the very
-    # first run, then the count of Event Info Update artifacts seen so far
-    # for every re-run after that. Each Enrichment Complete artifact this
-    # run creates is SDI'd with this index so it's a genuinely new artifact
-    # instead of colliding with a prior run's — that's what lets the count
-    # comparison above ever move past 1.
-    phantom.save_run_data(key="on_start:run_index", value=str(recheck_requested_count))
-
-    filter_event_info(container=container)
+    # call 'check_reentry' block
+    check_reentry(container=container)
 
     return
 
-
 @phantom.playbook_block()
-def filter_event_info(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
+def filter_event_info(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
     phantom.debug("filter_event_info() called")
 
     ################################################################################
-    # Native filter block -- narrows artifacts to name == "Event Info" so
-    # get_trap_incident's incident_id parameter (node 3's JSON) binds to
-    # filtered-data:filter_event_info:condition_1:artifact:*.cef.incidentId,
-    # a single reliable value, instead of the raw wildcard
-    # artifact:*.cef.incidentId it used to bind to directly. That raw
-    # wildcard resolved to the literal string "None" whenever this playbook
-    # ran on anything other than a full container-level artifact_created
-    # fan-out. Found live 2026-08-14. SOAR resolves the filter itself from
-    # the JSON conditions at dispatch time, not via code in this function --
-    # this body is a readable reflection, not what actually executes.
+    # Keep only the Event Info artifact, whose cef.incidentId both TRAP actions use.
     ################################################################################
 
-    get_trap_incident(container=container)
+    # collect filtered artifact ids and results for 'if' condition 1
+    matched_artifacts_1, matched_results_1 = phantom.condition(
+        container=container,
+        conditions=[
+            ["artifact:*.name", "==", "Event Info"]
+        ],
+        conditions_dps=[
+            ["artifact:*.name", "==", "Event Info"]
+        ],
+        name="filter_event_info:condition_1",
+        scope="all",
+        delimiter=",")
+
+    # call connected blocks if filtered artifacts or results
+    if matched_artifacts_1 or matched_results_1:
+        get_trap_incident(action=action, success=success, container=container, results=results, handle=handle, filtered_artifacts=matched_artifacts_1, filtered_results=matched_results_1)
 
     return
 
 
 @phantom.playbook_block()
-def get_trap_incident(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
+def get_trap_incident(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
     phantom.debug("get_trap_incident() called")
 
+    # phantom.debug('Action: {0} {1}'.format(action['name'], ('SUCCEEDED' if success else 'FAILED')))
+
     ################################################################################
-    # Fetch full incident details from TRAP with expand_events=true.
-    # incident_id bound to the filtered Event Info datapath in this block's
-    # VPE config (see proofpoint_trap_detail.json node 3) -- SOAR resolves
-    # that binding itself at dispatch time, not via code in this function;
-    # this body independently re-derives the same value (filtered to
-    # name == "Event Info") as a readable reflection.
+    # Fetch the full incident, with its events, from Proofpoint TRAP.
     ################################################################################
 
-    rows = phantom.collect2(
-        container=container,
-        datapath=["artifact:*.name", "artifact:*.cef.incidentId"],
-        scope="all",
-    )
-    incident_ids = [row[1] for row in (rows or []) if row and row[0] == "Event Info" and row[1]]
-    incident_id_value = str(incident_ids[0]) if incident_ids else ""
+    filtered_artifact_0_data_filter_event_info = phantom.collect2(container=container, datapath=["filtered-data:filter_event_info:condition_1:artifact:*.cef.incidentId","filtered-data:filter_event_info:condition_1:artifact:*.id"], scope="all")
 
-    parameters = [{
-        "incident_id": incident_id_value,
-    }]
+    parameters = []
+
+    # build parameters list for 'get_trap_incident' call
+    for filtered_artifact_0_item_filter_event_info in filtered_artifact_0_data_filter_event_info:
+        if filtered_artifact_0_item_filter_event_info[0] is not None:
+            parameters.append({
+                "incident_id": filtered_artifact_0_item_filter_event_info[0],
+                "context": {'artifact_id': filtered_artifact_0_item_filter_event_info[1]},
+            })
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+
+    # Write your custom code here...
+
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
 
     phantom.act("get incident", parameters=parameters, name="get_trap_incident", assets=["proofpoint_trap_mock"], callback=dispatch_mime_download)
 
@@ -111,57 +83,38 @@ def get_trap_incident(action=None, success=None, container=None, results=None, h
 
 
 @phantom.playbook_block()
-def dispatch_mime_download(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
-    phantom.debug("dispatch_mime_download() called")
+def build_artifact_list(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
+    phantom.debug("build_artifact_list() called")
 
     ################################################################################
-    # Native action block (Proofpoint TRAP app, "download mime body") --
-    # fetches + vaults the raw MIME (.eml) for every event on this incident
-    # in one call (event_id omitted). Moved off the connector's on_poll
-    # (removed 2026-08-20, user decision: connector stays a thin generic
-    # API wrapper, MIME-fetch belongs with the rest of PB1's derived
-    # per-item artifacts, same reasoning already applied to the URL
-    # Artifact move 2026-08-18). incident_id bound to the same filtered
-    # Event Info datapath get_trap_incident uses -- SOAR resolves that
-    # binding itself at dispatch time (node 10's JSON), not via code in
-    # this function; this body independently re-derives the same value as
-    # a readable reflection, same pattern as get_trap_incident above.
+    # Build the artifacts to create from the incident's events and emails.
     ################################################################################
 
-    rows = phantom.collect2(
-        container=container,
-        datapath=["artifact:*.name", "artifact:*.cef.incidentId"],
-        scope="all",
-    )
-    incident_ids = [row[1] for row in (rows or []) if row and row[0] == "Event Info" and row[1]]
-    incident_id_value = str(incident_ids[0]) if incident_ids else ""
+    source_data_identifier_value = container.get("source_data_identifier", None)
+    get_trap_incident_result_data = phantom.collect2(container=container, datapath=["get_trap_incident:action_result.status","get_trap_incident:action_result.data"], action_results=results)
+    dispatch_mime_download_result_data = phantom.collect2(container=container, datapath=["dispatch_mime_download:action_result.status","dispatch_mime_download:action_result.data.*.event_id","dispatch_mime_download:action_result.data.*.vault_id","dispatch_mime_download:action_result.data.*.file_name"], action_results=results)
 
-    parameters = [{
-        "incident_id": incident_id_value,
-    }]
+    get_trap_incident_result_item_0 = [item[0] for item in get_trap_incident_result_data]
+    get_trap_incident_result_item_1 = [item[1] for item in get_trap_incident_result_data]
+    dispatch_mime_download_result_item_0 = [item[0] for item in dispatch_mime_download_result_data]
+    dispatch_mime_download_result_item_1 = [item[1] for item in dispatch_mime_download_result_data]
+    dispatch_mime_download_result_item_2 = [item[2] for item in dispatch_mime_download_result_data]
+    dispatch_mime_download_result_item_3 = [item[3] for item in dispatch_mime_download_result_data]
 
-    phantom.act("download mime body", parameters=parameters, name="dispatch_mime_download", assets=["proofpoint_trap_mock"], callback=extract_data_to_artifacts)
-
-    return
-
-
-@phantom.playbook_block()
-def extract_data_to_artifacts(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
-    phantom.debug("extract_data_to_artifacts() called")
-
-    ################################################################################
-    # Parse events from get_incident result, create email/domain/IP artifacts
-    ################################################################################
-
-    extract_data_to_artifacts__name = None
-    extract_data_to_artifacts__label = None
-    extract_data_to_artifacts__cef_dictionary = None
-    extract_data_to_artifacts__contains = None
-    extract_data_to_artifacts__incident_id = None
-    extract_data_to_artifacts__count = None
+    build_artifact_list__name = None
+    build_artifact_list__label = None
+    build_artifact_list__source_data_identifier = None
+    build_artifact_list__cef_dictionary = None
+    build_artifact_list__contains = None
+    build_artifact_list__incident_id = None
+    build_artifact_list__count = None
+    build_artifact_list__alert_count = None
+    build_artifact_list__event_count = None
+    build_artifact_list__already_present = None
 
     ################################################################################
     ## Custom Code Start
+    ################################################################################
     ################################################################################
 
     def _create_enrichment_failure_signal(msg):
@@ -329,26 +282,12 @@ def extract_data_to_artifacts(action=None, success=None, container=None, results
                 "dispatch_mime_download:action_result.data.*.file_name",
             ],
         )
-        # On a re-run (proofpoint_trap_recheck triggers one on a changed
-        # incident) the container already carries MIME Body artifacts for the
-        # events seen before, and PB7 has just built the new event's. SOAR does
-        # not dedup them away: its content hash covers cef_types, which the two
-        # builders set differently, so the same MIME lands twice. Skip what is
-        # already there, by source_data_identifier.
-        existing_rows = phantom.collect2(
-            container=container,
-            datapath=["artifact:*.name", "artifact:*.source_data_identifier"],
-            scope="all",
-        )
-        existing_mime_sdis = {
-            row[1] for row in (existing_rows or [])
-            if row and row[0] == "MIME Body" and row[1]
-        }
+        # MIME Body artifacts already on the container (from an earlier run, or
+        # built by proofpoint_trap_recheck for a new event) are dropped by the
+        # "already on the container" filter below, by source_data_identifier.
         for row in (mime_rows or []):
             mime_event_id, vault_id, file_name = row[0], row[1], row[2]
             if not vault_id:
-                continue
-            if "trap-{}-mime-{}".format(incident_id_val, mime_event_id) in existing_mime_sdis:
                 continue
             artifacts.append({
                 "name": "MIME Body",
@@ -523,143 +462,157 @@ def extract_data_to_artifacts(action=None, success=None, container=None, results
                 "run_automation": False,
             })
 
-    phantom.debug("Creating {} artifacts from events".format(len(artifacts)))
+    # Post only what is not on the container yet. A re-run (proofpoint_trap_recheck
+    # flags a changed incident, usually one that gained alerts) rebuilds the list
+    # from the whole incident; without this it re-posted every artifact each
+    # time, hundreds on a large incident, each one an "add artifact" action that
+    # SOAR then rejected as a duplicate -- or kept twice when the content
+    # differed slightly (MIME Body built by both this playbook and
+    # proofpoint_trap_recheck). An artifact is "already there" when one with the
+    # same name and the same identifying value exists; the same set also drops a
+    # repeat within this run (e.g. a URL listed twice in hosts.url).
+    def _artifact_key(name, cef, sdi):
+        if name == "MIME Body":
+            return (name, sdi)
+        if name in ("Sender Email", "Recipient Email"):
+            return (name, cef.get("emailAddress"), cef.get("emailRole"))
+        if name == "Sender Domain":
+            return (name, cef.get("sourceDnsDomain"))
+        if name == "Threat Domain":
+            return (name, cef.get("destinationDnsDomain"))
+        if name == "URL Artifact":
+            return (name, cef.get("requestURL"))
+        if name == "Click Source IP":
+            return (name, cef.get("sourceAddress"))
+        return None
 
-    # Native "add artifact" action parameters (Phantom app, asset "soar8"),
-    # one call per event artifact via dispatch_event_artifacts. Exposed as
-    # parallel per-field LISTS (not one list-of-dicts blob) so that block's
-    # JSON can map each field to a real output variable
-    # (extract_data_to_artifacts:custom_function:<field>) -- declared before
-    # the loop and .append()-ed inside it, the canonical parallel-output-
-    # variable-list shape (matches community playbook
-    # Splunk_Attack_Analyzer_Dynamic_Analysis's normalized_file_summary_output,
-    # see code-blocks.md).
-    #
-    # Fields that vary per artifact get a list: name, cef_dictionary,
-    # contains (cef_types differs by artifact type -- email/domain/ip).
-    # container_id is a single constant (bound to container:id on node 8's
-    # JSON) -- container_id confirmed live 2026-08-15
-    # it's technically omittable (falls back to the run's own container
-    # context), but left explicit since the VPE editor flags the action node
-    # "Unconfigured" without it (found live 2026-08-16). run_automation/
-    # determine_contains are omitted, falling back to the action's own
-    # declared `false` defaults -- that omission does not trigger the same
-    # "Unconfigured" flag.
-    #
-    # source_data_identifier is genuinely mandatory on this action --
-    # confirmed live 2026-08-15 omitting it entirely fails with "Required
-    # parameters are not specified or are blank: ['source_data_identifier']".
-    # A per-artifact uuid4 suffix was used earlier to guarantee uniqueness,
-    # but a live dedup test (2026-08-16: two artifacts posted to the same
-    # container with identical container_id + source_data_identifier + name,
-    # differing only in cef content) created two distinct artifacts with no
-    # merge/collision -- SOAR does not dedup on this key combination, so
-    # reusing the container's own source_data_identifier is safe for most of
-    # this batch. MIME Body artifacts are the one exception (per-item
-    # override via artifacts[i]["source_data_identifier"]) -- see the
-    # comment where they're built above; proofpoint_trap_attachments (PB3)
-    # parses that per-event SDI back apart, so it can't collapse to the
-    # shared incident_id_val like everything else here.
-    extract_data_to_artifacts__name = []
-    extract_data_to_artifacts__label = []
-    extract_data_to_artifacts__cef_dictionary = []
-    extract_data_to_artifacts__contains = []
+    existing_rows = phantom.collect2(
+        container=container,
+        datapath=[
+            "artifact:*.name",
+            "artifact:*.source_data_identifier",
+            "artifact:*.cef.emailAddress",
+            "artifact:*.cef.emailRole",
+            "artifact:*.cef.sourceDnsDomain",
+            "artifact:*.cef.destinationDnsDomain",
+            "artifact:*.cef.requestURL",
+            "artifact:*.cef.sourceAddress",
+        ],
+        scope="all",
+    )
+    existing_keys = set()
+    for row in (existing_rows or []):
+        if not row or not row[0]:
+            continue
+        existing_key = _artifact_key(row[0], {
+            "emailAddress": row[2], "emailRole": row[3], "sourceDnsDomain": row[4],
+            "destinationDnsDomain": row[5], "requestURL": row[6], "sourceAddress": row[7],
+        }, row[1])
+        if existing_key is not None:
+            existing_keys.add(existing_key)
 
+    new_artifacts = []
+    run_keys = set()
+    already_present = 0
     for a in artifacts:
-        extract_data_to_artifacts__name.append(a["name"])
-        extract_data_to_artifacts__label.append(a.get("label", "event"))
-        extract_data_to_artifacts__cef_dictionary.append(json.dumps(a.get("cef", {})))
-        extract_data_to_artifacts__contains.append(json.dumps(a.get("cef_types", {})))
+        key = _artifact_key(a["name"], a.get("cef", {}), a.get("source_data_identifier"))
+        if key is not None:
+            if key in run_keys:
+                continue
+            run_keys.add(key)
+            if key in existing_keys:
+                already_present += 1
+                continue
+        new_artifacts.append(a)
+    artifacts = new_artifacts
 
-    action_params = [
-        {
-            "container_id": id_value,
-            "name": extract_data_to_artifacts__name[i],
-            "label": extract_data_to_artifacts__label[i],
-            "source_data_identifier": artifacts[i].get("source_data_identifier") or incident_id_val,
-            "cef_dictionary": extract_data_to_artifacts__cef_dictionary[i],
-            "contains": extract_data_to_artifacts__contains[i],
-        }
-        for i in range(len(artifacts))
+    phantom.debug("Creating {} new artifacts from events ({} already on the container)".format(
+        len(artifacts), already_present))
+
+    # Parallel lists, one entry per artifact in the same order.
+    # dispatch_artifact_list turns them into one "add artifact" call per
+    # artifact. Every artifact uses the container's source_data_identifier
+    # except MIME Body, which carries its own per-event one
+    # (proofpoint_trap_attachments parses the event id back out of it).
+    build_artifact_list__name = [a["name"] for a in artifacts]
+    build_artifact_list__label = [a.get("label", "event") for a in artifacts]
+    build_artifact_list__source_data_identifier = [
+        a.get("source_data_identifier") or incident_id_val for a in artifacts
     ]
+    build_artifact_list__cef_dictionary = [json.dumps(a.get("cef", {})) for a in artifacts]
+    build_artifact_list__contains = [json.dumps(a.get("cef_types", {})) for a in artifacts]
+    # The fetched incident's id, and how many new artifacts this run posts --
+    # attempted, not confirmed; finalize_detail checks the writes.
+    build_artifact_list__incident_id = incident_id_val
+    build_artifact_list__count = len(artifacts)
+    # Alerts (TRAP "events") this run processed, and the incident's own
+    # event_count as TRAP reports it -- the two can differ.
+    build_artifact_list__alert_count = len(events)
+    build_artifact_list__event_count = incident.get("event_count")
+    # Artifacts this run found already on the container and did not post again.
+    build_artifact_list__already_present = already_present
 
-    phantom.save_run_data(key="extract_data_to_artifacts:action_params", value=json.dumps(action_params))
-    phantom.save_run_data(key="extract_data_to_artifacts:name", value=json.dumps(extract_data_to_artifacts__name))
-    phantom.save_run_data(key="extract_data_to_artifacts:label", value=json.dumps(extract_data_to_artifacts__label))
-    phantom.save_run_data(key="extract_data_to_artifacts:cef_dictionary", value=json.dumps(extract_data_to_artifacts__cef_dictionary))
-    phantom.save_run_data(key="extract_data_to_artifacts:contains", value=json.dumps(extract_data_to_artifacts__contains))
-    # Ground-truth incident_id from the actually-fetched incident (not the
-    # pre-fetch artifact scan above) -- downstream blocks read this instead
-    # of re-deriving it a second time.
-    phantom.save_run_data(key="extract_data_to_artifacts:incident_id", value=json.dumps(incident_id_val))
-    # Attempted count, not verified-success count -- dispatch_event_artifacts
-    # no longer checks per-app_run status after the native "add artifact"
-    # call (see its comment), so this is how many artifacts were built here,
-    # not how many the platform confirmed landing.
-    phantom.save_run_data(key="extract_data_to_artifacts:count", value=str(len(artifacts)))
+    # Also saved as run data: the downstream blocks read these keys with
+    # phantom.get_run_data() in their own custom code.
+    for output_key, output_value in (
+        ("name", build_artifact_list__name),
+        ("label", build_artifact_list__label),
+        ("source_data_identifier", build_artifact_list__source_data_identifier),
+        ("cef_dictionary", build_artifact_list__cef_dictionary),
+        ("contains", build_artifact_list__contains),
+        ("incident_id", build_artifact_list__incident_id),
+        ("count", build_artifact_list__count),
+        ("alert_count", build_artifact_list__alert_count),
+        ("event_count", build_artifact_list__event_count),
+        ("already_present", build_artifact_list__already_present),
+    ):
+        phantom.save_run_data(key="build_artifact_list:" + output_key, value=json.dumps(output_value))
 
-    # Also exposed as real output variables (not just run_data) so native
-    # blocks downstream can bind to them directly via
-    # extract_data_to_artifacts:custom_function:* datapaths, per
-    # constraints.md's "output variables, not save_run_data, when data
-    # feeds native blocks downstream" rule.
-    extract_data_to_artifacts__incident_id = incident_id_val
-    extract_data_to_artifacts__count = len(artifacts)
-
+    ################################################################################
     ################################################################################
     ## Custom Code End
     ################################################################################
 
-    dispatch_event_artifacts(container=container)
+    phantom.save_block_result(key="build_artifact_list__inputs:0:get_trap_incident:action_result.status", value=json.dumps(get_trap_incident_result_item_0))
+    phantom.save_block_result(key="build_artifact_list__inputs:1:get_trap_incident:action_result.data", value=json.dumps(get_trap_incident_result_item_1))
+    phantom.save_block_result(key="build_artifact_list__inputs:2:container:source_data_identifier", value=json.dumps(source_data_identifier_value))
+    phantom.save_block_result(key="build_artifact_list__inputs:3:dispatch_mime_download:action_result.status", value=json.dumps(dispatch_mime_download_result_item_0))
+    phantom.save_block_result(key="build_artifact_list__inputs:4:dispatch_mime_download:action_result.data.*.event_id", value=json.dumps(dispatch_mime_download_result_item_1))
+    phantom.save_block_result(key="build_artifact_list__inputs:5:dispatch_mime_download:action_result.data.*.vault_id", value=json.dumps(dispatch_mime_download_result_item_2))
+    phantom.save_block_result(key="build_artifact_list__inputs:6:dispatch_mime_download:action_result.data.*.file_name", value=json.dumps(dispatch_mime_download_result_item_3))
+
+    phantom.save_block_result(key="build_artifact_list:name", value=json.dumps(build_artifact_list__name))
+    phantom.save_block_result(key="build_artifact_list:label", value=json.dumps(build_artifact_list__label))
+    phantom.save_block_result(key="build_artifact_list:source_data_identifier", value=json.dumps(build_artifact_list__source_data_identifier))
+    phantom.save_block_result(key="build_artifact_list:cef_dictionary", value=json.dumps(build_artifact_list__cef_dictionary))
+    phantom.save_block_result(key="build_artifact_list:contains", value=json.dumps(build_artifact_list__contains))
+    phantom.save_block_result(key="build_artifact_list:incident_id", value=json.dumps(build_artifact_list__incident_id))
+    phantom.save_block_result(key="build_artifact_list:count", value=json.dumps(build_artifact_list__count))
+    phantom.save_block_result(key="build_artifact_list:alert_count", value=json.dumps(build_artifact_list__alert_count))
+    phantom.save_block_result(key="build_artifact_list:event_count", value=json.dumps(build_artifact_list__event_count))
+    phantom.save_block_result(key="build_artifact_list:already_present", value=json.dumps(build_artifact_list__already_present))
+
+    phantom.save_block_result(key="build_artifact_list_called", value="True")
+
+    dispatch_artifact_list(container=container)
 
     return
 
 
 @phantom.playbook_block()
-def dispatch_event_artifacts(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
-    phantom.debug("dispatch_event_artifacts() called")
-
-    ################################################################################
-    # Native action block (Phantom app, "add artifact") -- one parameter set
-    # per event artifact, built by extract_data_to_artifacts. Fires one app_run
-    # per item under this single dispatch. Per-app_run success is not
-    # checked (dropped the former finalize_event_artifacts verification
-    # step, per-item failure isn't treated as actionable here) -- callback
-    # goes straight to prepare_detail_note, which reads the attempted count
-    # extract_data_to_artifacts already saved.
-    ################################################################################
-
-    action_params = json.loads(phantom.get_run_data(key="extract_data_to_artifacts:action_params") or "[]")
-
-    if not action_params:
-        # Nothing to create this run (e.g. incident had no events) --
-        # phantom.act() with an empty parameters list has nothing to
-        # dispatch, so skip straight to the next block.
-        phantom.debug("No event artifacts to create this run")
-        prepare_detail_note(container=container)
-        return
-
-    phantom.act("add artifact", parameters=action_params, name="dispatch_event_artifacts", assets=["soar8"], callback=prepare_detail_note)
-
-    return
-
-
-@phantom.playbook_block()
-def prepare_detail_note(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
+def prepare_detail_note(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
     phantom.debug("prepare_detail_note() called")
 
     ################################################################################
-    # Build the summary note's title/content, exposed as output variables
-    # for the native "add note" action block (dispatch_detail_note) to bind
-    # to -- EXPERIMENT (2026-08-13): testing constraints.md's callback-chain
-    # claim for real instead of just trusting it. finalize_detail (that
-    # action's callback) does the enrichment_complete artifact creation
-    # that used to happen synchronously right after phantom.add_note() in a
-    # single block -- if that artifact still reliably lands and the
-    # playbook_run only completes after it does, the native action is fine
-    # here; if it's missing/racy, the documented rule holds and this gets
-    # reverted.
+    # Build the detail note's title and content.
     ################################################################################
+
+    get_trap_incident_result_data = phantom.collect2(container=container, datapath=["get_trap_incident:action_result.data.*.summary","get_trap_incident:action_result.data.*.event_count","get_trap_incident:action_result.data.*.score","get_trap_incident:action_result.data.*.state"], action_results=results)
+
+    get_trap_incident_result_item_0 = [item[0] for item in get_trap_incident_result_data]
+    get_trap_incident_result_item_1 = [item[1] for item in get_trap_incident_result_data]
+    get_trap_incident_result_item_2 = [item[2] for item in get_trap_incident_result_data]
+    get_trap_incident_result_item_3 = [item[3] for item in get_trap_incident_result_data]
 
     prepare_detail_note__note_title = None
     prepare_detail_note__note_content = None
@@ -667,11 +620,16 @@ def prepare_detail_note(action=None, success=None, container=None, results=None,
     ################################################################################
     ## Custom Code Start
     ################################################################################
+    ################################################################################
 
-    incident_id = json.loads(phantom.get_run_data(key="extract_data_to_artifacts:incident_id") or '"unknown"')
-    artifact_count = phantom.get_run_data(key="extract_data_to_artifacts:count") or "0"
+    incident_id = json.loads(phantom.get_run_data(key="build_artifact_list:incident_id") or '"unknown"')
+    artifact_count = json.loads(phantom.get_run_data(key="build_artifact_list:count") or "0")
+    already_present = json.loads(phantom.get_run_data(key="build_artifact_list:already_present") or "0")
+    alert_count = json.loads(phantom.get_run_data(key="build_artifact_list:alert_count") or "null")
 
-    # Collect incident summary from get_incident
+    # Read without action_results: this block also runs when
+    # dispatch_artifact_list had nothing to create, and then there are no
+    # callback results to narrow by.
     result_data = phantom.collect2(
         container=container,
         datapath=[
@@ -693,16 +651,30 @@ def prepare_detail_note(action=None, success=None, container=None, results=None,
         "**Incident ID:** {}\n"
         "**Summary:** {}\n"
         "**State:** {} | **Score:** {} | **Events:** {}\n"
-        "**Artifacts created from events:** {}\n\n"
+        "**Alerts processed:** {}\n"
+        "**Artifacts from events:** {} new, {} already on the container\n\n"
         "Event artifacts (emails, domains, IPs) have been created on this container."
-    ).format(incident_id, summary, state, score, event_count, artifact_count)
+    ).format(incident_id, summary, state, score, event_count,
+             alert_count if alert_count is not None else "?", artifact_count, already_present)
 
+    # Also saved as run data: dispatch_detail_note reads these keys.
+    phantom.save_run_data(key="prepare_detail_note:note_title", value=json.dumps(prepare_detail_note__note_title))
+    phantom.save_run_data(key="prepare_detail_note:note_content", value=json.dumps(prepare_detail_note__note_content))
+
+    ################################################################################
     ################################################################################
     ## Custom Code End
     ################################################################################
 
-    phantom.save_run_data(key="prepare_detail_note:note_title", value=json.dumps(prepare_detail_note__note_title))
-    phantom.save_run_data(key="prepare_detail_note:note_content", value=json.dumps(prepare_detail_note__note_content))
+    phantom.save_block_result(key="prepare_detail_note__inputs:0:get_trap_incident:action_result.data.*.summary", value=json.dumps(get_trap_incident_result_item_0))
+    phantom.save_block_result(key="prepare_detail_note__inputs:1:get_trap_incident:action_result.data.*.event_count", value=json.dumps(get_trap_incident_result_item_1))
+    phantom.save_block_result(key="prepare_detail_note__inputs:2:get_trap_incident:action_result.data.*.score", value=json.dumps(get_trap_incident_result_item_2))
+    phantom.save_block_result(key="prepare_detail_note__inputs:3:get_trap_incident:action_result.data.*.state", value=json.dumps(get_trap_incident_result_item_3))
+
+    phantom.save_block_result(key="prepare_detail_note:note_title", value=json.dumps(prepare_detail_note__note_title))
+    phantom.save_block_result(key="prepare_detail_note:note_content", value=json.dumps(prepare_detail_note__note_content))
+
+    phantom.save_block_result(key="prepare_detail_note_called", value="True")
 
     dispatch_detail_note(container=container)
 
@@ -710,23 +682,35 @@ def prepare_detail_note(action=None, success=None, container=None, results=None,
 
 
 @phantom.playbook_block()
-def dispatch_detail_note(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
+def dispatch_detail_note(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
     phantom.debug("dispatch_detail_note() called")
 
+    # phantom.debug('Action: {0} {1}'.format(action['name'], ('SUCCEEDED' if success else 'FAILED')))
+
     ################################################################################
-    # Native action block (Phantom app, "add note") -- title/content come
-    # from prepare_detail_note's output variables. This is the block under
-    # test: a native action at the tail of a callback chain, same shape
-    # constraints.md warns about.
+    # Add the detail note to the container.
     ################################################################################
 
-    note_title = json.loads(phantom.get_run_data(key="prepare_detail_note:note_title") or '"unknown"')
-    note_content = json.loads(phantom.get_run_data(key="prepare_detail_note:note_content") or '""')
+    prepare_detail_note__note_title = json.loads(_ if (_ := phantom.get_run_data(key="prepare_detail_note:note_title")) != "" else "null")  # pylint: disable=used-before-assignment
+    prepare_detail_note__note_content = json.loads(_ if (_ := phantom.get_run_data(key="prepare_detail_note:note_content")) != "" else "null")  # pylint: disable=used-before-assignment
 
-    parameters = [{
-        "title": note_title,
-        "content": note_content,
-    }]
+    parameters = []
+
+    if prepare_detail_note__note_title is not None:
+        parameters.append({
+            "title": prepare_detail_note__note_title,
+            "content": prepare_detail_note__note_content,
+        })
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+
+    # Write your custom code here...
+
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
 
     phantom.act("add note", parameters=parameters, name="dispatch_detail_note", assets=["soar8"], callback=finalize_detail)
 
@@ -734,50 +718,55 @@ def dispatch_detail_note(action=None, success=None, container=None, results=None
 
 
 @phantom.playbook_block()
-def finalize_detail(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
+def finalize_detail(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
     phantom.debug("finalize_detail() called")
 
     ################################################################################
-    # Builds the Enrichment Complete artifact's fields as output variables
-    # for the native "add artifact" action block (dispatch_enrichment_complete)
-    # to bind to -- same native-action pattern dispatch_event_artifacts
-    # already uses, replacing the old raw REST POST (removed 2026-08-13,
-    # user decision).
+    # Check the event-artifact and note writes; on success build the Enrichment Complete 
+    # artifact, on a failure record it and stop.
     ################################################################################
+
+    source_data_identifier_value = container.get("source_data_identifier", None)
+    dispatch_detail_note_result_data = phantom.collect2(container=container, datapath=["dispatch_detail_note:action_result.status"], action_results=results)
+    dispatch_artifact_list_result_data = phantom.collect2(container=container, datapath=["dispatch_artifact_list:action_result.status","dispatch_artifact_list:action_result.message"], action_results=results)
+    check_reentry__run_index = json.loads(_ if (_ := phantom.get_run_data(key="check_reentry:run_index")) != "" else "null")  # pylint: disable=used-before-assignment
+    build_artifact_list__alert_count = json.loads(_ if (_ := phantom.get_run_data(key="build_artifact_list:alert_count")) != "" else "null")  # pylint: disable=used-before-assignment
+    build_artifact_list__event_count = json.loads(_ if (_ := phantom.get_run_data(key="build_artifact_list:event_count")) != "" else "null")  # pylint: disable=used-before-assignment
+    build_artifact_list__already_present = json.loads(_ if (_ := phantom.get_run_data(key="build_artifact_list:already_present")) != "" else "null")  # pylint: disable=used-before-assignment
+
+    dispatch_detail_note_result_item_0 = [item[0] for item in dispatch_detail_note_result_data]
+    dispatch_artifact_list_result_item_0 = [item[0] for item in dispatch_artifact_list_result_data]
+    dispatch_artifact_list_result_message = [item[1] for item in dispatch_artifact_list_result_data]
 
     finalize_detail__cef_dictionary = None
 
     ################################################################################
     ## Custom Code Start
     ################################################################################
+    ################################################################################
 
-    # incident_id from the container's own native source_data_identifier
-    # field (set by the connector at ingestion) -- declared as a real input
-    # datapath (container:source_data_identifier) instead of reached into
-    # implicitly via container.get(), same as container:id already is on
-    # dispatch_event_artifacts/dispatch_enrichment_complete.
     sdi_rows = phantom.collect2(container=container, datapath=["container:source_data_identifier"])
     incident_id = sdi_rows[0][0] if sdi_rows and sdi_rows[0] and sdi_rows[0][0] else "unknown"
-    artifact_count = phantom.get_run_data(key="extract_data_to_artifacts:count") or "0"
+    artifact_count = json.loads(phantom.get_run_data(key="build_artifact_list:count") or "0")
 
     note_result = phantom.collect2(container=container, datapath=["dispatch_detail_note:action_result.status"])
     note_status = note_result[0][0] if note_result and note_result[0] else "unknown"
     phantom.debug("Native add note action result: {}".format(note_status))
 
-    # A failed platform write must not read as success. If the event
-    # artifacts or the detail note failed, record an error note and an
-    # "Enrichment Failed" signal through the synchronous API (which runs as
-    # the playbook, not through the soar8 asset that just failed) and stop
-    # before "Enrichment Complete" is written, so the re-entry guard lets a
-    # later run retry.
-    # A re-run (after proofpoint_trap_recheck flags a change) re-posts artifacts
-    # an earlier run already created; SOAR rejects those with "already exists",
-    # which is the dedup this UC relies on -- not a failed write.
+    # A failed platform write must not read as success. If the event artifacts
+    # or the detail note failed, record an error note and an "Enrichment
+    # Failed" artifact through the synchronous API (which runs as the playbook,
+    # not through the asset whose write just failed) and stop before "Enrichment
+    # Complete" is written, so check_reentry lets a later run retry.
+    # build_artifact_list skips what is already on the container, but a
+    # concurrent run (or proofpoint_trap_recheck) can post the same artifact
+    # between that check and this run's write; SOAR rejects it with "already
+    # exists", which is expected, not a failed write.
     event_rows = phantom.collect2(
         container=container,
         datapath=[
-            "dispatch_event_artifacts:action_result.status",
-            "dispatch_event_artifacts:action_result.message",
+            "dispatch_artifact_list:action_result.status",
+            "dispatch_artifact_list:action_result.message",
         ],
     )
     event_statuses = [row[0] for row in (event_rows or []) if row]
@@ -803,33 +792,49 @@ def finalize_detail(action=None, success=None, container=None, results=None, han
             phantom.error("Failed to create enrichment_failed artifact: {}".format(signal_message))
         return
 
-    # name/label/contains/run_automation/determine_contains/
-    # source_data_identifier never vary for this artifact -- those are
-    # literal defaults / omitted on the action step itself
-    # (dispatch_enrichment_complete) instead of being routed through here.
-    # Only cef_dictionary (JSON encoding -- native "add artifact" takes cef
-    # as a string, not a structured object) actually needs code.
-    # Native "add artifact" has no "description" parameter (same gap
-    # extract_data_to_artifacts's own event artifacts already have -- see
-    # dispatch_event_artifacts) -- folded the old description text into
-    # cef.message instead so it isn't lost outright.
-    # runIndex makes each run's Enrichment Complete artifact distinct content,
-    # so a re-run's signal is not rejected as a duplicate of the previous one --
-    # what on_start's count-based guard assumes (it compares how many
-    # "Enrichment Complete" artifacts exist against "Event Info Update" ones).
-    run_index = phantom.get_run_data(key="on_start:run_index") or "0"
+    # "add artifact" has no description parameter, so the summary goes into
+    # cef.message. runIndex makes each run's Enrichment Complete artifact
+    # distinct content, so a re-run's signal is not rejected as a duplicate of
+    # the previous one -- check_reentry's count depends on that.
+    run_index = json.loads(phantom.get_run_data(key="check_reentry:run_index") or "0") or 0
+    # alertCount: alerts (TRAP "events") this run processed -- what drives
+    # the artifact count. eventCount: the incident's event_count as TRAP
+    # reports it. artifactsCreated: new artifacts this run posted;
+    # artifactsAlreadyPresent: ones it found on the container and skipped.
+    alert_count = json.loads(phantom.get_run_data(key="build_artifact_list:alert_count") or "null")
+    event_count = json.loads(phantom.get_run_data(key="build_artifact_list:event_count") or "null")
+    already_present = json.loads(phantom.get_run_data(key="build_artifact_list:already_present") or "0")
 
     finalize_detail__cef_dictionary = json.dumps({
-        "message": "TRAP incident {} detail extraction complete. {} artifacts created.".format(incident_id, artifact_count),
+        "message": "TRAP incident {} detail extraction complete. {} alerts, {} new artifacts, {} already on the container.".format(
+            incident_id, alert_count if alert_count is not None else "?", artifact_count, already_present),
+        "alertCount": alert_count,
+        "eventCount": event_count,
         "artifactsCreated": int(artifact_count),
+        "artifactsAlreadyPresent": int(already_present),
         "runIndex": int(run_index),
     })
 
+    # Also saved as run data: dispatch_enrichment_complete reads this key.
+    phantom.save_run_data(key="finalize_detail:cef_dictionary", value=json.dumps(finalize_detail__cef_dictionary))
+
+    ################################################################################
     ################################################################################
     ## Custom Code End
     ################################################################################
 
-    phantom.save_run_data(key="finalize_detail:cef_dictionary", value=json.dumps(finalize_detail__cef_dictionary))
+    phantom.save_block_result(key="finalize_detail__inputs:0:dispatch_detail_note:action_result.status", value=json.dumps(dispatch_detail_note_result_item_0))
+    phantom.save_block_result(key="finalize_detail__inputs:1:container:source_data_identifier", value=json.dumps(source_data_identifier_value))
+    phantom.save_block_result(key="finalize_detail__inputs:2:dispatch_artifact_list:action_result.status", value=json.dumps(dispatch_artifact_list_result_item_0))
+    phantom.save_block_result(key="finalize_detail__inputs:3:dispatch_artifact_list:action_result.message", value=json.dumps(dispatch_artifact_list_result_message))
+    phantom.save_block_result(key="finalize_detail__inputs:4:check_reentry:custom_function:run_index", value=json.dumps(check_reentry__run_index))
+    phantom.save_block_result(key="finalize_detail__inputs:5:build_artifact_list:custom_function:alert_count", value=json.dumps(build_artifact_list__alert_count))
+    phantom.save_block_result(key="finalize_detail__inputs:6:build_artifact_list:custom_function:event_count", value=json.dumps(build_artifact_list__event_count))
+    phantom.save_block_result(key="finalize_detail__inputs:7:build_artifact_list:custom_function:already_present", value=json.dumps(build_artifact_list__already_present))
+
+    phantom.save_block_result(key="finalize_detail:cef_dictionary", value=json.dumps(finalize_detail__cef_dictionary))
+
+    phantom.save_block_result(key="finalize_detail_called", value="True")
 
     dispatch_enrichment_complete(container=container)
 
@@ -837,57 +842,229 @@ def finalize_detail(action=None, success=None, container=None, results=None, han
 
 
 @phantom.playbook_block()
-def dispatch_enrichment_complete(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
+def dispatch_artifact_list(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
+    phantom.debug("dispatch_artifact_list() called")
+
+    # phantom.debug('Action: {0} {1}'.format(action['name'], ('SUCCEEDED' if success else 'FAILED')))
+
+    ################################################################################
+    # Create the event artifacts, one add artifact call per artifact.
+    ################################################################################
+
+    id_value = container.get("id", None)
+    build_artifact_list__name = json.loads(_ if (_ := phantom.get_run_data(key="build_artifact_list:name")) != "" else "null")  # pylint: disable=used-before-assignment
+    build_artifact_list__label = json.loads(_ if (_ := phantom.get_run_data(key="build_artifact_list:label")) != "" else "null")  # pylint: disable=used-before-assignment
+    build_artifact_list__contains = json.loads(_ if (_ := phantom.get_run_data(key="build_artifact_list:contains")) != "" else "null")  # pylint: disable=used-before-assignment
+    build_artifact_list__cef_dictionary = json.loads(_ if (_ := phantom.get_run_data(key="build_artifact_list:cef_dictionary")) != "" else "null")  # pylint: disable=used-before-assignment
+    build_artifact_list__source_data_identifier = json.loads(_ if (_ := phantom.get_run_data(key="build_artifact_list:source_data_identifier")) != "" else "null")  # pylint: disable=used-before-assignment
+
+    parameters = []
+
+    if build_artifact_list__source_data_identifier is not None:
+        parameters.append({
+            "name": build_artifact_list__name,
+            "label": build_artifact_list__label,
+            "contains": build_artifact_list__contains,
+            "container_id": id_value,
+            "cef_dictionary": build_artifact_list__cef_dictionary,
+            "source_data_identifier": build_artifact_list__source_data_identifier,
+        })
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+    ################################################################################
+
+    # The parameters the VPE builds above are ONE set whose every field is a
+    # whole list. "add artifact" has to run once per artifact, so this replaces
+    # them with one set per list item; phantom.act() below then runs one app_run
+    # per set, on whichever asset this block selects. The fan-out lives here,
+    # in this block's custom code, because that is the part a VPE save keeps
+    # verbatim -- the generated code above is rebuilt from the bindings on
+    # every save. It reads the run data directly rather than the generated
+    # variables, so it does not depend on how the VPE names them.
+    artifact_names = json.loads(phantom.get_run_data(key="build_artifact_list:name") or "null") or []
+    artifact_labels = json.loads(phantom.get_run_data(key="build_artifact_list:label") or "null") or []
+    artifact_sdis = json.loads(phantom.get_run_data(key="build_artifact_list:source_data_identifier") or "null") or []
+    artifact_cefs = json.loads(phantom.get_run_data(key="build_artifact_list:cef_dictionary") or "null") or []
+    artifact_contains = json.loads(phantom.get_run_data(key="build_artifact_list:contains") or "null") or []
+
+    parameters = []
+    for index, artifact_name in enumerate(artifact_names):
+        parameters.append({
+            "name": artifact_name,
+            "label": artifact_labels[index],
+            "contains": artifact_contains[index],
+            "container_id": container.get("id"),
+            "cef_dictionary": artifact_cefs[index],
+            "source_data_identifier": artifact_sdis[index],
+        })
+
+    if not parameters:
+        # Nothing to create (an incident with no events): phantom.act() has
+        # nothing to dispatch, so go straight to the detail note.
+        phantom.debug("No event artifacts to create this run")
+        prepare_detail_note(container=container)
+        return
+
+    ################################################################################
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
+    phantom.act("add artifact", parameters=parameters, name="dispatch_artifact_list", assets=["soar8"], callback=prepare_detail_note)
+
+    return
+
+
+@phantom.playbook_block()
+def dispatch_enrichment_complete(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
     phantom.debug("dispatch_enrichment_complete() called")
 
+    # phantom.debug('Action: {0} {1}'.format(action['name'], ('SUCCEEDED' if success else 'FAILED')))
+
     ################################################################################
-    # Native action block (Phantom app, "add artifact") -- creates the
-    # Enrichment Complete signal artifact. True last step of PB1; no
-    # callback -- terminal, matches cyberark_rotation_orchestrator's own
-    # add_note_no_targets precedent (a phantom.act() call with no callback
-    # param). SOAR reaches on_finish once every branch completes.
-    # name/label/contains/run_automation/determine_contains are literal
-    # constants here and in the JSON node's parameter config. container_id
-    # bound to container:id -- technically omittable (falls back to the
-    # run's own container context, confirmed live 2026-08-15), but left
-    # explicit since the VPE editor flags the action node "Unconfigured"
-    # without it (found live 2026-08-16). source_data_identifier bound
-    # directly to container:source_data_identifier (single artifact per run,
-    # container's own native field maps 1:1) -- only cef_dictionary is
-    # genuinely computed, from finalize_detail's run data.
+    # Create the Enrichment Complete artifact, the playbook's last step.
     ################################################################################
 
-    sdi_rows = phantom.collect2(container=container, datapath=["container:source_data_identifier"])
-    source_data_identifier = sdi_rows[0][0] if sdi_rows and sdi_rows[0] and sdi_rows[0][0] else ""
-    cef_dictionary = json.loads(phantom.get_run_data(key="finalize_detail:cef_dictionary") or '""')
+    id_value = container.get("id", None)
+    source_data_identifier_value = container.get("source_data_identifier", None)
+    finalize_detail__cef_dictionary = json.loads(_ if (_ := phantom.get_run_data(key="finalize_detail:cef_dictionary")) != "" else "null")  # pylint: disable=used-before-assignment
 
-    parameters = [{
-        "container_id": container.get("id"),
-        "name": "Enrichment Complete",
-        "label": "enrichment_complete",
-        "source_data_identifier": source_data_identifier,
-        "cef_dictionary": cef_dictionary,
-        "contains": "{}",
-        "run_automation": False,
-        "determine_contains": False,
-    }]
+    parameters = []
+
+    if source_data_identifier_value is not None:
+        parameters.append({
+            "name": "Enrichment Complete",
+            "label": "enrichment_complete",
+            "container_id": id_value,
+            "cef_dictionary": finalize_detail__cef_dictionary,
+            "source_data_identifier": source_data_identifier_value,
+        })
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+
+    # Write your custom code here...
+
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
 
     phantom.act("add artifact", parameters=parameters, name="dispatch_enrichment_complete", assets=["soar8"])
 
     return
 
 
+@phantom.playbook_block()
+def dispatch_mime_download(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
+    phantom.debug("dispatch_mime_download() called")
+
+    # phantom.debug('Action: {0} {1}'.format(action['name'], ('SUCCEEDED' if success else 'FAILED')))
+
+    ################################################################################
+    # Download and vault the original email of every event on the incident.
+    ################################################################################
+
+    filtered_artifact_0_data_filter_event_info = phantom.collect2(container=container, datapath=["filtered-data:filter_event_info:condition_1:artifact:*.cef.incidentId","filtered-data:filter_event_info:condition_1:artifact:*.id"], scope="all")
+
+    parameters = []
+
+    # build parameters list for 'dispatch_mime_download' call
+    for filtered_artifact_0_item_filter_event_info in filtered_artifact_0_data_filter_event_info:
+        if filtered_artifact_0_item_filter_event_info[0] is not None:
+            parameters.append({
+                "incident_id": filtered_artifact_0_item_filter_event_info[0],
+                "context": {'artifact_id': filtered_artifact_0_item_filter_event_info[1]},
+            })
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+
+    # Write your custom code here...
+
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
+    phantom.act("download mime body", parameters=parameters, name="dispatch_mime_download", assets=["proofpoint_trap_mock"], callback=build_artifact_list)
+
+    return
+
+
+@phantom.playbook_block()
+def check_reentry(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
+    phantom.debug("check_reentry() called")
+
+    ################################################################################
+    # Decide whether this trigger needs an enrichment run.
+    ################################################################################
+
+    check_reentry__run_index = None
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+    ################################################################################
+
+    # This playbook fires on every artifact_created event on the container, so
+    # this block decides whether this trigger needs an enrichment run. It is a
+    # code block rather than code in on_start because the VPE regenerates
+    # on_start on every save and would drop it.
+    #
+    # Runs when no "Enrichment Complete" exists yet, or when there are at least
+    # as many "Event Info Update" artifacts (written by proofpoint_trap_recheck
+    # on a changed incident) as "Enrichment Complete" ones. "Enrichment Failed"
+    # is not counted, so a failed run can be retried. scope="all" because the
+    # artifacts that decide this were created by earlier triggers.
+    rows = phantom.collect2(container=container, datapath=["artifact:*.name"], scope="all")
+    names = [row[0] for row in (rows or []) if row and row[0]]
+    enrichment_complete_count = names.count("Enrichment Complete")
+    event_info_update_count = names.count("Event Info Update")
+
+    if enrichment_complete_count > 0 and event_info_update_count < enrichment_complete_count:
+        phantom.debug(
+            "Enrichment already complete ({} run(s)) with no unconsumed Event Info Update "
+            "artifact ({} total) -- skipping".format(enrichment_complete_count, event_info_update_count)
+        )
+        return
+
+    # This run's index: 0 on the first run, then the number of Event Info
+    # Update artifacts seen so far. finalize_detail puts it into this run's
+    # Enrichment Complete artifact, so each run's signal is new content and the
+    # count above can move past 1.
+    check_reentry__run_index = event_info_update_count
+    phantom.save_run_data(key="check_reentry:run_index", value=json.dumps(check_reentry__run_index))
+
+    ################################################################################
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
+    phantom.save_block_result(key="check_reentry:run_index", value=json.dumps(check_reentry__run_index))
+
+    phantom.save_block_result(key="check_reentry_called", value="True")
+
+    filter_event_info(container=container)
+
+    return
+
+
+@phantom.playbook_block()
 def on_finish(container, summary):
     phantom.debug("on_finish() called")
 
     ################################################################################
     ## Custom Code Start
     ################################################################################
+    ################################################################################
 
-    # dispatch_enrichment_complete is terminal (no callback), so its result
-    # is only visible here. Surface a failure instead of letting the run read
-    # as a clean success; with no "Enrichment Complete" artifact the re-entry
-    # guard already lets a later run redo the enrichment.
+    # dispatch_enrichment_complete has no callback, so its result is only
+    # visible here. Surface a failure instead of letting the run read as a
+    # clean success; with no "Enrichment Complete" artifact, check_reentry
+    # already lets a later run redo the enrichment.
     signal_rows = phantom.collect2(
         container=container,
         datapath=[
@@ -904,6 +1081,7 @@ def on_finish(container, summary):
         phantom.error(msg)
         phantom.add_note(container=container, note_type="general", title="TRAP Detail - Write failures", content=msg)
 
+    ################################################################################
     ################################################################################
     ## Custom Code End
     ################################################################################
