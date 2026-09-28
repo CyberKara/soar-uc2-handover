@@ -1,0 +1,14 @@
+{
+  "name": "soar8",
+  "app_name": "Phantom",
+  "configuration": {
+    "auth_token": "<<SET ME \u2014 see HANDOVER.md, re-enter from your vault/CMDB>>",
+    "phantom_server": "<<SET ME \u2014 this was the LAB's own internal address, not a real target address. Replace with your target system's real value.>>",
+    "verify_certificate": false
+  },
+  "redacted_fields": [
+    "auth_token",
+    "phantom_server"
+  ],
+  "note": "Reference for manually configuring this asset via Apps > Configure New Asset in the target SOAR GUI. Not a REST-postable creation payload \u2014 asset creation semantics differ from the read-merge-write update pattern used elsewhere in this toolchain, and this has not been verified as directly importable. This asset is SOAR's own app (add artifact / add note on this SOAR). The automation user whose token goes in auth_token needs a role that can edit containers (e.g. Automation); without one every artifact and note write fails with HTTP 403 while the playbook run still reports success."
+}

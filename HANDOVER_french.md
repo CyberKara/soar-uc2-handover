@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Paquet de transfert (déploiement air-gapped)
 
-Généré le 2026-09-28 16:10 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
+Généré le 2026-09-28 16:25 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
 
 Ce paquet est autonome — tout ce qu'il faut pour déployer ce cas d'usage manuellement
 dans un environnement sans accès réseau vers ce dépôt ni vers `soar8`.
@@ -50,6 +50,19 @@ d'installation.
      **Une identité doit correspondre au justificatif saisi à côté d'elle** — un vrai mot
      de passe associé à un nom d'utilisateur résiduel de l'environnement source ne
      s'authentifie auprès de rien et renvoie une erreur HTTP 401.
+
+   **Nommez chaque asset exactement comme ci-dessous.** Les playbooks choisissent leurs
+   assets par leur nom, fixé à leur construction. Un asset nommé autrement les laisse
+   pointer vers rien, et les rediriger oblige à modifier le playbook dans le VPE — ce qui
+   casse tout playbook listé plus bas sous « Ne pas réenregistrer ces playbooks dans le
+   VPE ».
+
+   | Nom de l'asset | Application | Utilisé par | Modèle |
+   |---|---|---|---|
+   | `proofpoint_trap_mock` | Proofpoint TRAP | `proofpoint_trap_acknowledge`, `proofpoint_trap_close`, `proofpoint_trap_detail`, `proofpoint_trap_recheck` | `assets/proofpoint_trap_mock.json` |
+   | `smtp` | SMTP | `proofpoint_trap_isolation_notify` | `assets/smtp.json` |
+   | `soar8` | Phantom | `proofpoint_trap_detail` | `assets/soar8.json` |
+
 3. **Créer la/les liste(s) personnalisée(s)** à partir de `custom_lists/*.json` — chaque
    fichier contient le tableau `content` exact (ligne d'en-tête seule, jamais les lignes de données de la source) à
    envoyer en POST vers `/rest/decided_list` :
@@ -80,6 +93,25 @@ une ligne saisie à la main est relue comme un état réel et le fera réagir à
 
 Consultez le document de plan d'implémentation dans `docs/` pour savoir ce que le
 playbook y stocke et à quel moment.
+
+## [!] Ne pas réenregistrer ces playbooks dans le VPE
+
+Consulter un playbook dans le VPE ne pose aucun problème. L'**enregistrer** fait
+régénérer son code par SOAR à partir de sa définition, et pour les blocs ci-dessous le
+code régénéré est faux. Chacun a été écrit pour lancer une action par élément ; le bloc
+régénéré est renommé avec un suffixe `_0` et envoie une **seule** action, tous les
+éléments étant joints par des virgules en une seule valeur. Cette action échoue alors —
+par exemple `Could not load JSON from CEF parameter ... Extra data` — ou crée en silence
+un seul élément mal formé au lieu de plusieurs.
+
+- `proofpoint_trap_detail` — bloc `dispatch_event_artifacts`
+- `proofpoint_trap_recheck` — bloc `dispatch_mime_refetch`
+
+Une action `<bloc>_0` dans une exécution de playbook en est le signe. Pour corriger,
+importez de nouveau le `.tgz` de ce playbook depuis `playbooks/`, comme à l'étape
+d'installation ci-dessus, puis réactivez-le s'il s'agit d'un playbook d'automatisation.
+Modifiez ce qui entoure le playbook — les noms d'assets avant tout — plutôt que le
+playbook lui-même.
 
 ## Vérification
 

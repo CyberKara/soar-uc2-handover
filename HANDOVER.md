@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Air-Gapped Handover Package
 
-Generated 2026-09-28 16:10 UTC from `proofpoint_trap` (source env: `soar8`).
+Generated 2026-09-28 16:25 UTC from `proofpoint_trap` (source env: `soar8`).
 
 This package is self-contained — everything needed to deploy this use case by hand
 in an environment with no network access back to this repo or to `soar8`.
@@ -46,6 +46,18 @@ previous package. On a completely fresh target, skip to Install order.
      here. Enter the values *your* target system expects. **An identity must match the
      credential you enter beside it** — a real password paired with a leftover username
      from the source environment authenticates as nothing and returns HTTP 401.
+
+   **Name each asset exactly as below.** The playbooks select their assets by name,
+   fixed when they were built. An asset named differently leaves them pointing at
+   nothing, and re-pointing them means editing the playbook in the VPE — which breaks
+   any playbook listed under "Do not re-save these playbooks in the VPE" below.
+
+   | Asset name | App | Used by | Template |
+   |---|---|---|---|
+   | `proofpoint_trap_mock` | Proofpoint TRAP | `proofpoint_trap_acknowledge`, `proofpoint_trap_close`, `proofpoint_trap_detail`, `proofpoint_trap_recheck` | `assets/proofpoint_trap_mock.json` |
+   | `smtp` | SMTP | `proofpoint_trap_isolation_notify` | `assets/smtp.json` |
+   | `soar8` | Phantom | `proofpoint_trap_detail` | `assets/soar8.json` |
+
 3. **Create the custom list(s)** from `custom_lists/*.json` — each file has the exact
    `content` array (header row only, never the source's data rows) to POST to `/rest/decided_list`:
    ```bash
@@ -71,6 +83,23 @@ are read back as real state and will make it act on things that never happened.
 - `proofpoint_trap_recheck_state`: `incident_id, signature` — written by the playbook, not by you.
 
 See the copied implementation plan doc in `docs/` for what the playbook stores and when.
+
+## [!] Do not re-save these playbooks in the VPE
+
+Viewing a playbook in the VPE is fine. **Saving** it makes SOAR regenerate the
+playbook's code from its definition, and for the blocks below the regenerated code is
+wrong. Each was written to run one action per item; the regenerated block is renamed
+with a `_0` suffix and sends a **single** action with every item comma-joined into one
+value. That action then fails — e.g. `Could not load JSON from CEF parameter ...
+Extra data` — or silently creates one malformed item instead of many.
+
+- `proofpoint_trap_detail` — block `dispatch_event_artifacts`
+- `proofpoint_trap_recheck` — block `dispatch_mime_refetch`
+
+A `<block>_0` action in a playbook run is the sign. To recover, import that playbook's
+`.tgz` from `playbooks/` again, as in the install step above, and re-activate it if it
+is an automation playbook. Change what surrounds the playbook — asset names above all —
+rather than the playbook itself.
 
 ## Verification
 
