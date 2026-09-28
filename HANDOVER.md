@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Air-Gapped Handover Package
 
-Generated 2026-09-24 15:52 UTC from `proofpoint_trap` (source env: `soar8`).
+Generated 2026-09-28 15:47 UTC from `proofpoint_trap` (source env: `soar8`).
 
 This package is self-contained — everything needed to deploy this use case by hand
 in an environment with no network access back to this repo or to `soar8`.
@@ -11,7 +11,7 @@ in an environment with no network access back to this repo or to `soar8`.
 
 | Path | What |
 |------|------|
-| `connectors/` | Connector app package(s): proofpoint_trap-v1.0.34.tgz |
+| `connectors/` | Connector app package(s): proofpoint_trap-v1.0.35.tgz |
 | `connectors/source/` | Same connector(s), extracted — for reading, not for import |
 | `playbooks/*.tgz` (CFs) | proofpoint_trap_extract_incident_id |
 | `playbooks/*.tgz` (PBs) | proofpoint_trap_detail, proofpoint_trap_triage, proofpoint_trap_attachments, proofpoint_trap_acknowledge, proofpoint_trap_close, proofpoint_trap_isolation_notify, proofpoint_trap_recheck |
@@ -19,6 +19,13 @@ in an environment with no network access back to this repo or to `soar8`.
 | `assets/*.json` | Asset config templates (credentials redacted — see below) |
 | `custom_lists/*.json` | Custom list schema (header row only — see the custom-list section below) |
 | `docs/` | Implementation plan doc, for full design context |
+
+## [!] Upgrading over an earlier install — read this first
+
+These apply only if this app is already installed on the target from a
+previous package. On a completely fresh target, skip to Install order.
+
+- **Connector v1.0.35 fixes `download mime body`, which failed on every event against a real TRAP appliance** (v1.0.34 and older called an endpoint TRAP does not have). Install it over the existing Proofpoint TRAP app: a normal in-place upgrade. The asset, its API key and every playbook stay as they are — nothing to re-import, nothing to re-enter. **Incidents processed before the upgrade keep no emails:** `proofpoint_trap_detail` marked them `Enrichment Complete` although the email download failed, and it does not run again on a completed container. New incidents, and any incident `proofpoint_trap_recheck` sees change, get their emails and attachments normally. To fetch an older incident's emails by hand, run `download mime body` on its container with the incident id: the `.eml` files land in the container's Files (Vault), but no `MIME Body` artifact is created, so `proofpoint_trap_attachments` does not process them.
 
 ## Install order
 

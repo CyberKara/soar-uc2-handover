@@ -18,7 +18,10 @@ INCIDENTS_PATH = "/api/incidents"
 INCIDENT_DETAIL_PATH = "/api/incidents/{}.json"
 INCIDENT_CLOSE_PATH = "/api/incidents/{}/close.json"
 INCIDENT_COMMENT_PATH = "/api/incidents/{}/comments.json"
-INCIDENT_EVENT_MIME_PATH = "/api/incidents/{}/events/{}/mime"
+# Alert API: an incident's events[] are its alerts, so this takes an
+# events[].id. Needs "Accept: message/rfc822" (vendor doc, "Download
+# Original Abuse Messages").
+ALERT_ORIGINAL_MSG_PATH = "/api/v1/alerts/{}/download_original_msg"
 INCIDENT_USERS_PATH = "/api/incidents/{}/users.json"
 INCIDENT_DESCRIPTION_PATH = "/api/incidents/{}/description.json"
 INCIDENT_TEAM_ASSIGNEE_PATH = "/api/incidents/{}/team_and_assignee.json"
@@ -50,4 +53,4 @@ ERR_CONNECTION = "API Error: Unable to connect to Proofpoint TRAP at {}"
 ERR_SSL = "API Error: SSL error — check verify_ssl setting"
 ERR_TIMEOUT = "API Error: Request timed out after {} seconds"
 ERR_AUTH = "Auth Error: Invalid API key — verify key in TRAP System Settings"
-ERR_EVENT_NOT_FOUND = "Event {} not found on incident {}"
+ERR_EVENT_NOT_FOUND = "No original message for event {} (HTTP 404) -- not an alert id, or the alert has no stored message"

@@ -10,7 +10,7 @@
     "logo_dark": "logo_dark.svg",
     "publisher": "Ted",
     "license": "Copyright (c) 2026",
-    "app_version": "1.0.34",
+    "app_version": "1.0.35",
     "utctime_updated": "2026-08-20T00:00:00.000000Z",
     "package_name": "phantom_proofpoint_trap",
     "main_module": "proofpoint_trap_connector.py",
@@ -371,7 +371,7 @@
         {
             "action": "download mime body",
             "identifier": "download_mime_body",
-            "description": "Download the raw MIME body for one or all events of a TRAP incident and store it in the Vault (Incidents API, /api/incidents)",
+            "description": "Download the raw MIME body for one or all events of a TRAP incident and store it in the Vault (Alert API, /api/v1/alerts/{id}/download_original_msg)",
             "verbose": "Fetches the raw MIME (.eml) content for a specific event (or, if event_id is omitted, every event) on a TRAP incident, saves it to the SOAR Vault, and returns the vault_id so analysts/playbooks can review or attach the original email.",
             "type": "investigate",
             "read_only": true,
@@ -387,7 +387,7 @@
                     ]
                 },
                 "event_id": {
-                    "description": "Specific event ID to fetch MIME for (omit to fetch MIME for every event on the incident)",
+                    "description": "Specific event (alert) ID to fetch MIME for (omit to fetch MIME for every event on the incident)",
                     "data_type": "string",
                     "required": false,
                     "order": 1

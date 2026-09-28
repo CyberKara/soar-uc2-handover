@@ -340,29 +340,41 @@ class ProofpointTrapConnector(BaseConnector):
     # MIME body helpers (shared by the on-demand action and on_poll)
     # ------------------------------------------------------------------
 
-    def _fetch_incident_events(self, incident_id):
-        """Fetch the full incident (expand_events=true) and return its events list."""
+    def _fetch_incident_events(self, action_result, incident_id):
+        """Fetch the full incident (expand_events=true) and return its events list.
+
+        Returns:
+            tuple: (status, events) — RetVal pattern; on failure the reason
+            is already set on action_result.
+        """
         url = "{}{}".format(self._base_url, INCIDENT_DETAIL_PATH.format(incident_id))
         ret_val, incident = self._make_rest_call(
-            "GET", url, None, params={"expand_events": "true"}
+            "GET", url, action_result, params={"expand_events": "true"}
         )
-        if phantom.is_fail(ret_val) or not isinstance(incident, dict):
-            return []
-        return incident.get("events", []) or []
+        if phantom.is_fail(ret_val):
+            return ret_val, []
+        if not isinstance(incident, dict):
+            return action_result.set_status(
+                phantom.APP_ERROR,
+                "Unexpected incident {} response: expected a JSON object".format(incident_id),
+            ), []
+        return phantom.APP_SUCCESS, incident.get("events", []) or []
 
     def _download_and_vault_mime(self, incident_id, event_id, container_id):
-        """Download raw MIME for one event and store it in the Vault.
+        """Download raw MIME for one event (alert) and store it in the Vault.
 
         Returns:
             tuple: (status, vault_id, file_name, error_message) — RetVal
             pattern; vault_id/file_name are None on failure.
         """
-        url = "{}{}".format(
-            self._base_url, INCIDENT_EVENT_MIME_PATH.format(incident_id, event_id)
-        )
+        path = ALERT_ORIGINAL_MSG_PATH.format(event_id)
+        url = "{}{}".format(self._base_url, path)
         try:
+            # The session's JSON Accept/Content-Type would ask for the wrong
+            # representation; None drops the session value for this call.
             response = self._session.request(
-                "GET", url, timeout=self._timeout, verify=self._verify
+                "GET", url, timeout=self._timeout, verify=self._verify,
+                headers={"Accept": "message/rfc822", "Content-Type": None},
             )
         except requests.exceptions.SSLError:
             return phantom.APP_ERROR, None, None, ERR_SSL
@@ -373,12 +385,25 @@ class ProofpointTrapConnector(BaseConnector):
         except Exception as e:
             return phantom.APP_ERROR, None, None, "API Error: Unexpected error — {}".format(str(e))
 
-        if response.status_code == 404:
-            return phantom.APP_ERROR, None, None, ERR_EVENT_NOT_FOUND.format(event_id, incident_id)
-        if response.status_code in (401, 403):
+        status_code = response.status_code
+        content_type = response.headers.get("Content-Type", "")
+        snippet = " ".join(response.text[:150].split()) if response.content else "(empty body)"
+
+        if status_code == 404:
+            return phantom.APP_ERROR, None, None, "{} [GET {}: {}]".format(
+                ERR_EVENT_NOT_FOUND.format(event_id), path, snippet)
+        if status_code in (401, 403):
             return phantom.APP_ERROR, None, None, ERR_AUTH
-        if response.status_code != 200:
-            return phantom.APP_ERROR, None, None, "API Error: HTTP {}".format(response.status_code)
+        if status_code != 200:
+            return phantom.APP_ERROR, None, None, "API Error: HTTP {} [GET {}: {}]".format(
+                status_code, path, snippet)
+        # A 200 that is a web page or a JSON body is not a message -- vaulting
+        # it as .eml would hand PB3 a fake email and report success.
+        if not response.content or "html" in content_type or "json" in content_type:
+            return phantom.APP_ERROR, None, None, (
+                "Unexpected response for event {}: HTTP 200, Content-Type {!r}, "
+                "expected message/rfc822 [GET {}: {}]".format(
+                    event_id, content_type, path, snippet))
 
         file_name = "trap-{}-{}.eml".format(incident_id, event_id)
         try:
@@ -981,7 +1006,12 @@ class ProofpointTrapConnector(BaseConnector):
         if raw_event_id not in (None, ""):
             event_ids = [raw_event_id]
         else:
-            events = self._fetch_incident_events(incident_id)
+            ret_val, events = self._fetch_incident_events(action_result, incident_id)
+            if phantom.is_fail(ret_val):
+                message = "Could not list the events of incident {}: {}".format(
+                    incident_id, action_result.get_message())
+                self.save_progress(message)
+                return action_result.set_status(phantom.APP_ERROR, message)
             event_ids = [e.get("id") for e in events if e.get("id")]
             if not event_ids:
                 return action_result.set_status(
@@ -998,7 +1028,10 @@ class ProofpointTrapConnector(BaseConnector):
             )
             if phantom.is_fail(ret_val):
                 failed += 1
-                errors.append("event {}: {}".format(event_id, err))
+                errors.append((event_id, err))
+                # save_progress is what reaches an operator with no shell;
+                # the action message below quotes only the first error.
+                self.save_progress("MIME download failed -- event {}: {}".format(event_id, err))
                 continue
 
             action_result.add_data({
@@ -1017,12 +1050,20 @@ class ProofpointTrapConnector(BaseConnector):
         if succeeded == 0:
             return action_result.set_status(
                 phantom.APP_ERROR,
-                "All {} MIME downloads failed: {}".format(failed, "; ".join(errors)[:500]),
+                "All {} MIME downloads failed -- event {}: {}{}".format(
+                    failed, errors[0][0], errors[0][1],
+                    " (also failed: events {})".format(_event_list(errors[1:])) if failed > 1 else ""),
             )
         return action_result.set_status(
             phantom.APP_SUCCESS,
-            "{}/{} MIME bodies downloaded".format(succeeded, len(event_ids)),
+            "{}/{} MIME bodies downloaded{}".format(
+                succeeded, len(event_ids),
+                " (failed: events {})".format(_event_list(errors)) if errors else ""),
         )
+
+
+def _event_list(errors):
+    return ", ".join(str(event_id) for event_id, _ in errors)
 
 
 def main():

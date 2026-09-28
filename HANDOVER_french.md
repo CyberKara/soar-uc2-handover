@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Paquet de transfert (déploiement air-gapped)
 
-Généré le 2026-09-24 15:52 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
+Généré le 2026-09-28 15:47 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
 
 Ce paquet est autonome — tout ce qu'il faut pour déployer ce cas d'usage manuellement
 dans un environnement sans accès réseau vers ce dépôt ni vers `soar8`.
@@ -11,7 +11,7 @@ dans un environnement sans accès réseau vers ce dépôt ni vers `soar8`.
 
 | Chemin | Contenu |
 |--------|---------|
-| `connectors/` | Paquet(s) applicatif(s) connecteur : proofpoint_trap-v1.0.34.tgz |
+| `connectors/` | Paquet(s) applicatif(s) connecteur : proofpoint_trap-v1.0.35.tgz |
 | `connectors/source/` | Même(s) connecteur(s), extrait(s) — pour lecture, pas pour import |
 | `playbooks/*.tgz` (CF) | proofpoint_trap_extract_incident_id |
 | `playbooks/*.tgz` (PB) | proofpoint_trap_detail, proofpoint_trap_triage, proofpoint_trap_attachments, proofpoint_trap_acknowledge, proofpoint_trap_close, proofpoint_trap_isolation_notify, proofpoint_trap_recheck |
@@ -19,6 +19,14 @@ dans un environnement sans accès réseau vers ce dépôt ni vers `soar8`.
 | `assets/*.json` | Modèles de configuration d'assets (identifiants masqués — voir ci-dessous) |
 | `custom_lists/*.json` | Schéma de la/les liste(s) personnalisée(s) (en-têtes uniquement — voir la section dédiée ci-dessous) |
 | `docs/` | Document de plan d'implémentation, pour le contexte de conception complet |
+
+## [!] Mise à niveau d'une installation existante — à lire en premier
+
+Ne concerne que le cas où cette application est déjà installée sur la cible
+depuis un paquet précédent. Sur une cible vierge, passez à l'ordre
+d'installation.
+
+- **Le connecteur v1.0.35 corrige `download mime body`, qui échouait sur chaque événement face à une vraie appliance TRAP** (les versions v1.0.34 et antérieures appelaient un point d'accès que TRAP ne possède pas). Installez-le par-dessus l'application Proofpoint TRAP existante : mise à jour normale, sur place. L'actif (asset), sa clé d'API et tous les playbooks restent tels quels — rien à réimporter, rien à ressaisir. **Les incidents traités avant la mise à jour restent sans leurs e-mails :** `proofpoint_trap_detail` les a marqués `Enrichment Complete` bien que le téléchargement des e-mails ait échoué, et il ne s'exécute plus sur un conteneur déjà traité. Les nouveaux incidents, ainsi que tout incident dont `proofpoint_trap_recheck` détecte une modification, reçoivent normalement leurs e-mails et pièces jointes. Pour récupérer à la main les e-mails d'un incident antérieur, lancez `download mime body` sur son conteneur avec l'identifiant de l'incident : les fichiers `.eml` arrivent dans les fichiers (Vault) du conteneur, mais aucun artefact `MIME Body` n'est créé, donc `proofpoint_trap_attachments` ne les traite pas.
 
 ## Ordre d'installation
 

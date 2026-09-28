@@ -48,7 +48,6 @@ Upload via **Apps > Install App**.
 | `abuse_disposition` | string | No | `Unknown` | Comma-separated Abuse Disposition filter (v1.0.10+: full confirmed vocabulary). Valid: `Malicious`, `Suspicious`, `Spam`, `Bulk`, `Low Risk`, `False Negative`, `Known Good`, `Unknown` | `Unknown` |
 | `sub_disposition` | string | No | (empty) | Comma-separated Sub Disposition filter (v1.0.10+). Valid: `Needs Manual Review`, `Likely Harmless`. Applied *in addition to* `abuse_disposition` — an incident must pass both. **Only ever populated on `Unknown`-disposition incidents** on real Threat Response (confirmed against the Incident API doc, v1.0.12+) — setting this while `abuse_disposition` excludes `Unknown` guarantees zero results. Leave empty unless `abuse_disposition` includes `Unknown`. | (empty — no filter) |
 | `poll_hours` | numeric | No | `1` | Hours to look back on first poll | `1` |
-| `fetch_mime_on_poll` | boolean | No | `true` | Auto-fetch + Vault-attach the raw MIME body for every event on each ingested incident (v1.0.8+). Adds one detail call per incident plus one call per event, every poll cycle. Disable if that overhead matters and use the standalone `download mime body` action on-demand instead. | `true` |
 
 ## Setting Up Polling (Ingestion)
 
@@ -77,9 +76,9 @@ Each TRAP incident produces:
   - **Event Info** — abuse disposition (`cs1`), classification (`cs2`), threat score (`cn1`)
 
   (An earlier version also created an "IP Artifact" from `hosts.attacker` and a "Forensics URL" from `hosts.forensics` — removed 2026-08-06 once confirmed against real incident data that `hosts` only ever has `url`, not `attacker`/`forensics`.)
-  - **MIME Body** (v1.0.7+) — one per event, raw `.eml` content stored in the Vault (CEF: `vaultId`, `fileName`, contains `vault id`). Controlled by the `fetch_mime_on_poll` asset config (default `true`, v1.0.8+).
+  (MIME bodies are no longer fetched here: since v1.0.30 the `proofpoint_trap_detail` playbook calls `download mime body` and builds the **MIME Body** artifacts itself.)
 
-The connector uses `expand_events=false` for lightweight polling. For full email event details (sender, recipient, attachments), use the `get incident` action. MIME bodies are fetched via a separate per-incident detail call (`expand_events=true`) purely to enumerate event IDs — this adds one extra API call per incident plus one per event during `on_poll`. If that overhead matters for your TRAP instance, set `fetch_mime_on_poll=false` and use the standalone `download mime body` action on-demand instead.
+The connector uses `expand_events=false` for lightweight polling. For full email event details (sender, recipient, attachments), use the `get incident` action.
 
 ### Severity mapping
 
@@ -130,7 +129,9 @@ Both `summary` and `detail` are **required** by the TRAP API. The action will fa
 
 ### download mime body
 
-Params: `incident_id` (required), `event_id` (optional — omit to fetch every event on the incident). Each event downloads to the Vault via `Vault.create_attachment`; output data includes `event_id`, `vault_id`, `file_name` per event. Partial failure (e.g. one bad event_id among several) reports `succeeded`/`failed`/`total` in the summary and only fails the action if *all* events failed.
+Params: `incident_id` (required), `event_id` (optional — omit to fetch every event on the incident). An incident's events are TRAP *alerts*, and each one is fetched from the Alert API, `GET /api/v1/alerts/{event_id}/download_original_msg` with `Accept: message/rfc822` (vendor doc: "Download Original Abuse Messages"). With `event_id` omitted, the action first reads the incident (`expand_events=true`) to list its event ids. Each message downloads to the Vault via `Vault.create_attachment` as `trap-<incident>-<event>.eml`; output data includes `event_id`, `vault_id`, `file_name` per event. Partial failure (e.g. one bad event_id among several) reports `succeeded`/`failed`/`total` in the summary and only fails the action if *all* events failed. Each failed event's HTTP status, request path and the start of the response body go to the action's progress output; the result message quotes the first failure and lists the other failed event ids.
+
+Before v1.0.35 this action called `/api/incidents/{id}/events/{event_id}/mime`, a path that only this lab's mock served — the real appliance answers it with 404, so every download failed with `Event <id> not found on incident <id>`.
 
 ## Troubleshooting
 
@@ -142,7 +143,9 @@ Params: `incident_id` (required), `event_id` (optional — omit to fetch every e
 | Close incident fails | Missing field | Both `summary` and `detail` are required |
 | `list incidents` fails with `unsupported type for timedelta hours component: str` | `hours_back` arrived as a string — a VPE literal action parameter always does | Fixed in v1.0.34 (the value is validated like every other numeric parameter). On an older build, bind `hours_back` to a numeric datapath instead of a literal |
 | Timeout errors | Large response | Increase `timeout` in asset config. Connector retries 500/502/503/504 automatically. |
-| No MIME Body artifacts on ingested containers | Vault write failed for every event | Check `spawn.log`/`decided.log` for `"Failed to fetch MIME for incident..."` (only `debug_print`'ed, not surfaced as an action failure — `on_poll` still reports success) |
+| `download mime body` fails with `Event <id> not found on incident <id>` for every event | Connector v1.0.34 or older: it called a path the real appliance does not have (see the action's section above) | Upgrade to v1.0.35+ |
+| `download mime body` fails with `No original message for event <id> (HTTP 404)` | The id is not an alert id, or TRAP stored no message for that alert (not every alert source carries an email) | Check the event's `source` in `get incident` output. Other events on the same incident still download |
+| `download mime body` fails with `Unexpected response ... HTTP 200, Content-Type 'text/html'` | `base_url` reaches a web page (login page, proxy) instead of the API | Check `base_url`; nothing is written to the Vault in this case |
 
 ### `update team and assignee` — diagnosing directly against TRAP, without SOAR
 
