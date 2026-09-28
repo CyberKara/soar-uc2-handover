@@ -1,7 +1,9 @@
 # File: proofpoint_trap_connector.py
+import email.policy
 import json
 import sys
 from datetime import datetime, timedelta, timezone
+from email.parser import BytesHeaderParser
 
 import requests
 import urllib3
@@ -360,12 +362,12 @@ class ProofpointTrapConnector(BaseConnector):
             ), []
         return phantom.APP_SUCCESS, incident.get("events", []) or []
 
-    def _download_and_vault_mime(self, incident_id, event_id, container_id):
-        """Download raw MIME for one event (alert) and store it in the Vault.
+    def _download_mime(self, event_id):
+        """Download the raw MIME (.eml) of one event (alert).
 
         Returns:
-            tuple: (status, vault_id, file_name, error_message) — RetVal
-            pattern; vault_id/file_name are None on failure.
+            tuple: (status, content, error_message) — RetVal pattern;
+            content is the message bytes, None on failure.
         """
         path = ALERT_ORIGINAL_MSG_PATH.format(event_id)
         url = "{}{}".format(self._base_url, path)
@@ -377,38 +379,47 @@ class ProofpointTrapConnector(BaseConnector):
                 headers={"Accept": "message/rfc822", "Content-Type": None},
             )
         except requests.exceptions.SSLError:
-            return phantom.APP_ERROR, None, None, ERR_SSL
+            return phantom.APP_ERROR, None, ERR_SSL
         except requests.exceptions.ConnectionError:
-            return phantom.APP_ERROR, None, None, ERR_CONNECTION.format(self._base_url)
+            return phantom.APP_ERROR, None, ERR_CONNECTION.format(self._base_url)
         except requests.exceptions.Timeout:
-            return phantom.APP_ERROR, None, None, ERR_TIMEOUT.format(self._timeout)
+            return phantom.APP_ERROR, None, ERR_TIMEOUT.format(self._timeout)
         except Exception as e:
-            return phantom.APP_ERROR, None, None, "API Error: Unexpected error — {}".format(str(e))
+            return phantom.APP_ERROR, None, "API Error: Unexpected error — {}".format(str(e))
 
         status_code = response.status_code
         content_type = response.headers.get("Content-Type", "")
         snippet = " ".join(response.text[:150].split()) if response.content else "(empty body)"
 
         if status_code == 404:
-            return phantom.APP_ERROR, None, None, "{} [GET {}: {}]".format(
+            return phantom.APP_ERROR, None, "{} [GET {}: {}]".format(
                 ERR_EVENT_NOT_FOUND.format(event_id), path, snippet)
         if status_code in (401, 403):
-            return phantom.APP_ERROR, None, None, ERR_AUTH
+            return phantom.APP_ERROR, None, ERR_AUTH
         if status_code != 200:
-            return phantom.APP_ERROR, None, None, "API Error: HTTP {} [GET {}: {}]".format(
+            return phantom.APP_ERROR, None, "API Error: HTTP {} [GET {}: {}]".format(
                 status_code, path, snippet)
         # A 200 that is a web page or a JSON body is not a message -- vaulting
         # it as .eml would hand PB3 a fake email and report success.
         if not response.content or "html" in content_type or "json" in content_type:
-            return phantom.APP_ERROR, None, None, (
+            return phantom.APP_ERROR, None, (
                 "Unexpected response for event {}: HTTP 200, Content-Type {!r}, "
                 "expected message/rfc822 [GET {}: {}]".format(
                     event_id, content_type, path, snippet))
 
+        return phantom.APP_SUCCESS, response.content, None
+
+    def _vault_mime(self, incident_id, event_id, container_id, content):
+        """Store one downloaded message in the container's Vault.
+
+        Returns:
+            tuple: (status, vault_id, file_name, error_message) — RetVal
+            pattern; vault_id/file_name are None on failure.
+        """
         file_name = "trap-{}-{}.eml".format(incident_id, event_id)
         try:
             vault_result = Vault.create_attachment(
-                file_contents=response.content,
+                file_contents=content,
                 container_id=container_id,
                 file_name=file_name,
             )
@@ -993,7 +1004,8 @@ class ProofpointTrapConnector(BaseConnector):
 
     def _handle_download_mime_body(self, param):
         """Download the raw MIME body for one event, or all events on an
-        incident when event_id is omitted, and store each in the Vault."""
+        incident when event_id is omitted, and store each in the container's
+        Vault when the action runs in one."""
         action_result = self.add_action_result(ActionResult(dict(param)))
 
         incident_id = self._validate_integer(action_result, param.get("incident_id"), "incident_id")
@@ -1001,6 +1013,13 @@ class ProofpointTrapConnector(BaseConnector):
             return action_result.get_status()
 
         container_id = self.get_container_id()
+        # Run from the asset's action panel (App Debugger) there is no
+        # container, and so no Vault: download and check each message, but
+        # skip storing it rather than fail every event.
+        store = bool(container_id)
+        if not store:
+            self.save_progress(
+                "Run outside a container: messages are downloaded and checked, not stored in the Vault")
         raw_event_id = param.get("event_id")
 
         if raw_event_id not in (None, ""):
@@ -1023,9 +1042,12 @@ class ProofpointTrapConnector(BaseConnector):
         errors = []
 
         for event_id in event_ids:
-            ret_val, vault_id, file_name, err = self._download_and_vault_mime(
-                incident_id, event_id, container_id
-            )
+            vault_id, file_name = None, None
+            ret_val, content, err = self._download_mime(event_id)
+            if not phantom.is_fail(ret_val) and store:
+                ret_val, vault_id, file_name, err = self._vault_mime(
+                    incident_id, event_id, container_id, content
+                )
             if phantom.is_fail(ret_val):
                 failed += 1
                 errors.append((event_id, err))
@@ -1038,6 +1060,8 @@ class ProofpointTrapConnector(BaseConnector):
                 "event_id": event_id,
                 "vault_id": vault_id,
                 "file_name": file_name,
+                "size": len(content),
+                "subject": _mime_subject(content),
             })
             succeeded += 1
 
@@ -1056,14 +1080,24 @@ class ProofpointTrapConnector(BaseConnector):
             )
         return action_result.set_status(
             phantom.APP_SUCCESS,
-            "{}/{} MIME bodies downloaded{}".format(
+            "{}/{} MIME bodies downloaded{}{}".format(
                 succeeded, len(event_ids),
-                " (failed: events {})".format(_event_list(errors)) if errors else ""),
+                " (failed: events {})".format(_event_list(errors)) if errors else "",
+                "" if store else " -- not stored: run outside a container, so there is no Vault"),
         )
 
 
 def _event_list(errors):
     return ", ".join(str(event_id) for event_id, _ in errors)
+
+
+def _mime_subject(content):
+    """Decoded Subject header, so a run shows WHICH message came back."""
+    try:
+        headers = BytesHeaderParser(policy=email.policy.default).parsebytes(content)
+        return str(headers.get("Subject") or "")[:200]
+    except Exception:
+        return ""
 
 
 def main():
