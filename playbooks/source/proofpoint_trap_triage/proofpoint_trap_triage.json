@@ -4,7 +4,7 @@
     "category": "Email Abuse",
     "coa": {
         "data": {
-            "hash": "",
+            "hash": "798ddeee00e653b413bc4e576f9db208e15e926c",
             "edges": [
                 {
                     "id": "port_0_to_port_2",
@@ -31,7 +31,7 @@
             "nodes": {
                 "0": {
                     "x": 190,
-                    "y": 0,
+                    "y": -6.394884621840902e-14,
                     "id": "0",
                     "data": {
                         "id": "0",
@@ -42,11 +42,12 @@
                         "functionName": "on_start"
                     },
                     "type": "start",
-                    "errors": {}
+                    "errors": {},
+                    "warnings": {}
                 },
                 "1": {
                     "x": 190,
-                    "y": 300,
+                    "y": 299.9999999999999,
                     "id": "1",
                     "data": {
                         "id": "1",
@@ -59,7 +60,8 @@
                     },
                     "type": "end",
                     "errors": {},
-                    "userCode": "\n"
+                    "userCode": "    ################################################################################\n\n    # This function is called after all actions are completed.\n    # summary of all the action and/or all details of actions\n    # can be collected here.\n\n    # summary_json = phantom.get_summary()\n    # if 'result' in summary_json:\n        # for action_result in summary_json['result']:\n            # if 'action_run_id' in action_result:\n                # action_results = phantom.get_action_results(action_run_id=action_result['action_run_id'], result_data=False, flatten=False)\n                # phantom.debug(action_results)\n\n    ################################################################################\n",
+                    "warnings": {}
                 },
                 "2": {
                     "x": 190,
@@ -67,6 +69,31 @@
                     "id": "2",
                     "data": {
                         "id": "2",
+                        "loop": {
+                            "enabled": false,
+                            "pauseUnit": "m",
+                            "conditions": [
+                                {
+                                    "type": "if",
+                                    "logic": "and",
+                                    "comparisons": [
+                                        {
+                                            "op": "==",
+                                            "param": "",
+                                            "value": "",
+                                            "comparisonKey": "comparison_key_0"
+                                        }
+                                    ],
+                                    "conditionKey": "condition_key_0",
+                                    "conditionIndex": 0
+                                }
+                            ],
+                            "pauseValue": 2,
+                            "exitAfterUnit": "m",
+                            "exitLoopAfter": 2,
+                            "exitAfterValue": 10,
+                            "exitConditionEnabled": false
+                        },
                         "type": "utility",
                         "values": {
                             "proofpoint_trap_extract_incident_id": {}
@@ -96,11 +123,12 @@
                         }
                     },
                     "type": "utility",
-                    "errors": {}
+                    "errors": {},
+                    "warnings": {}
                 },
                 "3": {
                     "x": 190,
-                    "y": 200,
+                    "y": 199.99999999999997,
                     "id": "3",
                     "data": {
                         "id": "3",
@@ -124,11 +152,12 @@
                     },
                     "type": "code",
                     "errors": {},
-                    "userCode": "    ################################################################################\n\n    result_rows = phantom.collect2(\n        container=container,\n        datapath=[\"extract_incident_id:custom_function_result.data.incident_id\", \"extract_incident_id:custom_function_result.data.trap_severity\"],\n    )\n    incident_id_val, trap_severity = result_rows[0] if result_rows else (None, None)\n\n    if not incident_id_val:\n        phantom.error(\"Could not find Incident ID (cef.incidentId) on the 'Event Info' artifact\")\n        phantom.add_note(\n            container=container,\n            note_type=\"general\",\n            title=\"TRAP Triage - Error\",\n            content=\"Could not find Incident ID on the 'Event Info' artifact\"\n        )\n        return\n\n    read_incident_id__incident_id = str(incident_id_val)\n    phantom.debug(\"Extracted incident ID: {}\".format(read_incident_id__incident_id))\n\n    severity_map = {\"Critical\": \"high\", \"High\": \"medium\", \"Informational\": \"low\"}\n    mapped_severity = severity_map.get(trap_severity, \"low\")\n    phantom.set_severity(container=container, severity=mapped_severity)\n    phantom.debug(\n        \"Promoted container severity to '{}' (TRAP Severity: '{}')\".format(\n            mapped_severity, trap_severity\n        )\n    )\n\n    ################################################################################\n"
+                    "userCode": "    ################################################################################\n\n\n    result_rows = phantom.collect2(\n        container=container,\n        datapath=[\"extract_incident_id:custom_function_result.data.incident_id\", \"extract_incident_id:custom_function_result.data.trap_severity\"],\n    )\n    incident_id_val, trap_severity = result_rows[0] if result_rows else (None, None)\n\n    if not incident_id_val:\n        phantom.error(\"Could not find Incident ID (cef.incidentId) on the 'Event Info' artifact\")\n        phantom.add_note(\n            container=container,\n            note_type=\"general\",\n            title=\"TRAP Triage - Error\",\n            content=\"Could not find Incident ID on the 'Event Info' artifact\"\n        )\n        return\n\n    read_incident_id__incident_id = str(incident_id_val)\n    phantom.debug(\"Extracted incident ID: {}\".format(read_incident_id__incident_id))\n\n    severity_map = {\"Critical\": \"high\", \"High\": \"medium\", \"Informational\": \"low\"}\n    mapped_severity = severity_map.get(trap_severity, \"low\")\n    phantom.set_severity(container=container, severity=mapped_severity)\n    phantom.debug(\n        \"Promoted container severity to '{}' (TRAP Severity: '{}')\".format(\n            mapped_severity, trap_severity\n        )\n    )\n\n    # Also saved as run data, so a consumer never depends on how the VPE names it.\n    phantom.save_run_data(key=\"read_incident_id:incident_id\", value=json.dumps(read_incident_id__incident_id))\n\n    ################################################################################\n",
+                    "warnings": {}
                 }
             },
             "notes": "",
-            "description": "Automation playbook (PB2) triggered on container creation. Extracts the TRAP incident ID from container data and stops. Analyst-driven actions (comment/assignee/status, close) live in separate manually-launched playbooks: proofpoint_trap_acknowledge, proofpoint_trap_close."
+            "description": "Automation playbook (PB2) triggered on container creation. Reads the TRAP incident ID and raw TRAP Severity off the Event Info artifact and promotes the container's severity from TRAP's own Severity (the connector creates the container at a neutral default). No writes back to TRAP. Analyst-driven actions (acknowledge, close) live in separate manually-launched playbooks: proofpoint_trap_acknowledge, proofpoint_trap_close."
         },
         "input_spec": [],
         "output_spec": [],
@@ -137,7 +166,7 @@
         "schema": "5.0.5",
         "version": "6.4.1.100"
     },
-    "create_time": "2026-09-22T22:56:54.116865Z",
+    "create_time": "2026-09-28T20:44:59.409191Z",
     "draft_mode": false,
     "labels": [
         "proofpoint_trap"

@@ -1,50 +1,66 @@
 """
-Proofpoint TRAP Acknowledge (PB4)
-
-Data playbook manually launched by an analyst from the container, once
-they've reviewed the artifacts/enrichment notes PB1-PB3 produced. Prompts
-for a comment, then writes three things to the real TRAP incident: the
-comment, an assignee marking it claimed by SOAR, and a status change from
-new to open. Independent of proofpoint_trap_triage/proofpoint_trap_close —
-no chaining.
-
-Trigger: Manual run by analyst
+Data playbook (PB4) manually launched by an analyst from the container once they&#39;ve reviewed the artifacts/notes PB1-PB3 produced. Prompts for a comment, then assigns the TRAP incident to SOAR, moves its status from new to open, and posts the comment. Independent of proofpoint_trap_triage/proofpoint_trap_close.
 """
 
 
 import phantom.rules as phantom
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
+
+################################################################################
+## Global Custom Code Start
+################################################################################
+
+
+
+# Design notes (kept here because a VPE save replaces the module docstring):
+# Proofpoint TRAP Acknowledge (PB4)
+#
+# Data playbook manually launched by an analyst from the container, once
+# they've reviewed the artifacts/enrichment notes PB1-PB3 produced. Prompts
+# for a comment, then writes three things to the real TRAP incident: the
+# comment, an assignee marking it claimed by SOAR, and a status change from
+# new to open. Independent of proofpoint_trap_triage/proofpoint_trap_close —
+# no chaining.
+#
+# Trigger: Manual run by analyst
 
 ACK_ASSIGNEE = "SOAR"
 ACK_FALLBACK_COMMENT = "Acknowledged by SOAR"
-
+################################################################################
+## Global Custom Code End
+################################################################################
 
 @phantom.playbook_block()
 def on_start(container):
     phantom.debug('on_start() called')
 
+    # call 'extract_incident_id' block
     extract_incident_id(container=container)
 
     return
 
-
 @phantom.playbook_block()
-def extract_incident_id(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
+def extract_incident_id(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
     phantom.debug("extract_incident_id() called")
 
     ################################################################################
-    # Calls the shared proofpoint_trap_extract_incident_id custom function
-    # (playbooks/proofpoint_trap/custom_functions/) instead of re-parsing
-    # cef.incidentId inline -- this exact block used to be duplicated
-    # near-verbatim across PB2/PB4/PB5 (see next-steps.md #58). The CF itself
-    # reads the "Event Info"/"Event Info Update" artifacts via a direct REST
-    # scan (see its own docstring for why not phantom.collect2() -- custom
-    # functions get no container object to pass it).
+    # Extract TRAP incident ID (+ raw TRAP Severity) via the shared proofpoint_trap_extract_incident_id 
+    # custom function.
     ################################################################################
 
     parameters = [{}]
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+
+    # Write your custom code here...
+
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
 
     phantom.custom_function(custom_function="local/proofpoint_trap_extract_incident_id", parameters=parameters, name="extract_incident_id", callback=read_incident_id)
 
@@ -52,63 +68,24 @@ def extract_incident_id(action=None, success=None, container=None, results=None,
 
 
 @phantom.playbook_block()
-def read_incident_id(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
-    phantom.debug("read_incident_id() called")
+def prompt_comment(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
+    phantom.debug("prompt_comment() called")
 
     ################################################################################
-    # Bridge block reading extract_incident_id's CF result (same pattern as
-    # cyberark_rotation_orchestrator.py's discover_targets -> read_discover_result
-    # pair -- a native utility block's own output needs a following code block
-    # to branch/save on it).
+    # Ask the analyst for an acknowledgement comment (approver: container owner, else 
+    # soar_local_admin).
     ################################################################################
-
-    read_incident_id__incident_id = None
 
     ################################################################################
     ## Custom Code Start
     ################################################################################
-
-    result_rows = phantom.collect2(
-        container=container,
-        datapath=["extract_incident_id:custom_function_result.data.incident_id"],
-    )
-    incident_id_val = result_rows[0][0] if result_rows else None
-
-    if not incident_id_val:
-        phantom.error("Could not find Incident ID (cef.incidentId) on the 'Event Info' artifact")
-        phantom.add_note(
-            container=container,
-            note_type="general",
-            title="TRAP Acknowledge - Error",
-            content="Could not find Incident ID on the 'Event Info' artifact"
-        )
-        return
-
-    read_incident_id__incident_id = str(incident_id_val)
-    phantom.debug("Extracted incident ID: {}".format(read_incident_id__incident_id))
-
-    ################################################################################
-    ## Custom Code End
     ################################################################################
 
-    phantom.save_run_data(key="read_incident_id:incident_id", value=json.dumps(read_incident_id__incident_id))
-
-    prompt_comment(container=container)
-
-    return
-
-
-@phantom.playbook_block()
-def prompt_comment(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
-    phantom.debug("prompt_comment() called")
-
-    ################################################################################
-    # Native prompt block — asks the analyst for an acknowledgement comment.
-    # Approver: container_owner, falls back to soar_local_admin (same
-    # fallback pattern as the old prompt_analyst block — TRAP containers
-    # never get an owner assigned). Timeout: 30 min.
-    ################################################################################
-
+    # The prompt is raised from code, not from a native prompt block: a VPE save
+    # regenerates prompt blocks whole (they have no Custom Code), which would drop
+    # this approver fallback -- TRAP containers never get an owner assigned. The
+    # callback continues the flow; the return below stops the generated call to
+    # process_comment from also running right away.
     user = container.get('owner_name', None) or 'soar_local_admin'
     role = None
     message = """**TRAP Incident {0}**
@@ -136,16 +113,24 @@ assign it to SOAR, and move its status from new to open."""
 
     return
 
+    ################################################################################
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
+    phantom.save_block_result(key="prompt_comment_called", value="True")
+
+    process_comment(container=container)
+
+    return
+
 
 @phantom.playbook_block()
-def process_comment(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
+def process_comment(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
     phantom.debug("process_comment() called")
 
     ################################################################################
-    # Read analyst's prompt response via REST /rest/approval — not
-    # phantom.collect2(), which is confirmed broken for this classification
-    # on this SOAR 8.5 instance (see proofpoint_trap_triage.py's dated
-    # comment on the same bug, and process_decision's original fix).
+    # Read analyst's prompt response.
     ################################################################################
 
     process_comment__comment = None
@@ -153,6 +138,8 @@ def process_comment(action=None, success=None, container=None, results=None, han
     ################################################################################
     ## Custom Code Start
     ################################################################################
+    ################################################################################
+
 
     run_id = phantom.get_playbook_run_id_()
 
@@ -182,12 +169,18 @@ def process_comment(action=None, success=None, container=None, results=None, han
 
     process_comment__comment = comment
 
+    # Also saved as run data: the action blocks and the note read these keys.
+    phantom.save_run_data(key="process_comment:comment", value=json.dumps(process_comment__comment))
+    phantom.save_run_data(key="process_comment:prompt_status", value=json.dumps(prompt_status))
+
+    ################################################################################
     ################################################################################
     ## Custom Code End
     ################################################################################
 
-    phantom.save_run_data(key="process_comment:comment", value=json.dumps(process_comment__comment))
-    phantom.save_run_data(key="process_comment:prompt_status", value=json.dumps(prompt_status))
+    phantom.save_block_result(key="process_comment:comment", value=json.dumps(process_comment__comment))
+
+    phantom.save_block_result(key="process_comment_called", value="True")
 
     update_incident_assignee(container=container)
 
@@ -195,19 +188,44 @@ def process_comment(action=None, success=None, container=None, results=None, han
 
 
 @phantom.playbook_block()
-def update_incident_assignee(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
+def update_incident_assignee(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
     phantom.debug("update_incident_assignee() called")
 
+    # phantom.debug('Action: {0} {1}'.format(action['name'], ('SUCCEEDED' if success else 'FAILED')))
+
     ################################################################################
-    # Native action block — assigns the TRAP incident to SOAR.
+    # Assign the TRAP incident to SOAR.
     ################################################################################
 
-    read_incident_id__incident_id = json.loads(phantom.get_run_data(key="read_incident_id:incident_id"))
+    read_incident_id__incident_id = json.loads(_ if (_ := phantom.get_run_data(key="read_incident_id:incident_id")) != "" else "null")  # pylint: disable=used-before-assignment
+
+    parameters = []
+
+    if read_incident_id__incident_id is not None:
+        parameters.append({
+            "assignee": "SOAR",
+            "incident_id": read_incident_id__incident_id,
+        })
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+    ################################################################################
+
+    # Built from run data, so the call does not depend on how the VPE names its
+    # generated variables. Sends assignee only -- the connector requires team as
+    # well, a known bug that stays on hold until the TRAP web-UI reassignment test.
+    read_incident_id__incident_id = json.loads(phantom.get_run_data(key="read_incident_id:incident_id") or "null")
 
     parameters = [{
         "incident_id": read_incident_id__incident_id,
         "assignee": ACK_ASSIGNEE,
     }]
+
+    ################################################################################
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
 
     phantom.act("update team and assignee", parameters=parameters, name="update_incident_assignee", assets=["proofpoint_trap_mock"], callback=set_incident_open)
 
@@ -215,14 +233,34 @@ def update_incident_assignee(action=None, success=None, container=None, results=
 
 
 @phantom.playbook_block()
-def set_incident_open(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
+def set_incident_open(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
     phantom.debug("set_incident_open() called")
 
+    # phantom.debug('Action: {0} {1}'.format(action['name'], ('SUCCEEDED' if success else 'FAILED')))
+
     ################################################################################
-    # Native action block — moves the TRAP incident status from new to open.
+    # Move the TRAP incident status from new to open.
     ################################################################################
 
-    read_incident_id__incident_id = json.loads(phantom.get_run_data(key="read_incident_id:incident_id"))
+    read_incident_id__incident_id = json.loads(_ if (_ := phantom.get_run_data(key="read_incident_id:incident_id")) != "" else "null")  # pylint: disable=used-before-assignment
+
+    parameters = []
+
+    if read_incident_id__incident_id is not None:
+        parameters.append({
+            "field": "status",
+            "value": "open",
+            "incident_id": read_incident_id__incident_id,
+        })
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+    ################################################################################
+
+    # Built from run data, so the call does not depend on how the VPE names its
+    # generated variables.
+    read_incident_id__incident_id = json.loads(phantom.get_run_data(key="read_incident_id:incident_id") or "null")
 
     parameters = [{
         "incident_id": read_incident_id__incident_id,
@@ -230,21 +268,46 @@ def set_incident_open(action=None, success=None, container=None, results=None, h
         "value": "open",
     }]
 
+    ################################################################################
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
     phantom.act("set incident field value", parameters=parameters, name="set_incident_open", assets=["proofpoint_trap_mock"], callback=add_trap_comment)
 
     return
 
 
 @phantom.playbook_block()
-def add_trap_comment(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
+def add_trap_comment(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
     phantom.debug("add_trap_comment() called")
 
+    # phantom.debug('Action: {0} {1}'.format(action['name'], ('SUCCEEDED' if success else 'FAILED')))
+
     ################################################################################
-    # Native action block — adds the analyst's (or fallback) comment to the
-    # TRAP incident.
+    # Add the analyst's acknowledgement comment to the TRAP incident.
     ################################################################################
 
-    read_incident_id__incident_id = json.loads(phantom.get_run_data(key="read_incident_id:incident_id"))
+    process_comment__comment = json.loads(_ if (_ := phantom.get_run_data(key="process_comment:comment")) != "" else "null")  # pylint: disable=used-before-assignment
+    read_incident_id__incident_id = json.loads(_ if (_ := phantom.get_run_data(key="read_incident_id:incident_id")) != "" else "null")  # pylint: disable=used-before-assignment
+
+    parameters = []
+
+    if read_incident_id__incident_id is not None:
+        parameters.append({
+            "detail": process_comment__comment,
+            "summary": "SOAR Acknowledgement",
+            "incident_id": read_incident_id__incident_id,
+        })
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+    ################################################################################
+
+    # Built from run data, so the call does not depend on how the VPE names its
+    # generated variables.
+    read_incident_id__incident_id = json.loads(phantom.get_run_data(key="read_incident_id:incident_id") or "null")
     comment = json.loads(phantom.get_run_data(key="process_comment:comment") or '""')
 
     parameters = [{
@@ -253,21 +316,36 @@ def add_trap_comment(action=None, success=None, container=None, results=None, ha
         "detail": comment,
     }]
 
+    ################################################################################
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
     phantom.act("add comment", parameters=parameters, name="add_trap_comment", assets=["proofpoint_trap_mock"], callback=add_ack_note)
 
     return
 
 
 @phantom.playbook_block()
-def add_ack_note(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
+def add_ack_note(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
     phantom.debug("add_ack_note() called")
 
     ################################################################################
-    # Add a summary note with the acknowledgement comment and action results.
+    # Add acknowledgement summary note to container.
     ################################################################################
+
+    update_incident_assignee_result_data = phantom.collect2(container=container, datapath=["update_incident_assignee:action_result.status"], action_results=results)
+    set_incident_open_result_data = phantom.collect2(container=container, datapath=["set_incident_open:action_result.status"], action_results=results)
+    add_trap_comment_result_data = phantom.collect2(container=container, datapath=["add_trap_comment:action_result.status"], action_results=results)
+    process_comment__comment = json.loads(_ if (_ := phantom.get_run_data(key="process_comment:comment")) != "" else "null")  # pylint: disable=used-before-assignment
+
+    update_incident_assignee_result_item_0 = [item[0] for item in update_incident_assignee_result_data]
+    set_incident_open_result_item_0 = [item[0] for item in set_incident_open_result_data]
+    add_trap_comment_result_item_0 = [item[0] for item in add_trap_comment_result_data]
 
     ################################################################################
     ## Custom Code Start
+    ################################################################################
     ################################################################################
 
     incident_id = json.loads(phantom.get_run_data(key="read_incident_id:incident_id"))
@@ -308,12 +386,103 @@ def add_ack_note(action=None, success=None, container=None, results=None, handle
     phantom.debug("Acknowledge note added")
 
     ################################################################################
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
+    phantom.save_block_result(key="add_ack_note__inputs:0:process_comment:custom_function:comment", value=json.dumps(process_comment__comment))
+    phantom.save_block_result(key="add_ack_note__inputs:1:update_incident_assignee:action_result.status", value=json.dumps(update_incident_assignee_result_item_0))
+    phantom.save_block_result(key="add_ack_note__inputs:2:set_incident_open:action_result.status", value=json.dumps(set_incident_open_result_item_0))
+    phantom.save_block_result(key="add_ack_note__inputs:3:add_trap_comment:action_result.status", value=json.dumps(add_trap_comment_result_item_0))
+
+    phantom.save_block_result(key="add_ack_note_called", value="True")
+
+    return
+
+
+@phantom.playbook_block()
+def read_incident_id(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
+    phantom.debug("read_incident_id() called")
+
+    ################################################################################
+    # Bridge block: read extract_incident_id CF result (same pattern as cyberark_rotation_orchestrator.py 
+    # read_discover_result).
+    ################################################################################
+
+    extract_incident_id__result = phantom.collect2(container=container, datapath=["extract_incident_id:custom_function_result.data.incident_id"])
+
+    extract_incident_id_data_incident_id = [item[0] for item in extract_incident_id__result]
+
+    read_incident_id__incident_id = None
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+    ################################################################################
+
+
+    result_rows = phantom.collect2(
+        container=container,
+        datapath=["extract_incident_id:custom_function_result.data.incident_id"],
+    )
+    incident_id_val = result_rows[0][0] if result_rows else None
+
+    if not incident_id_val:
+        phantom.error("Could not find Incident ID (cef.incidentId) on the 'Event Info' artifact")
+        phantom.add_note(
+            container=container,
+            note_type="general",
+            title="TRAP Acknowledge - Error",
+            content="Could not find Incident ID on the 'Event Info' artifact"
+        )
+        return
+
+    read_incident_id__incident_id = str(incident_id_val)
+    phantom.debug("Extracted incident ID: {}".format(read_incident_id__incident_id))
+
+    # Also saved as run data: later blocks read this key in their own Custom Code.
+    phantom.save_run_data(key="read_incident_id:incident_id", value=json.dumps(read_incident_id__incident_id))
+
+    ################################################################################
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
+    phantom.save_block_result(key="read_incident_id__inputs:0:extract_incident_id:custom_function_result.data.incident_id", value=json.dumps(extract_incident_id_data_incident_id))
+
+    phantom.save_block_result(key="read_incident_id:incident_id", value=json.dumps(read_incident_id__incident_id))
+
+    phantom.save_block_result(key="read_incident_id_called", value="True")
+
+    prompt_comment(container=container)
+
+    return
+
+
+@phantom.playbook_block()
+def on_finish(container, summary):
+    phantom.debug("on_finish() called")
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+    ################################################################################
+
+    # This function is called after all actions are completed.
+    # summary of all the action and/or all details of actions
+    # can be collected here.
+
+    # summary_json = phantom.get_summary()
+    # if 'result' in summary_json:
+        # for action_result in summary_json['result']:
+            # if 'action_run_id' in action_result:
+                # action_results = phantom.get_action_results(action_run_id=action_result['action_run_id'], result_data=False, flatten=False)
+                # phantom.debug(action_results)
+
+    ################################################################################
+    ################################################################################
     ## Custom Code End
     ################################################################################
 
     return
 
-
-def on_finish(container, summary):
-    phantom.debug("on_finish() called")
-    return

@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Air-Gapped Handover Package
 
-Generated 2026-09-28 17:50 UTC from `proofpoint_trap` (source env: `soar8`).
+Generated 2026-09-28 21:30 UTC from `proofpoint_trap` (source env: `soar8`).
 
 This package is self-contained — everything needed to deploy this use case by hand
 in an environment with no network access back to this repo or to `soar8`.
@@ -14,7 +14,7 @@ in an environment with no network access back to this repo or to `soar8`.
 | `connectors/` | Connector app package(s): proofpoint_trap-v1.0.36.tgz |
 | `connectors/source/` | Same connector(s), extracted — for reading, not for import |
 | `playbooks/*.tgz` (CFs) | proofpoint_trap_extract_incident_id |
-| `playbooks/*.tgz` (PBs) | proofpoint_trap_detail, proofpoint_trap_triage, proofpoint_trap_attachments, proofpoint_trap_acknowledge, proofpoint_trap_close, proofpoint_trap_isolation_notify, proofpoint_trap_recheck |
+| `playbooks/*.tgz` (PBs) | proofpoint_trap_detail, proofpoint_trap_triage, proofpoint_trap_attachments, proofpoint_trap_acknowledge, proofpoint_trap_close, proofpoint_trap_isolation_notify, proofpoint_trap_recheck, proofpoint_trap_summary |
 | `playbooks/source/` | Same CFs/playbooks, extracted — for reading, not for import |
 | `assets/*.json` | Asset config templates (credentials redacted — see below) |
 | `custom_lists/*.json` | Custom list schema (header row only — see the custom-list section below) |
@@ -28,6 +28,8 @@ previous package. On a completely fresh target, skip to Install order.
 - **Connector v1.0.36 fixes `download mime body`, which failed on every event against a real TRAP appliance** (v1.0.34 and older called an endpoint TRAP does not have; v1.0.35 also failed every event when run from the asset's action panel, which has no container to store the email in — it now downloads and checks each email there, showing its size and subject, without storing it). Install it over the existing Proofpoint TRAP app: a normal in-place upgrade. The asset, its API key and every playbook stay as they are — nothing to re-import, nothing to re-enter. **Incidents processed before the upgrade keep no emails:** `proofpoint_trap_detail` marked them `Enrichment Complete` although the email download failed, and it does not run again on a completed container. New incidents, and any incident `proofpoint_trap_recheck` sees change, get their emails and attachments normally. To fetch an older incident's emails by hand, run `download mime body` on its container with the incident id: the `.eml` files land in the container's Files (Vault), but no `MIME Body` artifact is created, so `proofpoint_trap_attachments` does not process them.
 
 - **`proofpoint_trap_detail` must be re-imported (2026-09-28) — unlike the connector upgrade above.** It now survives a save in the VPE and its re-runs post only new artifacts. Re-import it from `playbooks/` — the new copy replaces yours, including any block renamed with `_0` by an earlier save — and re-activate it. After the import you may re-point its action blocks to your own asset names and save: it no longer breaks. Two blocks have new names (`build_artifact_list`, `dispatch_artifact_list`). A re-run, which `proofpoint_trap_recheck` triggers each time an incident changes, now posts only the artifacts not already on the container instead of the whole list again, and the detail note shows "N new, M already on the container". The `Enrichment Complete` artifact adds `alertCount` (alerts processed), `eventCount` (TRAP's own count) and `artifactsAlreadyPresent`; `artifactsCreated` now counts new artifacts only.
+
+- **Every UC2 playbook now survives a save in the VPE, and `proofpoint_trap_summary` is new (2026-09-28).** Re-import all the playbooks from `playbooks/` (the new copies replace yours) and re-activate the automation ones (`proofpoint_trap_detail`, `proofpoint_trap_triage`, `proofpoint_trap_attachments`, `proofpoint_trap_recheck`). After that you may re-point any action block to your own asset names and save. What changed: `proofpoint_trap_acknowledge` and `proofpoint_trap_close` ask the container owner, or `soar_local_admin` when the container has no owner (as before, but the fallback now survives a save); a close prompt that gets no answer still writes its note; `proofpoint_trap_attachments` no longer touches the filesystem (SOAR's own validator flagged it) and reads and stores Vault files through SOAR's REST API instead. `proofpoint_trap_summary` is run by hand from a container: it writes one `TRAP Summary` note with a table per artifact type and rewrites that same note on every run.
 
 ## Install order
 
@@ -51,9 +53,9 @@ previous package. On a completely fresh target, skip to Install order.
 
    **The playbooks ship pointed at the asset names below.** Either create your assets
    with these names, or keep your own names and re-point each playbook's action blocks
-   to your assets in the VPE, then save. Saving is safe for every playbook **except** the
-   ones listed under "Do not re-save these playbooks in the VPE" below — for those,
-   use the names in this table.
+   to your assets in the VPE, then save: every playbook in this package is built to
+   survive a save. (A save makes a manually-run playbook available on every container
+   label; re-importing it restores the label.)
 
    | Asset name | App | Used by | Template |
    |---|---|---|---|
@@ -86,24 +88,6 @@ are read back as real state and will make it act on things that never happened.
 - `proofpoint_trap_recheck_state`: `incident_id, signature` — written by the playbook, not by you.
 
 See the copied implementation plan doc in `docs/` for what the playbook stores and when.
-
-## [!] Do not re-save these playbooks in the VPE
-
-Viewing a playbook in the VPE is fine. **Saving** it makes SOAR regenerate the
-playbook's code from its definition, and for the blocks below the regenerated code is
-wrong. Each was written to run one action per item; the regenerated block sends a
-**single** action with every item comma-joined into one value. That action then fails —
-e.g. `Could not load JSON from CEF parameter ... Extra data` — or silently creates one
-malformed item instead of many.
-
-- `proofpoint_trap_recheck` — block `dispatch_mime_refetch`
-
-The sign is that block's action failing that way in a playbook run (its name may also
-gain a `_0` suffix, but only when its label ends in "artifacts" or "container"). To
-recover, import that playbook's `.tgz` from `playbooks/` again, as in the install step
-above, and re-activate it if it
-is an automation playbook. Change what surrounds the playbook — asset names above all —
-rather than the playbook itself.
 
 ## Verification
 

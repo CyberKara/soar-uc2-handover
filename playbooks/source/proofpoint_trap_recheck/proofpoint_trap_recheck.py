@@ -1,69 +1,48 @@
 """
-Proofpoint TRAP Recheck
-
-Automation playbook triggered on container creation for label
-'proofpoint_trap_recheck' (a Timer asset tick, not a real TRAP incident
-container). Periodically re-scans the whole in-window TRAP incident
-backlog (all states, not just poll_state="new") for incidents that have
-already been ingested into SOAR but changed since -- a field edit,
-disposition change, or newly-linked event that on_poll's own checkpoint-
-based main pass would never see again once an incident has a container.
-
-Moved out of the connector's on_poll 2026-08-18 (previously
-_run_recheck_pass/_incident_signature) -- see uc2_implementation_plan.md's
-"fold into pb" entry for the reasoning. Custom list
-`proofpoint_trap_recheck_state` (columns: incident_id, signature) replaces
-the connector's self._state["incident_hashes"]/["incident_event_ids"]
-persistent state -- durable across playbook runs the same way, just
-playbook-owned instead of connector-owned. Dropped the connector's
-newly-linked-event diffing in favor of a simpler design: any detected
-change re-fetches/re-vaults ALL of that incident's MIME bodies, relying on
-the already-proven SDI-based artifact dedup (native "add artifact" 400s
-harmlessly on a duplicate SDI) instead of tracking per-incident event_ids.
-
-Trigger: Container created on label 'proofpoint_trap_recheck' (Timer asset)
+Periodically re-scans the whole in-window TRAP incident backlog (all states) for already-ingested incidents that changed since ingestion -- a field edit, disposition change, or newly-linked event that on_poll&#39;s checkpoint-based main pass can&#39;t see again once a container exists. Triggered by a Timer asset (label proofpoint_trap_recheck), not real TRAP incidents.
 """
 
 
 import phantom.rules as phantom
 import json
-import hashlib
 from datetime import datetime, timedelta
+
+
+################################################################################
+## Global Custom Code Start
+################################################################################
+
+
+
+# Design notes (kept here because a VPE save replaces the module docstring):
+# Proofpoint TRAP Recheck
+#
+# Automation playbook triggered on container creation for label
+# 'proofpoint_trap_recheck' (a Timer asset tick, not a real TRAP incident
+# container). Periodically re-scans the whole in-window TRAP incident
+# backlog (all states, not just poll_state="new") for incidents that have
+# already been ingested into SOAR but changed since -- a field edit,
+# disposition change, or newly-linked event that on_poll's own checkpoint-
+# based main pass would never see again once an incident has a container.
+#
+# Moved out of the connector's on_poll 2026-08-18 (previously
+# _run_recheck_pass/_incident_signature) -- see uc2_implementation_plan.md's
+# "fold into pb" entry for the reasoning. Custom list
+# `proofpoint_trap_recheck_state` (columns: incident_id, signature) replaces
+# the connector's self._state["incident_hashes"]/["incident_event_ids"]
+# persistent state -- durable across playbook runs the same way, just
+# playbook-owned instead of connector-owned. Dropped the connector's
+# newly-linked-event diffing in favor of a simpler design: any detected
+# change re-fetches/re-vaults ALL of that incident's MIME bodies, relying on
+# the already-proven SDI-based artifact dedup (native "add artifact" 400s
+# harmlessly on a duplicate SDI) instead of tracking per-incident event_ids.
+#
+# Trigger: Container created on label 'proofpoint_trap_recheck' (Timer asset)
+
+import hashlib
 
 STATE_LIST_NAME = "proofpoint_trap_recheck_state"
 DEFAULT_LOOKBACK_HOURS = 168  # 7 days, matches the connector's old default
-
-
-@phantom.playbook_block()
-def on_start(container):
-    phantom.debug('on_start() called')
-
-    list_incidents(container=container)
-
-    return
-
-
-@phantom.playbook_block()
-def list_incidents(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
-    phantom.debug("list_incidents() called")
-
-    ################################################################################
-    # state="" -- confirmed (mock_api_gateway.py's parse_qs default drops an
-    # empty-valued query param, same as omitted) to mean "all states", not
-    # the action's own "new" default -- this pass must see open/closed
-    # incidents too, the exact gap the main on_poll pass can't cover.
-    # hours_back a literal constant, not playbook-input-driven -- kept
-    # simple deliberately, see module docstring.
-    ################################################################################
-
-    parameters = [{
-        "state": "",
-        "hours_back": str(DEFAULT_LOOKBACK_HOURS),
-    }]
-
-    phantom.act("list incidents", parameters=parameters, name="list_incidents", assets=["proofpoint_trap_mock"], callback=process_incidents)
-
-    return
 
 
 def _get_field_value(incident, field_name):
@@ -103,15 +82,81 @@ def _incident_signature(incident):
     event_info = _build_event_info_cef(incident)
     payload = json.dumps({"state": state, "event_info": event_info}, sort_keys=True)
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
+################################################################################
+## Global Custom Code End
+################################################################################
 
 @phantom.playbook_block()
-def process_incidents(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
-    phantom.debug("process_incidents() called")
+def on_start(container):
+    phantom.debug('on_start() called')
+
+    # call 'list_incidents' block
+    list_incidents(container=container)
+
+    return
+
+@phantom.playbook_block()
+def list_incidents(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
+    phantom.debug("list_incidents() called")
+
+    # phantom.debug('Action: {0} {1}'.format(action['name'], ('SUCCEEDED' if success else 'FAILED')))
+
+    ################################################################################
+    # List all TRAP incidents (any state) created within the lookback window.
+    ################################################################################
+
+    parameters = []
+
+    parameters.append({
+        "state": "",
+        "hours_back": 168,
+    })
 
     ################################################################################
     ## Custom Code Start
     ################################################################################
+    ################################################################################
+
+    # state "" means every state -- this pass must see open and closed incidents
+    # too, the ones the on_poll main pass no longer looks at. Built here as well
+    # as in the block's bindings, so an empty value can never be dropped and
+    # fall back to the action's own default ("new").
+    parameters = [{
+        "state": "",
+        "hours_back": str(DEFAULT_LOOKBACK_HOURS),
+    }]
+
+    ################################################################################
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
+    phantom.act("list incidents", parameters=parameters, name="list_incidents", assets=["proofpoint_trap_mock"], callback=process_incidents)
+
+    return
+
+
+@phantom.playbook_block()
+def process_incidents(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
+    phantom.debug("process_incidents() called")
+
+    ################################################################################
+    # Diff each listed incident's signature against the recheck state list; incidents 
+    # that changed and already have a container go to the recheck batch.
+    ################################################################################
+
+    list_incidents_result_data = phantom.collect2(container=container, datapath=["list_incidents:action_result.status","list_incidents:action_result.data"], action_results=results)
+
+    list_incidents_result_item_0 = [item[0] for item in list_incidents_result_data]
+    list_incidents_result_item_1 = [item[1] for item in list_incidents_result_data]
+
+    process_incidents__incident_id = None
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+    ################################################################################
+
 
     result_data = phantom.collect2(
         container=container,
@@ -197,22 +242,24 @@ def process_incidents(action=None, success=None, container=None, results=None, h
 
     phantom.debug("{} incident(s) changed and already have a container".format(len(to_recheck)))
 
-    action_params = [{"incident_id": row["incident_id"]} for row in to_recheck]
-
     phantom.save_run_data(key="process_incidents:to_recheck", value=json.dumps(to_recheck))
     phantom.save_run_data(key="process_incidents:new_state", value=json.dumps(new_state))
-    phantom.save_run_data(key="process_incidents:action_params", value=json.dumps(action_params))
 
-    # Real output variable (not just save_run_data) so dispatch_mime_refetch
-    # (a native action node) can bind its list-fan-out parameter to it
-    # directly -- constraints.md's "output variables, not save_run_data,
-    # when data feeds native blocks downstream" rule, same convention as
-    # extract_data_to_artifacts's __name/__label/etc in proofpoint_trap_detail.py.
+    # The changed incidents' ids, also as the block's output (dispatch_mime_refetch
+    # binds to it for the VPE view; its own Custom Code reads to_recheck).
     process_incidents__incident_id = [row["incident_id"] for row in to_recheck]
 
     ################################################################################
+    ################################################################################
     ## Custom Code End
     ################################################################################
+
+    phantom.save_block_result(key="process_incidents__inputs:0:list_incidents:action_result.status", value=json.dumps(list_incidents_result_item_0))
+    phantom.save_block_result(key="process_incidents__inputs:1:list_incidents:action_result.data", value=json.dumps(list_incidents_result_item_1))
+
+    phantom.save_block_result(key="process_incidents:incident_id", value=json.dumps(process_incidents__incident_id))
+
+    phantom.save_block_result(key="process_incidents_called", value="True")
 
     dispatch_mime_refetch(container=container)
 
@@ -220,35 +267,75 @@ def process_incidents(action=None, success=None, container=None, results=None, h
 
 
 @phantom.playbook_block()
-def dispatch_mime_refetch(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
+def dispatch_mime_refetch(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
     phantom.debug("dispatch_mime_refetch() called")
 
+    # phantom.debug('Action: {0} {1}'.format(action['name'], ('SUCCEEDED' if success else 'FAILED')))
+
     ################################################################################
-    # Native action block ("download mime body"), one parameter set per
-    # changed incident, built by process_incidents. Same empty-list-skip
-    # pattern as proofpoint_trap_detail.py's dispatch_event_artifacts --
-    # phantom.act() with an empty parameters list has nothing to dispatch,
-    # so skip straight to the next block instead.
+    # Re-fetch and vault all MIME bodies for each changed incident.
     ################################################################################
 
-    action_params = json.loads(phantom.get_run_data(key="process_incidents:action_params") or "[]")
+    process_incidents__incident_id = json.loads(_ if (_ := phantom.get_run_data(key="process_incidents:incident_id")) != "" else "null")  # pylint: disable=used-before-assignment
 
-    if not action_params:
+    parameters = []
+
+    if process_incidents__incident_id is not None:
+        parameters.append({
+            "incident_id": process_incidents__incident_id,
+        })
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+    ################################################################################
+
+    # One "download mime body" per changed incident. The VPE builds ONE parameter
+    # set whose incident_id is the whole list; replace it with one set per
+    # incident -- the generated phantom.act() below then runs one app_run per set
+    # on this block's selected asset, and a VPE save keeps this section. Reads the
+    # run data rather than the generated variable, so a regenerated name cannot
+    # break it.
+    to_recheck = json.loads(phantom.get_run_data(key="process_incidents:to_recheck") or "null") or []
+    parameters = [{"incident_id": row["incident_id"]} for row in to_recheck]
+
+    if not parameters:
+        # Nothing changed this cycle: phantom.act() has nothing to dispatch, so
+        # go straight to the state update.
         phantom.debug("Nothing to recheck this cycle")
         dispatch_updates(container=container)
         return
 
-    phantom.act("download mime body", parameters=action_params, name="dispatch_mime_refetch", assets=["proofpoint_trap_mock"], callback=dispatch_updates)
+    ################################################################################
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
+    phantom.act("download mime body", parameters=parameters, name="dispatch_mime_refetch", assets=["proofpoint_trap_mock"], callback=dispatch_updates)
 
     return
 
 
 @phantom.playbook_block()
-def dispatch_updates(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
+def dispatch_updates(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
     phantom.debug("dispatch_updates() called")
 
     ################################################################################
+    # Build MIME Body + Event Info Update artifacts on each changed incident's container 
+    # (raw REST, cross-container write), then persist the new signatures to the recheck 
+    # state list.
+    ################################################################################
+
+    dispatch_mime_refetch_result_data = phantom.collect2(container=container, datapath=["dispatch_mime_refetch:action_result.parameter.incident_id","dispatch_mime_refetch:action_result.data.*.event_id","dispatch_mime_refetch:action_result.data.*.vault_id","dispatch_mime_refetch:action_result.data.*.file_name"], action_results=results)
+
+    dispatch_mime_refetch_parameter_incident_id = [item[0] for item in dispatch_mime_refetch_result_data]
+    dispatch_mime_refetch_result_item_1 = [item[1] for item in dispatch_mime_refetch_result_data]
+    dispatch_mime_refetch_result_item_2 = [item[2] for item in dispatch_mime_refetch_result_data]
+    dispatch_mime_refetch_result_item_3 = [item[3] for item in dispatch_mime_refetch_result_data]
+
+    ################################################################################
     ## Custom Code Start
+    ################################################################################
     ################################################################################
 
     try:
@@ -377,12 +464,44 @@ def dispatch_updates(action=None, success=None, container=None, results=None, ha
         phantom.debug("Failed to update recheck state list: {}".format(str(e)))
 
     ################################################################################
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
+    phantom.save_block_result(key="dispatch_updates__inputs:0:dispatch_mime_refetch:action_result.parameter.incident_id", value=json.dumps(dispatch_mime_refetch_parameter_incident_id))
+    phantom.save_block_result(key="dispatch_updates__inputs:1:dispatch_mime_refetch:action_result.data.*.event_id", value=json.dumps(dispatch_mime_refetch_result_item_1))
+    phantom.save_block_result(key="dispatch_updates__inputs:2:dispatch_mime_refetch:action_result.data.*.vault_id", value=json.dumps(dispatch_mime_refetch_result_item_2))
+    phantom.save_block_result(key="dispatch_updates__inputs:3:dispatch_mime_refetch:action_result.data.*.file_name", value=json.dumps(dispatch_mime_refetch_result_item_3))
+
+    phantom.save_block_result(key="dispatch_updates_called", value="True")
+
+    return
+
+
+@phantom.playbook_block()
+def on_finish(container, summary):
+    phantom.debug("on_finish() called")
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+    ################################################################################
+
+    # This function is called after all actions are completed.
+    # summary of all the action and/or all details of actions
+    # can be collected here.
+
+    # summary_json = phantom.get_summary()
+    # if 'result' in summary_json:
+        # for action_result in summary_json['result']:
+            # if 'action_run_id' in action_result:
+                # action_results = phantom.get_action_results(action_run_id=action_result['action_run_id'], result_data=False, flatten=False)
+                # phantom.debug(action_results)
+
+    ################################################################################
+    ################################################################################
     ## Custom Code End
     ################################################################################
 
     return
 
-
-def on_finish(container, summary):
-    phantom.debug("on_finish() called")
-    return

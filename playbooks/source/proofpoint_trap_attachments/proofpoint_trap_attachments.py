@@ -1,94 +1,97 @@
 """
-Proofpoint TRAP Attachment Extraction
-
-Automation playbook triggered on artifact creation for label 'proofpoint_trap'.
-Scans the container for 'MIME Body' artifacts (vaulted raw .eml, created by the
-proofpoint_trap connector's on_poll — see FR-21), parses each one for:
-  - file attachments — vaulted as their own artifact (name 'Email Attachment',
-    cef.vaultId + cef.fileName + cef.fileHashSha256 + cef.fileType) for
-    downstream analyst review / future reputation enrichment (UC8). Includes
-    forwarded emails attached as message/rfc822 (the raw embedded message is
-    serialized and vaulted like any other attachment — these were silently
-    skipped before 2026-08-12 because message/rfc822 parts report
-    is_multipart()=True, tripping the "skip container parts" check meant for
-    genuine multipart/* wrappers). Flags a MIME-type/filename mismatch
-    (mimetypes.guess_type vs the part's declared Content-Type) as a possible
-    disguised-executable signal.
-  - Cc recipients — parsed directly from the raw MIME headers (getaddresses),
-    as 'Recipient Email' artifacts (emailRole='cc'), matching PB1's existing
-    artifact shape. PB1 attempts this too but only from the structured API's
-    headers dict, which real payloads never populate (see its own comment) —
-    this is the reliable path.
-  - Return-Path vs From mismatch — envelope sender vs displayed sender is a
-    classic spoofing signal, surfaced in the Email Content note.
-  - the rendered email body (HTML preferred, falls back to plain text) and
-    auth/routing headers (Authentication-Results, Reply-To, X-Originating-IP,
-    Received chain) — none of this exists in TRAP's structured "get incident"
-    API, only in the raw MIME — added as an "Email Content" note per event so
-    an analyst can read the actual message without downloading the .eml.
-
-    phantom.add_note() sanitizes content through a real (undocumented) tag
-    allowlist, confirmed live 2026-08-12 by probing it directly: h1/h2/p/b/
-    ul/li/hr/span/br survive; pre/details/summary/code/div/i are silently
-    stripped (text kept, tag dropped); <a href=...> keeps the <a> tag but
-    strips the href attribute, so links never work. Formatting below only
-    uses the confirmed-safe tags — no <pre>, no <details>, no links. A raw
-    HTML body from a real phishing email (tables, images, div layouts) will
-    still get stripped down to bare readable text by this same sanitizer;
-    that's a platform limitation, not something this playbook can route
-    around short of writing HTML to a note some other way.
-
-Re-scans all MIME Body artifacts on every run (same pattern as ip_enrich) and
-skips any already marked processed via a data.attachments_extracted marker —
-tolerates the "artifact_created fires on container AND artifact creation"
-platform behavior (constraints.md) without needing to distinguish trigger type.
-
-Trigger: Artifact created, label 'proofpoint_trap'
+Automation playbook triggered on artifact creation for label &#39;proofpoint_trap&#39;. Scans the container for &#39;MIME Body&#39; artifacts (vaulted raw .eml, created by the connector&#39;s on_poll -- see FR-21), parses each one for file attachments, and vaults each attachment as its own &#39;Email Attachment&#39; artifact (vaultId, fileName, fileHashSha256).
 """
 
 
 import phantom.rules as phantom
 import json
-import hashlib
-import html
-import email
-import email.policy
-import mimetypes
-import os
-import tempfile
-from email.utils import getaddresses, parseaddr
+from datetime import datetime, timedelta
 
 
 @phantom.playbook_block()
 def on_start(container):
     phantom.debug('on_start() called')
 
+    # call 'extract_attachments' block
     extract_attachments(container=container)
 
     return
 
-
 @phantom.playbook_block()
-def extract_attachments(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
+def extract_attachments(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
     phantom.debug("extract_attachments() called")
 
     ################################################################################
-    # Find MIME Body artifacts not yet processed, parse each .eml from the vault,
+    # Find MIME Body artifacts not yet processed, parse each .eml from the vault, 
     # and vault out any file attachments as their own artifacts.
     ################################################################################
+
+    container_artifact_data = phantom.collect2(container=container, datapath=["artifact:*.name","artifact:*.id","artifact:*.cef.vaultId","artifact:*.cef.fileName"])
+
+    container_artifact_header_item_0 = [item[0] for item in container_artifact_data]
+    container_artifact_header_item_1 = [item[1] for item in container_artifact_data]
+    container_artifact_cef_item_2 = [item[2] for item in container_artifact_data]
+    container_artifact_cef_item_3 = [item[3] for item in container_artifact_data]
 
     ################################################################################
     ## Custom Code Start
     ################################################################################
 
+    # Design notes (kept here because a VPE save replaces the module docstring):
+    # Proofpoint TRAP Attachment Extraction
+    #
+    # Automation playbook triggered on artifact creation for label 'proofpoint_trap'.
+    # Scans the container for 'MIME Body' artifacts (vaulted raw .eml, created by the
+    # proofpoint_trap connector's on_poll — see FR-21), parses each one for:
+    # - file attachments — vaulted as their own artifact (name 'Email Attachment',
+    # cef.vaultId + cef.fileName + cef.fileHashSha256 + cef.fileType) for
+    # downstream analyst review / future reputation enrichment (UC8). Includes
+    # forwarded emails attached as message/rfc822 (the raw embedded message is
+    # serialized and vaulted like any other attachment — these were silently
+    # skipped before 2026-08-12 because message/rfc822 parts report
+    # is_multipart()=True, tripping the "skip container parts" check meant for
+    # genuine multipart/* wrappers). Flags a MIME-type/filename mismatch
+    # (mimetypes.guess_type vs the part's declared Content-Type) as a possible
+    # disguised-executable signal.
+    # - Cc recipients — parsed directly from the raw MIME headers (getaddresses),
+    # as 'Recipient Email' artifacts (emailRole='cc'), matching PB1's existing
+    # artifact shape. PB1 attempts this too but only from the structured API's
+    # headers dict, which real payloads never populate (see its own comment) —
+    # this is the reliable path.
+    # - Return-Path vs From mismatch — envelope sender vs displayed sender is a
+    # classic spoofing signal, surfaced in the Email Content note.
+    # - the rendered email body (HTML preferred, falls back to plain text) and
+    # auth/routing headers (Authentication-Results, Reply-To, X-Originating-IP,
+    # Received chain) — none of this exists in TRAP's structured "get incident"
+    # API, only in the raw MIME — added as an "Email Content" note per event so
+    # an analyst can read the actual message without downloading the .eml.
+    #
+    # phantom.add_note() sanitizes content through a real (undocumented) tag
+    # allowlist, confirmed live 2026-08-12 by probing it directly: h1/h2/p/b/
+    # ul/li/hr/span/br survive; pre/details/summary/code/div/i are silently
+    # stripped (text kept, tag dropped); <a href=...> keeps the <a> tag but
+    # strips the href attribute, so links never work. Formatting below only
+    # uses the confirmed-safe tags — no <pre>, no <details>, no links. A raw
+    # HTML body from a real phishing email (tables, images, div layouts) will
+    # still get stripped down to bare readable text by this same sanitizer;
+    # that's a platform limitation, not something this playbook can route
+    # around short of writing HTML to a note some other way.
+    #
+    # Re-scans all MIME Body artifacts on every run (same pattern as ip_enrich) and
+    # skips any already marked processed via a data.attachments_extracted marker —
+    # tolerates the "artifact_created fires on container AND artifact creation"
+    # platform behavior (constraints.md) without needing to distinguish trigger type.
+    #
+    # Trigger: Artifact created, label 'proofpoint_trap'
+
+
     # Local re-imports — GUI edits recompile/lint each code block in isolation
     # and don't see module-level imports (same gap already documented for
     # urllib.parse/uuid elsewhere in this UC's playbooks).
-    import os
+    import base64
     import hashlib
     import html
     import mimetypes
-    import tempfile
     import email
     import email.policy
     from email.utils import getaddresses, parseaddr
@@ -135,42 +138,26 @@ def extract_attachments(action=None, success=None, container=None, results=None,
         incident_id = sdi_parts[0].replace("trap-", "", 1) if sdi_parts else "?"
         event_id = sdi_parts[1] if len(sdi_parts) > 1 else "?"
 
+        # Read the email's bytes over REST (download_attachment by vault id)
+        # rather than opening the vault file's local path: SOAR's validator flags
+        # any filesystem access in a playbook (no-filesystem-access), and the
+        # REST route does not depend on this node holding the file.
         try:
-            vi_result = phantom.vault_info(vault_id=mime["vault_id"])
+            download = phantom.requests.get(
+                uri=phantom.build_phantom_rest_url("download_attachment"),
+                params={"vault_id": mime["vault_id"]},
+                verify=False,
+            )
         except Exception as e:
-            phantom.debug("vault_info() raised for vault_id {}: {}".format(mime["vault_id"], str(e)))
+            phantom.debug("Could not download vault file {}: {}".format(mime["vault_id"], str(e)))
             continue
-
-        # phantom.vault_info()'s return shape isn't independently verified anywhere
-        # in this repo yet (see memory project_soar85_vault_api_quirks — only the
-        # official-docs signature was confirmed, not a live return value). Handle
-        # both the documented 3-tuple form (success, message, info_list) and a
-        # bare list-of-dicts return defensively, and log the raw shape on mismatch
-        # so a real run pins this down for good.
-        vault_entries = None
-        if isinstance(vi_result, tuple) and len(vi_result) == 3:
-            vi_success, vi_message, vi_entries = vi_result
-            if vi_success:
-                vault_entries = list(vi_entries) if vi_entries else []
-            else:
-                phantom.debug("vault_info failed for vault_id {}: {}".format(mime["vault_id"], vi_message))
-        elif isinstance(vi_result, (list, tuple)):
-            vault_entries = list(vi_result)
-        else:
-            phantom.debug("Unexpected vault_info() return type {} for vault_id {}: {!r}".format(type(vi_result), mime["vault_id"], vi_result))
-
-        if not vault_entries:
-            continue
-
-        first_entry = vault_entries[0]
-        file_path = first_entry.get("path") if isinstance(first_entry, dict) else None
-        if not file_path or not os.path.exists(file_path):
-            phantom.debug("No usable local path from vault_info for vault_id {}: {!r}".format(mime["vault_id"], first_entry))
+        if download.status_code != 200 or not download.content:
+            phantom.debug("Vault download for {} returned HTTP {} ({} bytes)".format(
+                mime["vault_id"], download.status_code, len(download.content or b"")))
             continue
 
         try:
-            with open(file_path, "rb") as fp:
-                parsed = email.message_from_binary_file(fp, policy=email.policy.default)
+            parsed = email.message_from_bytes(download.content, policy=email.policy.default)
         except Exception as e:
             phantom.debug("Failed to parse MIME body {}: {}".format(source_file_name, str(e)))
             continue
@@ -210,25 +197,26 @@ def extract_attachments(action=None, success=None, container=None, results=None,
             guessed_type, _ = mimetypes.guess_type(filename)
             type_mismatch = bool(guessed_type) and guessed_type != content_type
 
-            tmp_fd, tmp_path = tempfile.mkstemp(prefix="trap_attach_")
-            os.close(tmp_fd)
+            # Store the attachment through REST with its content inline
+            # (container_attachment, base64) instead of writing a temp file for
+            # phantom.vault_add(): no filesystem access in the playbook.
             try:
-                with open(tmp_path, "wb") as tmp_fp:
-                    tmp_fp.write(payload)
-
-                success_va, msg_va, attachment_vault_id = phantom.vault_add(
-                    container=container_id,
-                    file_location=tmp_path,
-                    file_name=filename,
-                )
-            finally:
-                try:
-                    os.remove(tmp_path)
-                except OSError:
-                    pass
-
-            if not success_va:
-                phantom.debug("vault_add failed for {}: {}".format(filename, msg_va))
+                upload = phantom.requests.post(
+                    uri=phantom.build_phantom_rest_url("container_attachment"),
+                    data=json.dumps({
+                        "container_id": container_id,
+                        "file_content": base64.b64encode(payload).decode("ascii"),
+                        "file_name": filename,
+                        "metadata": {"contains": ["vault id"]},
+                    }),
+                    verify=False,
+                ).json()
+            except Exception as e:
+                phantom.debug("Vault upload failed for {}: {}".format(filename, str(e)))
+                continue
+            attachment_vault_id = upload.get("vault_id")
+            if not upload.get("succeeded") or not attachment_vault_id:
+                phantom.debug("Vault upload failed for {}: {}".format(filename, upload.get("message")))
                 continue
 
             attachment_cef = {
@@ -403,9 +391,40 @@ def extract_attachments(action=None, success=None, container=None, results=None,
     ## Custom Code End
     ################################################################################
 
+    phantom.save_block_result(key="extract_attachments__inputs:0:artifact:*.name", value=json.dumps(container_artifact_header_item_0))
+    phantom.save_block_result(key="extract_attachments__inputs:1:artifact:*.id", value=json.dumps(container_artifact_header_item_1))
+    phantom.save_block_result(key="extract_attachments__inputs:2:artifact:*.cef.vaultId", value=json.dumps(container_artifact_cef_item_2))
+    phantom.save_block_result(key="extract_attachments__inputs:3:artifact:*.cef.fileName", value=json.dumps(container_artifact_cef_item_3))
+
+    phantom.save_block_result(key="extract_attachments_called", value="True")
+
     return
 
 
+@phantom.playbook_block()
 def on_finish(container, summary):
     phantom.debug("on_finish() called")
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+    ################################################################################
+
+    # This function is called after all actions are completed.
+    # summary of all the action and/or all details of actions
+    # can be collected here.
+
+    # summary_json = phantom.get_summary()
+    # if 'result' in summary_json:
+        # for action_result in summary_json['result']:
+            # if 'action_run_id' in action_result:
+                # action_results = phantom.get_action_results(action_run_id=action_result['action_run_id'], result_data=False, flatten=False)
+                # phantom.debug(action_results)
+
+    ################################################################################
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
     return
+

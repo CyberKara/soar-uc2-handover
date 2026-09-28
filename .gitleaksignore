@@ -1,0 +1,14 @@
+playbooks/source/proofpoint_trap_acknowledge/proofpoint_trap_acknowledge.json:generic-api-key:126
+playbooks/source/proofpoint_trap_acknowledge/proofpoint_trap_acknowledge.json:generic-api-key:240
+playbooks/source/proofpoint_trap_acknowledge/proofpoint_trap_acknowledge.json:generic-api-key:307
+playbooks/source/proofpoint_trap_acknowledge/proofpoint_trap_acknowledge.json:generic-api-key:385
+playbooks/source/proofpoint_trap_close/proofpoint_trap_close.json:generic-api-key:145
+playbooks/source/proofpoint_trap_close/proofpoint_trap_close.json:generic-api-key:260
+playbooks/source/proofpoint_trap_close/proofpoint_trap_close.json:generic-api-key:338
+playbooks/source/proofpoint_trap_close/proofpoint_trap_close.json:generic-api-key:477
+playbooks/source/proofpoint_trap_close/proofpoint_trap_close.json:generic-api-key:494
+playbooks/source/proofpoint_trap_isolation_notify/proofpoint_trap_isolation_notify.json:generic-api-key:105
+playbooks/source/proofpoint_trap_isolation_notify/proofpoint_trap_isolation_notify.json:generic-api-key:227
+playbooks/source/proofpoint_trap_recheck/proofpoint_trap_recheck.json:generic-api-key:189
+playbooks/source/proofpoint_trap_recheck/proofpoint_trap_recheck.json:generic-api-key:99
+playbooks/source/proofpoint_trap_triage/proofpoint_trap_triage.json:generic-api-key:84

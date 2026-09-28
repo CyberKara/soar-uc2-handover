@@ -39,6 +39,25 @@ asset names in the action blocks (a save). On the real appliance a save had turn
   (`"default": ""` on `requiredParameters`, a float canvas position, the VPE's `hash`), now folded in —
   the repo equals live id 93. A PB7-triggered re-run on that user-saved id 93 (container 1202,
   17:41Z) posted 3 new artifacts, recognised 6 as present (incl. PB7's MIME Body), all actions success.
+
+**PB2-PB7 made save-safe, PB8 added (2026-09-28, later).** Same rules as PB1. Action blocks rebuild
+their parameters in Custom Code (PB4-PB7); module-level constants/imports/helpers moved to Global Custom
+Code (PB4, PB6, PB7); PB7's MIME fan-out moved into `dispatch_mime_refetch`'s Custom Code; PB4/PB5's
+prompts are code blocks calling `phantom.prompt2()` (approver: container owner, else soar_local_admin --
+user decision; a native prompt block cannot keep that fallback); PB4/PB5 action bindings fixed (they
+pointed at `extract_incident_id:custom_function:incident_id`, a code-block path on a utility block);
+PB5's `add_close_note` has `notRequiredJoins` (a save had generated a join that waited for
+`add_trap_comment`, so an unanswered prompt left no note); PB3 reads and writes the Vault over REST
+(`download_attachment`, `container_attachment`) instead of the filesystem -- SOAR's validator flagged
+4 x `no-filesystem-access`. The repo versions are the user's VPE-saved ones plus those fixes.
+Live-verified on soar8: PB2/PB3/PB7 on a real trigger; PB3 with a test email carrying an attachment
+(REST read, REST vault write, `Email Attachment` with the type-mismatch warning); PB4 (set-open + comment;
+assignee still refused for missing `team` -- the on-hold bug, unchanged); PB5 approved (TRAP close +
+comment, container closed) and denied (else path, note written through the join); PB6 up to the send
+(lab mock SMTP down). **PB8 `proofpoint_trap_summary`** (new, data, manual): reads every artifact on the
+container and writes ONE "TRAP Summary" note, a markdown table per artifact type, rewritten in place
+on each run (REST, since `phantom.add_note()` cannot update); 250-row cap per table. The user confirmed
+the markdown tables render as tables in the SOAR note view.
 - **Re-runs post only new artifacts.** A re-run (PB7 flags a changed incident, usually one that
   gained alerts) used to re-post the whole list — 180 → 323 `add artifact` calls per run on a real
   appliance incident, nearly all rejected as duplicates. `build_artifact_list` now skips any

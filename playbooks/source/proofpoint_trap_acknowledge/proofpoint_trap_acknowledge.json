@@ -4,7 +4,7 @@
     "category": "Email Abuse",
     "coa": {
         "data": {
-            "hash": "",
+            "hash": "da2c00270fecaaaea38237fbc11707444aace842",
             "edges": [
                 {
                     "id": "port_0_to_port_2",
@@ -73,7 +73,7 @@
             "nodes": {
                 "0": {
                     "x": 190,
-                    "y": 0,
+                    "y": -6.394884621840902e-14,
                     "id": "0",
                     "data": {
                         "id": "0",
@@ -84,7 +84,8 @@
                         "functionName": "on_start"
                     },
                     "type": "start",
-                    "errors": {}
+                    "errors": {},
+                    "warnings": {}
                 },
                 "1": {
                     "x": 190,
@@ -101,7 +102,8 @@
                     },
                     "type": "end",
                     "errors": {},
-                    "userCode": "\n"
+                    "userCode": "    ################################################################################\n\n    # This function is called after all actions are completed.\n    # summary of all the action and/or all details of actions\n    # can be collected here.\n\n    # summary_json = phantom.get_summary()\n    # if 'result' in summary_json:\n        # for action_result in summary_json['result']:\n            # if 'action_run_id' in action_result:\n                # action_results = phantom.get_action_results(action_run_id=action_result['action_run_id'], result_data=False, flatten=False)\n                # phantom.debug(action_results)\n\n    ################################################################################\n",
+                    "warnings": {}
                 },
                 "2": {
                     "x": 190,
@@ -109,6 +111,31 @@
                     "id": "2",
                     "data": {
                         "id": "2",
+                        "loop": {
+                            "enabled": false,
+                            "pauseUnit": "m",
+                            "conditions": [
+                                {
+                                    "type": "if",
+                                    "logic": "and",
+                                    "comparisons": [
+                                        {
+                                            "op": "==",
+                                            "param": "",
+                                            "value": "",
+                                            "comparisonKey": "comparison_key_0"
+                                        }
+                                    ],
+                                    "conditionKey": "condition_key_0",
+                                    "conditionIndex": 0
+                                }
+                            ],
+                            "pauseValue": 2,
+                            "exitAfterUnit": "m",
+                            "exitLoopAfter": 2,
+                            "exitAfterValue": 10,
+                            "exitConditionEnabled": false
+                        },
                         "type": "utility",
                         "values": {
                             "proofpoint_trap_extract_incident_id": {}
@@ -138,7 +165,8 @@
                         }
                     },
                     "type": "utility",
-                    "errors": {}
+                    "errors": {},
+                    "warnings": {}
                 },
                 "3": {
                     "x": 190,
@@ -146,38 +174,23 @@
                     "id": "3",
                     "data": {
                         "id": "3",
-                        "type": "prompt",
-                        "message": "**TRAP Incident {0}**\nContainer: {1}\n\nAcknowledging this incident will add your comment to the TRAP incident, assign it to SOAR, and move its status from new to open.",
+                        "type": "code",
                         "advanced": {
                             "join": [],
-                            "note": "Approver: container_owner, falls back to soar_local_admin. 30min timeout.",
+                            "note": "Code block, not a native prompt: a VPE save regenerates prompt blocks whole and would drop the soar_local_admin fallback (TRAP containers have no owner). Calls phantom.prompt2 with callback process_comment, then returns.",
                             "customName": "prompt comment",
-                            "description": "Prompt analyst for an acknowledgement comment.",
+                            "description": "Ask the analyst for an acknowledgement comment (approver: container owner, else soar_local_admin).",
                             "customNameId": 0
                         },
-                        "approver": {
-                            "type": "user",
-                            "value": "container_owner"
-                        },
-                        "responses": [
-                            {
-                                "required": true,
-                                "responseType": "message",
-                                "responsePrompt": "Comment",
-                                "responseOptions": []
-                            }
-                        ],
-                        "functionId": 2,
-                        "parameters": [
-                            "extract_incident_id:custom_function:incident_id",
-                            "container:name"
-                        ],
+                        "functionId": 9,
                         "functionName": "prompt_comment",
-                        "responseTime": 30,
-                        "hasExternalApprover": false
+                        "inputParameters": [],
+                        "outputVariables": []
                     },
-                    "type": "prompt",
-                    "errors": {}
+                    "type": "code",
+                    "errors": {},
+                    "userCode": "    ################################################################################\n\n    # The prompt is raised from code, not from a native prompt block: a VPE save\n    # regenerates prompt blocks whole (they have no Custom Code), which would drop\n    # this approver fallback -- TRAP containers never get an owner assigned. The\n    # callback continues the flow; the return below stops the generated call to\n    # process_comment from also running right away.\n    user = container.get('owner_name', None) or 'soar_local_admin'\n    role = None\n    message = \"\"\"**TRAP Incident {0}**\nContainer: {1}\n\nAcknowledging this incident will add your comment to the TRAP incident,\nassign it to SOAR, and move its status from new to open.\"\"\"\n\n    parameters = [\n        \"read_incident_id:custom_function:incident_id\",\n        \"container:name\",\n    ]\n\n    response_types = [\n        {\n            \"prompt\": \"Comment\",\n            \"options\": {\n                \"type\": \"message\",\n                \"required\": True,\n            },\n        },\n    ]\n\n    phantom.prompt2(container=container, user=user, role=role, message=message, respond_in_mins=30, name=\"prompt_comment\", parameters=parameters, response_types=response_types, callback=process_comment)\n\n    return\n\n    ################################################################################\n",
+                    "warnings": {}
                 },
                 "4": {
                     "x": 190,
@@ -195,17 +208,15 @@
                         },
                         "functionId": 3,
                         "functionName": "process_comment",
-                        "inputParameters": [
-                            "prompt_comment:action_result.summary.responses.0",
-                            "prompt_comment:action_result.status"
-                        ],
+                        "inputParameters": [],
                         "outputVariables": [
                             "comment"
                         ]
                     },
                     "type": "code",
                     "errors": {},
-                    "userCode": "    ################################################################################\n\n    run_id = phantom.get_playbook_run_id_()\n\n    comment = ACK_FALLBACK_COMMENT\n    prompt_status = \"expired\"\n\n    try:\n        approval_url = phantom.build_phantom_rest_url(\"approval\") + \\\n            \"?_filter_playbook_run={}&_filter_name=\\\"prompt_comment\\\"&sort=id&order=desc&page_size=1\".format(run_id)\n        approvals = phantom.requests.get(uri=approval_url, verify=False).json().get(\"data\") or []\n    except Exception as e:\n        phantom.error(\"Could not fetch approval record for playbook_run {}: {}\".format(run_id, str(e)))\n        approvals = []\n\n    if approvals:\n        approval = approvals[0]\n        responses = approval.get(\"responses\") or []\n        if approval.get(\"status\") == \"approved\" and responses and responses[0]:\n            comment = responses[0]\n            prompt_status = \"success\"\n        else:\n            phantom.debug(\"Approval status '{}' for playbook_run {} -- treating as expired/no response\".format(approval.get(\"status\"), run_id))\n    else:\n        phantom.error(\"No approval record found for playbook_run {}\".format(run_id))\n\n    phantom.debug(\"Analyst comment: '{}', status: {}\".format(comment, prompt_status))\n\n    process_comment__comment = comment\n\n    ################################################################################\n"
+                    "userCode": "    ################################################################################\n\n\n    run_id = phantom.get_playbook_run_id_()\n\n    comment = ACK_FALLBACK_COMMENT\n    prompt_status = \"expired\"\n\n    try:\n        approval_url = phantom.build_phantom_rest_url(\"approval\") + \\\n            \"?_filter_playbook_run={}&_filter_name=\\\"prompt_comment\\\"&sort=id&order=desc&page_size=1\".format(run_id)\n        approvals = phantom.requests.get(uri=approval_url, verify=False).json().get(\"data\") or []\n    except Exception as e:\n        phantom.error(\"Could not fetch approval record for playbook_run {}: {}\".format(run_id, str(e)))\n        approvals = []\n\n    if approvals:\n        approval = approvals[0]\n        responses = approval.get(\"responses\") or []\n        if approval.get(\"status\") == \"approved\" and responses and responses[0]:\n            comment = responses[0]\n            prompt_status = \"success\"\n        else:\n            phantom.debug(\"Approval status '{}' for playbook_run {} -- treating as expired/no response\".format(approval.get(\"status\"), run_id))\n    else:\n        phantom.error(\"No approval record found for playbook_run {}\".format(run_id))\n\n    phantom.debug(\"Analyst comment: '{}', status: {}\".format(comment, prompt_status))\n\n    process_comment__comment = comment\n\n    # Also saved as run data: the action blocks and the note read these keys.\n    phantom.save_run_data(key=\"process_comment:comment\", value=json.dumps(process_comment__comment))\n    phantom.save_run_data(key=\"process_comment:prompt_status\", value=json.dumps(prompt_status))\n\n    ################################################################################\n",
+                    "warnings": {}
                 },
                 "5": {
                     "x": 190,
@@ -213,6 +224,32 @@
                     "id": "5",
                     "data": {
                         "id": "5",
+                        "tab": "byConnector",
+                        "loop": {
+                            "enabled": false,
+                            "pauseUnit": "m",
+                            "conditions": [
+                                {
+                                    "type": "if",
+                                    "logic": "and",
+                                    "comparisons": [
+                                        {
+                                            "op": "==",
+                                            "param": "",
+                                            "value": "",
+                                            "comparisonKey": "comparison_key_0"
+                                        }
+                                    ],
+                                    "conditionKey": "condition_key_0",
+                                    "conditionIndex": 0
+                                }
+                            ],
+                            "pauseValue": 2,
+                            "exitAfterUnit": "m",
+                            "exitLoopAfter": 2,
+                            "exitAfterValue": 10,
+                            "exitConditionEnabled": false
+                        },
                         "type": "action",
                         "action": "update team and assignee",
                         "advanced": {
@@ -226,18 +263,8 @@
                         "actionType": "generic",
                         "functionId": 4,
                         "parameters": {
-                            "assignee": {
-                                "template": "SOAR",
-                                "functionId": 4,
-                                "parameters": []
-                            },
-                            "incident_id": {
-                                "template": "{0}",
-                                "functionId": 4,
-                                "parameters": [
-                                    "extract_incident_id:custom_function:incident_id"
-                                ]
-                            }
+                            "assignee": "SOAR",
+                            "incident_id": "read_incident_id:custom_function:incident_id"
                         },
                         "connectorId": "a7c41f8e-3b2d-4e9a-bf56-1d8e9a4c2f7b",
                         "functionName": "update_incident_assignee",
@@ -254,7 +281,9 @@
                         ]
                     },
                     "type": "action",
-                    "errors": {}
+                    "errors": {},
+                    "userCode": "    ################################################################################\n\n    # Built from run data, so the call does not depend on how the VPE names its\n    # generated variables. Sends assignee only -- the connector requires team as\n    # well, a known bug that stays on hold until the TRAP web-UI reassignment test.\n    read_incident_id__incident_id = json.loads(phantom.get_run_data(key=\"read_incident_id:incident_id\") or \"null\")\n\n    parameters = [{\n        \"incident_id\": read_incident_id__incident_id,\n        \"assignee\": ACK_ASSIGNEE,\n    }]\n\n    ################################################################################\n",
+                    "warnings": {}
                 },
                 "6": {
                     "x": 190,
@@ -262,6 +291,32 @@
                     "id": "6",
                     "data": {
                         "id": "6",
+                        "tab": "byConnector",
+                        "loop": {
+                            "enabled": false,
+                            "pauseUnit": "m",
+                            "conditions": [
+                                {
+                                    "type": "if",
+                                    "logic": "and",
+                                    "comparisons": [
+                                        {
+                                            "op": "==",
+                                            "param": "",
+                                            "value": "",
+                                            "comparisonKey": "comparison_key_0"
+                                        }
+                                    ],
+                                    "conditionKey": "condition_key_0",
+                                    "conditionIndex": 0
+                                }
+                            ],
+                            "pauseValue": 2,
+                            "exitAfterUnit": "m",
+                            "exitLoopAfter": 2,
+                            "exitAfterValue": 10,
+                            "exitConditionEnabled": false
+                        },
                         "type": "action",
                         "action": "set incident field value",
                         "advanced": {
@@ -275,23 +330,9 @@
                         "actionType": "generic",
                         "functionId": 5,
                         "parameters": {
-                            "field": {
-                                "template": "status",
-                                "functionId": 5,
-                                "parameters": []
-                            },
-                            "value": {
-                                "template": "open",
-                                "functionId": 5,
-                                "parameters": []
-                            },
-                            "incident_id": {
-                                "template": "{0}",
-                                "functionId": 5,
-                                "parameters": [
-                                    "extract_incident_id:custom_function:incident_id"
-                                ]
-                            }
+                            "field": "status",
+                            "value": "open",
+                            "incident_id": "read_incident_id:custom_function:incident_id"
                         },
                         "connectorId": "a7c41f8e-3b2d-4e9a-bf56-1d8e9a4c2f7b",
                         "functionName": "set_incident_open",
@@ -303,12 +344,24 @@
                             {
                                 "field": "incident_id",
                                 "default": "",
+                                "data_type": "numeric"
+                            },
+                            {
+                                "field": "field",
+                                "default": "",
+                                "data_type": "string"
+                            },
+                            {
+                                "field": "value",
+                                "default": "",
                                 "data_type": "string"
                             }
                         ]
                     },
                     "type": "action",
-                    "errors": {}
+                    "errors": {},
+                    "userCode": "    ################################################################################\n\n    # Built from run data, so the call does not depend on how the VPE names its\n    # generated variables.\n    read_incident_id__incident_id = json.loads(phantom.get_run_data(key=\"read_incident_id:incident_id\") or \"null\")\n\n    parameters = [{\n        \"incident_id\": read_incident_id__incident_id,\n        \"field\": \"status\",\n        \"value\": \"open\",\n    }]\n\n    ################################################################################\n",
+                    "warnings": {}
                 },
                 "7": {
                     "x": 190,
@@ -316,6 +369,32 @@
                     "id": "7",
                     "data": {
                         "id": "7",
+                        "tab": "byConnector",
+                        "loop": {
+                            "enabled": false,
+                            "pauseUnit": "m",
+                            "conditions": [
+                                {
+                                    "type": "if",
+                                    "logic": "and",
+                                    "comparisons": [
+                                        {
+                                            "op": "==",
+                                            "param": "",
+                                            "value": "",
+                                            "comparisonKey": "comparison_key_0"
+                                        }
+                                    ],
+                                    "conditionKey": "condition_key_0",
+                                    "conditionIndex": 0
+                                }
+                            ],
+                            "pauseValue": 2,
+                            "exitAfterUnit": "m",
+                            "exitLoopAfter": 2,
+                            "exitAfterValue": 10,
+                            "exitConditionEnabled": false
+                        },
                         "type": "action",
                         "action": "add comment",
                         "advanced": {
@@ -329,25 +408,9 @@
                         "actionType": "generic",
                         "functionId": 6,
                         "parameters": {
-                            "detail": {
-                                "template": "{0}",
-                                "functionId": 6,
-                                "parameters": [
-                                    "process_comment:custom_function:comment"
-                                ]
-                            },
-                            "summary": {
-                                "template": "SOAR Acknowledgement",
-                                "functionId": 6,
-                                "parameters": []
-                            },
-                            "incident_id": {
-                                "template": "{0}",
-                                "functionId": 6,
-                                "parameters": [
-                                    "extract_incident_id:custom_function:incident_id"
-                                ]
-                            }
+                            "detail": "process_comment:custom_function:comment",
+                            "summary": "SOAR Acknowledgement",
+                            "incident_id": "read_incident_id:custom_function:incident_id"
                         },
                         "connectorId": "a7c41f8e-3b2d-4e9a-bf56-1d8e9a4c2f7b",
                         "functionName": "add_trap_comment",
@@ -359,12 +422,19 @@
                             {
                                 "field": "incident_id",
                                 "default": "",
+                                "data_type": "numeric"
+                            },
+                            {
+                                "field": "summary",
+                                "default": "",
                                 "data_type": "string"
                             }
                         ]
                     },
                     "type": "action",
-                    "errors": {}
+                    "errors": {},
+                    "userCode": "    ################################################################################\n\n    # Built from run data, so the call does not depend on how the VPE names its\n    # generated variables.\n    read_incident_id__incident_id = json.loads(phantom.get_run_data(key=\"read_incident_id:incident_id\") or \"null\")\n    comment = json.loads(phantom.get_run_data(key=\"process_comment:comment\") or '\"\"')\n\n    parameters = [{\n        \"incident_id\": read_incident_id__incident_id,\n        \"summary\": \"SOAR Acknowledgement\",\n        \"detail\": comment,\n    }]\n\n    ################################################################################\n",
+                    "warnings": {}
                 },
                 "8": {
                     "x": 190,
@@ -392,11 +462,12 @@
                     },
                     "type": "code",
                     "errors": {},
-                    "userCode": "    ################################################################################\n\n    incident_id = json.loads(phantom.get_run_data(key=\"read_incident_id:incident_id\"))\n    comment = json.loads(phantom.get_run_data(key=\"process_comment:comment\") or '\"\"')\n    prompt_status = json.loads(phantom.get_run_data(key=\"process_comment:prompt_status\") or '\"\"')\n\n    assignee_data = phantom.collect2(container=container, datapath=[\"update_incident_assignee:action_result.status\"])\n    assignee_status = assignee_data[0][0] if assignee_data and assignee_data[0][0] else \"not run\"\n\n    status_data = phantom.collect2(container=container, datapath=[\"set_incident_open:action_result.status\"])\n    status_status = status_data[0][0] if status_data and status_data[0][0] else \"not run\"\n\n    comment_data = phantom.collect2(container=container, datapath=[\"add_trap_comment:action_result.status\"])\n    comment_status = comment_data[0][0] if comment_data and comment_data[0][0] else \"not run\"\n\n    note_lines = [\n        \"# TRAP Acknowledgement\",\n        \"**Incident ID:** {}\".format(incident_id),\n        \"**Comment:** {}\".format(comment),\n        \"**Prompt status:** {}\".format(prompt_status),\n        \"**Time:** {}\".format(datetime.now().strftime(\"%Y-%m-%d %H:%M:%S\")),\n        \"\",\n        \"## TRAP Actions\",\n        \"**update_incident_assignee:** {}\".format(assignee_status),\n        \"**set_incident_open:** {}\".format(status_status),\n        \"**add_comment:** {}\".format(comment_status),\n    ]\n\n    note_content = \"\\n\".join(note_lines)\n\n    phantom.add_note(\n        container=container,\n        note_type=\"general\",\n        title=\"TRAP Acknowledge - {}\".format(datetime.now().strftime(\"%Y-%m-%d %H:%M\")),\n        content=note_content\n    )\n\n    phantom.debug(\"Acknowledge note added\")\n\n    ################################################################################\n"
+                    "userCode": "    ################################################################################\n\n    incident_id = json.loads(phantom.get_run_data(key=\"read_incident_id:incident_id\"))\n    comment = json.loads(phantom.get_run_data(key=\"process_comment:comment\") or '\"\"')\n    prompt_status = json.loads(phantom.get_run_data(key=\"process_comment:prompt_status\") or '\"\"')\n\n    assignee_data = phantom.collect2(container=container, datapath=[\"update_incident_assignee:action_result.status\"])\n    assignee_status = assignee_data[0][0] if assignee_data and assignee_data[0][0] else \"not run\"\n\n    status_data = phantom.collect2(container=container, datapath=[\"set_incident_open:action_result.status\"])\n    status_status = status_data[0][0] if status_data and status_data[0][0] else \"not run\"\n\n    comment_data = phantom.collect2(container=container, datapath=[\"add_trap_comment:action_result.status\"])\n    comment_status = comment_data[0][0] if comment_data and comment_data[0][0] else \"not run\"\n\n    note_lines = [\n        \"# TRAP Acknowledgement\",\n        \"**Incident ID:** {}\".format(incident_id),\n        \"**Comment:** {}\".format(comment),\n        \"**Prompt status:** {}\".format(prompt_status),\n        \"**Time:** {}\".format(datetime.now().strftime(\"%Y-%m-%d %H:%M:%S\")),\n        \"\",\n        \"## TRAP Actions\",\n        \"**update_incident_assignee:** {}\".format(assignee_status),\n        \"**set_incident_open:** {}\".format(status_status),\n        \"**add_comment:** {}\".format(comment_status),\n    ]\n\n    note_content = \"\\n\".join(note_lines)\n\n    phantom.add_note(\n        container=container,\n        note_type=\"general\",\n        title=\"TRAP Acknowledge - {}\".format(datetime.now().strftime(\"%Y-%m-%d %H:%M\")),\n        content=note_content\n    )\n\n    phantom.debug(\"Acknowledge note added\")\n\n    ################################################################################\n",
+                    "warnings": {}
                 },
                 "9": {
                     "x": 190,
-                    "y": 200,
+                    "y": 199.99999999999997,
                     "id": "9",
                     "data": {
                         "id": "9",
@@ -419,7 +490,8 @@
                     },
                     "type": "code",
                     "errors": {},
-                    "userCode": "    ################################################################################\n\n    result_rows = phantom.collect2(\n        container=container,\n        datapath=[\"extract_incident_id:custom_function_result.data.incident_id\"],\n    )\n    incident_id_val = result_rows[0][0] if result_rows else None\n\n    if not incident_id_val:\n        phantom.error(\"Could not find Incident ID (cef.incidentId) on the 'Event Info' artifact\")\n        phantom.add_note(\n            container=container,\n            note_type=\"general\",\n            title=\"TRAP Acknowledge - Error\",\n            content=\"Could not find Incident ID on the 'Event Info' artifact\"\n        )\n        return\n\n    read_incident_id__incident_id = str(incident_id_val)\n    phantom.debug(\"Extracted incident ID: {}\".format(read_incident_id__incident_id))\n\n    ################################################################################\n"
+                    "userCode": "    ################################################################################\n\n\n    result_rows = phantom.collect2(\n        container=container,\n        datapath=[\"extract_incident_id:custom_function_result.data.incident_id\"],\n    )\n    incident_id_val = result_rows[0][0] if result_rows else None\n\n    if not incident_id_val:\n        phantom.error(\"Could not find Incident ID (cef.incidentId) on the 'Event Info' artifact\")\n        phantom.add_note(\n            container=container,\n            note_type=\"general\",\n            title=\"TRAP Acknowledge - Error\",\n            content=\"Could not find Incident ID on the 'Event Info' artifact\"\n        )\n        return\n\n    read_incident_id__incident_id = str(incident_id_val)\n    phantom.debug(\"Extracted incident ID: {}\".format(read_incident_id__incident_id))\n\n    # Also saved as run data: later blocks read this key in their own Custom Code.\n    phantom.save_run_data(key=\"read_incident_id:incident_id\", value=json.dumps(read_incident_id__incident_id))\n\n    ################################################################################\n",
+                    "warnings": {}
                 }
             },
             "notes": "",
@@ -432,7 +504,7 @@
         "schema": "5.0.5",
         "version": "6.4.1.100"
     },
-    "create_time": "2026-09-22T22:56:59.459066Z",
+    "create_time": "2026-09-28T20:45:05.344222Z",
     "draft_mode": false,
     "labels": [
         "proofpoint_trap"

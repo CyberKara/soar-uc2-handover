@@ -1,48 +1,42 @@
 """
-Proofpoint TRAP Triage (PB2)
-
-Automation playbook triggered on container creation. Reads the Incident ID
-and raw TRAP Severity off the "Event Info" artifact (cef.incidentId/trapSeverity, set by
-the connector's on_poll) and promotes container severity from TRAP's own
-Severity field via phantom.set_severity() — the connector only creates the
-container at a neutral default. No writes back to TRAP. Downstream,
-analyst-driven actions (acknowledge, close) live in their own separate,
-manually-launched playbooks (proofpoint_trap_acknowledge,
-proofpoint_trap_close).
-
-Trigger: Automatic on container creation
+Automation playbook (PB2) triggered on container creation. Reads the TRAP incident ID and raw TRAP Severity off the Event Info artifact and promotes the container&#39;s severity from TRAP&#39;s own Severity (the connector creates the container at a neutral default). No writes back to TRAP. Analyst-driven actions (acknowledge, close) live in separate manually-launched playbooks: proofpoint_trap_acknowledge, proofpoint_trap_close.
 """
 
 
 import phantom.rules as phantom
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 @phantom.playbook_block()
 def on_start(container):
     phantom.debug('on_start() called')
 
+    # call 'extract_incident_id' block
     extract_incident_id(container=container)
 
     return
 
-
 @phantom.playbook_block()
-def extract_incident_id(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
+def extract_incident_id(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
     phantom.debug("extract_incident_id() called")
 
     ################################################################################
-    # Calls the shared proofpoint_trap_extract_incident_id custom function
-    # (playbooks/proofpoint_trap/custom_functions/) instead of re-parsing
-    # cef.incidentId/trapSeverity inline -- this exact block used to be
-    # duplicated near-verbatim across PB2/PB4/PB5 (see next-steps.md #58).
-    # The CF itself reads the "Event Info"/"Event Info Update" artifacts via
-    # a direct REST scan (see its own docstring for why not phantom.collect2()
-    # -- custom functions get no container object to pass it).
+    # Extract TRAP incident ID (+ raw TRAP Severity) via the shared proofpoint_trap_extract_incident_id 
+    # custom function.
     ################################################################################
 
     parameters = [{}]
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+
+    # Write your custom code here...
+
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
 
     phantom.custom_function(custom_function="local/proofpoint_trap_extract_incident_id", parameters=parameters, name="extract_incident_id", callback=read_incident_id)
 
@@ -50,26 +44,26 @@ def extract_incident_id(action=None, success=None, container=None, results=None,
 
 
 @phantom.playbook_block()
-def read_incident_id(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
+def read_incident_id(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
     phantom.debug("read_incident_id() called")
 
     ################################################################################
-    # Bridge block reading extract_incident_id's CF result (same pattern as
-    # cyberark_rotation_orchestrator.py's discover_targets -> read_discover_result
-    # pair -- a native utility block's own output needs a following code block
-    # to branch/save on it). Promotes container severity from TRAP's own
-    # Severity field (cef.trapSeverity) -- the connector only sets a neutral
-    # DEFAULT_SEVERITY at ingestion (see proofpoint_trap_connector.py
-    # _handle_on_poll) -- this is where the real value lands. Mapping
-    # duplicated here (small, playbook-local) since playbooks can't import
-    # the connector's consts.py.
+    # Bridge block: read extract_incident_id CF result (incident_id + trap_severity) 
+    # and promote container severity.
     ################################################################################
+
+    extract_incident_id__result = phantom.collect2(container=container, datapath=["extract_incident_id:custom_function_result.data.incident_id","extract_incident_id:custom_function_result.data.trap_severity"])
+
+    extract_incident_id_data_incident_id = [item[0] for item in extract_incident_id__result]
+    extract_incident_id_data_trap_severity = [item[1] for item in extract_incident_id__result]
 
     read_incident_id__incident_id = None
 
     ################################################################################
     ## Custom Code Start
     ################################################################################
+    ################################################################################
+
 
     result_rows = phantom.collect2(
         container=container,
@@ -99,15 +93,48 @@ def read_incident_id(action=None, success=None, container=None, results=None, ha
         )
     )
 
+    # Also saved as run data, so a consumer never depends on how the VPE names it.
+    phantom.save_run_data(key="read_incident_id:incident_id", value=json.dumps(read_incident_id__incident_id))
+
+    ################################################################################
     ################################################################################
     ## Custom Code End
     ################################################################################
 
-    phantom.save_run_data(key="read_incident_id:incident_id", value=json.dumps(read_incident_id__incident_id))
+    phantom.save_block_result(key="read_incident_id__inputs:0:extract_incident_id:custom_function_result.data.incident_id", value=json.dumps(extract_incident_id_data_incident_id))
+    phantom.save_block_result(key="read_incident_id__inputs:1:extract_incident_id:custom_function_result.data.trap_severity", value=json.dumps(extract_incident_id_data_trap_severity))
+
+    phantom.save_block_result(key="read_incident_id:incident_id", value=json.dumps(read_incident_id__incident_id))
+
+    phantom.save_block_result(key="read_incident_id_called", value="True")
 
     return
 
 
+@phantom.playbook_block()
 def on_finish(container, summary):
     phantom.debug("on_finish() called")
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+    ################################################################################
+
+    # This function is called after all actions are completed.
+    # summary of all the action and/or all details of actions
+    # can be collected here.
+
+    # summary_json = phantom.get_summary()
+    # if 'result' in summary_json:
+        # for action_result in summary_json['result']:
+            # if 'action_run_id' in action_result:
+                # action_results = phantom.get_action_results(action_run_id=action_result['action_run_id'], result_data=False, flatten=False)
+                # phantom.debug(action_results)
+
+    ################################################################################
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
     return
+

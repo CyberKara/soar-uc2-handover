@@ -1,44 +1,42 @@
 """
-Proofpoint TRAP Close (PB5)
-
-Data playbook manually launched by an analyst from the container whenever
-they're ready to close out the incident. Prompts for a closure reason, then
-closes the TRAP incident and posts the closing comment. Independent of
-proofpoint_trap_triage/proofpoint_trap_acknowledge — no chaining.
-
-Trigger: Manual run by analyst
+Data playbook (PB5) manually launched by an analyst from the container whenever they&#39;re ready to close out the incident. Prompts for a closure reason, then closes the TRAP incident and posts the closing comment. Independent of proofpoint_trap_triage/proofpoint_trap_acknowledge.
 """
 
 
 import phantom.rules as phantom
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 @phantom.playbook_block()
 def on_start(container):
     phantom.debug('on_start() called')
 
+    # call 'extract_incident_id' block
     extract_incident_id(container=container)
 
     return
 
-
 @phantom.playbook_block()
-def extract_incident_id(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
+def extract_incident_id(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
     phantom.debug("extract_incident_id() called")
 
     ################################################################################
-    # Calls the shared proofpoint_trap_extract_incident_id custom function
-    # (playbooks/proofpoint_trap/custom_functions/) instead of re-parsing
-    # cef.incidentId inline -- this exact block used to be duplicated
-    # near-verbatim across PB2/PB4/PB5 (see next-steps.md #58). The CF itself
-    # reads the "Event Info"/"Event Info Update" artifacts via a direct REST
-    # scan (see its own docstring for why not phantom.collect2() -- custom
-    # functions get no container object to pass it).
+    # Extract TRAP incident ID (+ raw TRAP Severity) via the shared proofpoint_trap_extract_incident_id 
+    # custom function.
     ################################################################################
 
     parameters = [{}]
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+
+    # Write your custom code here...
+
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
 
     phantom.custom_function(custom_function="local/proofpoint_trap_extract_incident_id", parameters=parameters, name="extract_incident_id", callback=read_incident_id)
 
@@ -46,63 +44,23 @@ def extract_incident_id(action=None, success=None, container=None, results=None,
 
 
 @phantom.playbook_block()
-def read_incident_id(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
-    phantom.debug("read_incident_id() called")
+def prompt_close_reason(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
+    phantom.debug("prompt_close_reason() called")
 
     ################################################################################
-    # Bridge block reading extract_incident_id's CF result (same pattern as
-    # cyberark_rotation_orchestrator.py's discover_targets -> read_discover_result
-    # pair -- a native utility block's own output needs a following code block
-    # to branch/save on it).
+    # Ask the analyst for a closure reason (approver: container owner, else soar_local_admin).
     ################################################################################
-
-    read_incident_id__incident_id = None
 
     ################################################################################
     ## Custom Code Start
     ################################################################################
-
-    result_rows = phantom.collect2(
-        container=container,
-        datapath=["extract_incident_id:custom_function_result.data.incident_id"],
-    )
-    incident_id_val = result_rows[0][0] if result_rows else None
-
-    if not incident_id_val:
-        phantom.error("Could not find Incident ID (cef.incidentId) on the 'Event Info' artifact")
-        phantom.add_note(
-            container=container,
-            note_type="general",
-            title="TRAP Close - Error",
-            content="Could not find Incident ID on the 'Event Info' artifact"
-        )
-        return
-
-    read_incident_id__incident_id = str(incident_id_val)
-    phantom.debug("Extracted incident ID: {}".format(read_incident_id__incident_id))
-
-    ################################################################################
-    ## Custom Code End
     ################################################################################
 
-    phantom.save_run_data(key="read_incident_id:incident_id", value=json.dumps(read_incident_id__incident_id))
-
-    prompt_close_reason(container=container)
-
-    return
-
-
-@phantom.playbook_block()
-def prompt_close_reason(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
-    phantom.debug("prompt_close_reason() called")
-
-    ################################################################################
-    # Native prompt block — asks the analyst for a closure reason.
-    # Approver: container_owner, falls back to soar_local_admin (same
-    # fallback pattern used elsewhere in UC2 — TRAP containers never get an
-    # owner assigned). Timeout: 30 min.
-    ################################################################################
-
+    # The prompt is raised from code, not from a native prompt block: a VPE save
+    # regenerates prompt blocks whole (they have no Custom Code), which would drop
+    # this approver fallback -- TRAP containers never get an owner assigned. The
+    # callback continues the flow; the return below stops the generated call to
+    # process_close_reason from also running right away.
     user = container.get('owner_name', None) or 'soar_local_admin'
     role = None
     message = """**TRAP Incident {0}**
@@ -130,16 +88,24 @@ closure reason as a comment. Provide a closure reason."""
 
     return
 
+    ################################################################################
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
+    phantom.save_block_result(key="prompt_close_reason_called", value="True")
+
+    process_close_reason(container=container)
+
+    return
+
 
 @phantom.playbook_block()
-def process_close_reason(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
+def process_close_reason(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
     phantom.debug("process_close_reason() called")
 
     ################################################################################
-    # Read analyst's prompt response via REST /rest/approval — not
-    # phantom.collect2(), which is confirmed broken for this classification
-    # on this SOAR 8.5 instance (see proofpoint_trap_triage.py's dated
-    # comment on the same bug).
+    # Read analyst's prompt response.
     ################################################################################
 
     process_close_reason__reason = None
@@ -148,6 +114,8 @@ def process_close_reason(action=None, success=None, container=None, results=None
     ################################################################################
     ## Custom Code Start
     ################################################################################
+    ################################################################################
+
 
     run_id = phantom.get_playbook_run_id_()
 
@@ -178,12 +146,19 @@ def process_close_reason(action=None, success=None, container=None, results=None
     process_close_reason__reason = reason
     process_close_reason__prompt_status = prompt_status
 
+    # Also saved as run data: the blocks after the decision read these keys.
+    phantom.save_run_data(key="process_close_reason:reason", value=json.dumps(process_close_reason__reason))
+    phantom.save_run_data(key="process_close_reason:prompt_status", value=json.dumps(process_close_reason__prompt_status))
+
+    ################################################################################
     ################################################################################
     ## Custom Code End
     ################################################################################
 
-    phantom.save_run_data(key="process_close_reason:reason", value=json.dumps(process_close_reason__reason))
-    phantom.save_run_data(key="process_close_reason:prompt_status", value=json.dumps(prompt_status))
+    phantom.save_block_result(key="process_close_reason:reason", value=json.dumps(process_close_reason__reason))
+    phantom.save_block_result(key="process_close_reason:prompt_status", value=json.dumps(process_close_reason__prompt_status))
+
+    phantom.save_block_result(key="process_close_reason_called", value="True")
 
     check_prompt_status(container=container)
 
@@ -191,41 +166,35 @@ def process_close_reason(action=None, success=None, container=None, results=None
 
 
 @phantom.playbook_block()
-def check_prompt_status(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
-    phantom.debug("check_prompt_status() called")
-
-    ################################################################################
-    # Native decision block — routes on process_close_reason's prompt_status
-    # output variable instead of branching in Python (constraints.md decision
-    # tree: "Branch on a condition? -> decision", not code). Replaces the old
-    # if/else that lived inside process_close_reason itself (see next-steps.md
-    # #58's PB5 finding).
-    ################################################################################
-
-    prompt_succeeded = phantom.decision(
-        container=container,
-        conditions=[
-            ["process_close_reason:custom_function:prompt_status", "==", "success"]
-        ])
-
-    if prompt_succeeded:
-        close_trap_incident(action=action, success=success, container=container, results=results, handle=handle)
-        return
-
-    add_close_note(action=action, success=success, container=container, results=results, handle=handle)
-
-    return
-
-
-@phantom.playbook_block()
-def close_trap_incident(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
+def close_trap_incident(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
     phantom.debug("close_trap_incident() called")
 
+    # phantom.debug('Action: {0} {1}'.format(action['name'], ('SUCCEEDED' if success else 'FAILED')))
+
     ################################################################################
-    # Native action block — closes the incident in Proofpoint TRAP.
+    # Run close_incident action on Proofpoint TRAP.
     ################################################################################
 
-    read_incident_id__incident_id = json.loads(phantom.get_run_data(key="read_incident_id:incident_id"))
+    process_close_reason__reason = json.loads(_ if (_ := phantom.get_run_data(key="process_close_reason:reason")) != "" else "null")  # pylint: disable=used-before-assignment
+    read_incident_id__incident_id = json.loads(_ if (_ := phantom.get_run_data(key="read_incident_id:incident_id")) != "" else "null")  # pylint: disable=used-before-assignment
+
+    parameters = []
+
+    if process_close_reason__reason is not None and read_incident_id__incident_id is not None:
+        parameters.append({
+            "detail": process_close_reason__reason,
+            "summary": "Closed by SOAR analyst",
+            "incident_id": read_incident_id__incident_id,
+        })
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+    ################################################################################
+
+    # Built from run data, so the call does not depend on how the VPE names its
+    # generated variables.
+    read_incident_id__incident_id = json.loads(phantom.get_run_data(key="read_incident_id:incident_id") or "null")
     reason = json.loads(phantom.get_run_data(key="process_close_reason:reason") or '""')
 
     parameters = [{
@@ -234,20 +203,46 @@ def close_trap_incident(action=None, success=None, container=None, results=None,
         "detail": reason,
     }]
 
+    ################################################################################
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
     phantom.act("close incident", parameters=parameters, name="close_trap_incident", assets=["proofpoint_trap_mock"], callback=add_trap_comment)
 
     return
 
 
 @phantom.playbook_block()
-def add_trap_comment(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
+def add_trap_comment(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
     phantom.debug("add_trap_comment() called")
 
+    # phantom.debug('Action: {0} {1}'.format(action['name'], ('SUCCEEDED' if success else 'FAILED')))
+
     ################################################################################
-    # Native action block — adds the closure comment to the TRAP incident.
+    # Add closure comment to TRAP incident.
     ################################################################################
 
-    read_incident_id__incident_id = json.loads(phantom.get_run_data(key="read_incident_id:incident_id"))
+    process_close_reason__reason = json.loads(_ if (_ := phantom.get_run_data(key="process_close_reason:reason")) != "" else "null")  # pylint: disable=used-before-assignment
+    read_incident_id__incident_id = json.loads(_ if (_ := phantom.get_run_data(key="read_incident_id:incident_id")) != "" else "null")  # pylint: disable=used-before-assignment
+
+    parameters = []
+
+    if read_incident_id__incident_id is not None:
+        parameters.append({
+            "detail": process_close_reason__reason,
+            "summary": "SOAR Closure Comment",
+            "incident_id": read_incident_id__incident_id,
+        })
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+    ################################################################################
+
+    # The comment says whether the TRAP close succeeded, so it is built here from
+    # close_trap_incident's result rather than bound directly.
+    read_incident_id__incident_id = json.loads(phantom.get_run_data(key="read_incident_id:incident_id") or "null")
     reason = json.loads(phantom.get_run_data(key="process_close_reason:reason") or '""')
 
     close_data = phantom.collect2(container=container, datapath=["close_trap_incident:action_result.status"])
@@ -266,22 +261,51 @@ def add_trap_comment(action=None, success=None, container=None, results=None, ha
         "detail": comment_text,
     }]
 
-    phantom.act("add comment", parameters=parameters, name="add_trap_comment", assets=["proofpoint_trap_mock"], callback=add_close_note)
+    ################################################################################
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
+    phantom.act("add comment", parameters=parameters, name="add_trap_comment", assets=["proofpoint_trap_mock"], callback=join_add_close_note)
 
     return
 
 
 @phantom.playbook_block()
-def add_close_note(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, **kwargs):
+def join_add_close_note(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
+    phantom.debug("join_add_close_note() called")
+
+    # if the joined function has already been called, do nothing
+    if phantom.get_run_data(key="join_add_close_note_called"):
+        return
+
+    # save the state that the joined function has now been called
+    phantom.save_run_data(key="join_add_close_note_called", value="add_close_note")
+
+    # call connected block "add_close_note"
+    add_close_note(container=container, handle=handle)
+
+    return
+
+
+@phantom.playbook_block()
+def add_close_note(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
     phantom.debug("add_close_note() called")
 
     ################################################################################
-    # Add a summary note with the closure reason and action results, and set
-    # the SOAR container status to closed once the TRAP close succeeds.
+    # Add closure summary note to container.
     ################################################################################
+
+    close_trap_incident_result_data = phantom.collect2(container=container, datapath=["close_trap_incident:action_result.status"], action_results=results)
+    add_trap_comment_result_data = phantom.collect2(container=container, datapath=["add_trap_comment:action_result.status"], action_results=results)
+    process_close_reason__reason = json.loads(_ if (_ := phantom.get_run_data(key="process_close_reason:reason")) != "" else "null")  # pylint: disable=used-before-assignment
+
+    close_trap_incident_result_item_0 = [item[0] for item in close_trap_incident_result_data]
+    add_trap_comment_result_item_0 = [item[0] for item in add_trap_comment_result_data]
 
     ################################################################################
     ## Custom Code Start
+    ################################################################################
     ################################################################################
 
     incident_id = json.loads(phantom.get_run_data(key="read_incident_id:incident_id"))
@@ -328,12 +352,129 @@ def add_close_note(action=None, success=None, container=None, results=None, hand
     phantom.debug("Close note added")
 
     ################################################################################
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
+    phantom.save_block_result(key="add_close_note__inputs:0:process_close_reason:custom_function:reason", value=json.dumps(process_close_reason__reason))
+    phantom.save_block_result(key="add_close_note__inputs:1:close_trap_incident:action_result.status", value=json.dumps(close_trap_incident_result_item_0))
+    phantom.save_block_result(key="add_close_note__inputs:2:add_trap_comment:action_result.status", value=json.dumps(add_trap_comment_result_item_0))
+
+    phantom.save_block_result(key="add_close_note_called", value="True")
+
+    return
+
+
+@phantom.playbook_block()
+def read_incident_id(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
+    phantom.debug("read_incident_id() called")
+
+    ################################################################################
+    # Bridge block: read extract_incident_id CF result (same pattern as cyberark_rotation_orchestrator.py 
+    # read_discover_result).
+    ################################################################################
+
+    extract_incident_id__result = phantom.collect2(container=container, datapath=["extract_incident_id:custom_function_result.data.incident_id"])
+
+    extract_incident_id_data_incident_id = [item[0] for item in extract_incident_id__result]
+
+    read_incident_id__incident_id = None
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+    ################################################################################
+
+
+    result_rows = phantom.collect2(
+        container=container,
+        datapath=["extract_incident_id:custom_function_result.data.incident_id"],
+    )
+    incident_id_val = result_rows[0][0] if result_rows else None
+
+    if not incident_id_val:
+        phantom.error("Could not find Incident ID (cef.incidentId) on the 'Event Info' artifact")
+        phantom.add_note(
+            container=container,
+            note_type="general",
+            title="TRAP Close - Error",
+            content="Could not find Incident ID on the 'Event Info' artifact"
+        )
+        return
+
+    read_incident_id__incident_id = str(incident_id_val)
+    phantom.debug("Extracted incident ID: {}".format(read_incident_id__incident_id))
+
+    # Also saved as run data: later blocks read this key in their own Custom Code.
+    phantom.save_run_data(key="read_incident_id:incident_id", value=json.dumps(read_incident_id__incident_id))
+
+    ################################################################################
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
+    phantom.save_block_result(key="read_incident_id__inputs:0:extract_incident_id:custom_function_result.data.incident_id", value=json.dumps(extract_incident_id_data_incident_id))
+
+    phantom.save_block_result(key="read_incident_id:incident_id", value=json.dumps(read_incident_id__incident_id))
+
+    phantom.save_block_result(key="read_incident_id_called", value="True")
+
+    prompt_close_reason(container=container)
+
+    return
+
+
+@phantom.playbook_block()
+def check_prompt_status(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
+    phantom.debug("check_prompt_status() called")
+
+    # check for 'if' condition 1
+    found_match_1 = phantom.decision(
+        container=container,
+        conditions=[
+            ["process_close_reason:custom_function:prompt_status", "==", "success"]
+        ],
+        conditions_dps=[
+            ["process_close_reason:custom_function:prompt_status", "==", "success"]
+        ],
+        name="check_prompt_status:condition_1",
+        delimiter=",")
+
+    # call connected blocks if condition 1 matched
+    if found_match_1:
+        close_trap_incident(action=action, success=success, container=container, results=results, handle=handle)
+        return
+
+    # check for 'else' condition 2
+    join_add_close_note(action=action, success=success, container=container, results=results, handle=handle)
+
+    return
+
+
+@phantom.playbook_block()
+def on_finish(container, summary):
+    phantom.debug("on_finish() called")
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+    ################################################################################
+
+    # This function is called after all actions are completed.
+    # summary of all the action and/or all details of actions
+    # can be collected here.
+
+    # summary_json = phantom.get_summary()
+    # if 'result' in summary_json:
+        # for action_result in summary_json['result']:
+            # if 'action_run_id' in action_result:
+                # action_results = phantom.get_action_results(action_run_id=action_result['action_run_id'], result_data=False, flatten=False)
+                # phantom.debug(action_results)
+
+    ################################################################################
+    ################################################################################
     ## Custom Code End
     ################################################################################
 
     return
 
-
-def on_finish(container, summary):
-    phantom.debug("on_finish() called")
-    return
