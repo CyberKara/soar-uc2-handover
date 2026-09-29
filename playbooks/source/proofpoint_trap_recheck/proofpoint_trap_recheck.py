@@ -1,5 +1,5 @@
 """
-Periodically re-scans the whole in-window TRAP incident backlog (all states) for already-ingested incidents that changed since ingestion -- a field edit, disposition change, or newly-linked event that on_poll&#39;s checkpoint-based main pass can&#39;t see again once a container exists. Triggered by a Timer asset (label proofpoint_trap_recheck), not real TRAP incidents.
+Automation playbook (PB7) for label proofpoint_trap_recheck, run by its Timer asset, not by TRAP incidents. Periodically re-scans the whole in-window TRAP incident backlog (all states) for already-ingested incidents that changed since ingestion -- a field edit, disposition change, or newly-linked event that on_poll&#39;s checkpoint-based main pass can&#39;t see again once a container exists.
 """
 
 

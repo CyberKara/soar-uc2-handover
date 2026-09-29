@@ -10,7 +10,7 @@
     "logo_dark": "logo_dark.svg",
     "publisher": "Ted",
     "license": "Copyright (c) 2026",
-    "app_version": "1.0.36",
+    "app_version": "1.0.37",
     "utctime_updated": "2026-08-20T00:00:00.000000Z",
     "package_name": "phantom_proofpoint_trap",
     "main_module": "proofpoint_trap_connector.py",
@@ -317,6 +317,11 @@
                 {
                     "data_path": "action_result.data.*.summary",
                     "data_type": "string"
+                },
+                {
+                    "data_path": "action_result.data.*.incident_url",
+                    "data_type": "string",
+                    "contains": ["url"]
                 },
                 {
                     "data_path": "action_result.data.*.state",

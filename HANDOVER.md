@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Air-Gapped Handover Package
 
-Generated 2026-09-29 14:38 UTC from `proofpoint_trap` (source env: `soar8`).
+Generated 2026-09-29 18:41 UTC from `proofpoint_trap` (source env: `soar8`).
 
 This package is self-contained — everything needed to deploy this use case by hand
 in an environment with no network access back to this repo or to `soar8`.
@@ -11,7 +11,7 @@ in an environment with no network access back to this repo or to `soar8`.
 
 | Path | What |
 |------|------|
-| `connectors/` | Connector app package(s): proofpoint_trap-v1.0.36.tgz |
+| `connectors/` | Connector app package(s): proofpoint_trap-v1.0.37.tgz |
 | `connectors/source/` | Same connector(s), extracted — for reading, not for import |
 | `playbooks/*.tgz` (CFs) | proofpoint_trap_extract_incident_id |
 | `playbooks/*.tgz` (PBs) | proofpoint_trap_detail, proofpoint_trap_triage, proofpoint_trap_attachments, proofpoint_trap_acknowledge, proofpoint_trap_close, proofpoint_trap_isolation_notify, proofpoint_trap_recheck, proofpoint_trap_summary |
@@ -36,6 +36,12 @@ previous package. On a completely fresh target, skip to Install order.
 - **Fix (2026-09-29): the packages of 2026-09-28 and 2026-09-29 shipped four playbooks without their Global Custom Code** — `proofpoint_trap_attachments`, `proofpoint_trap_acknowledge`, `proofpoint_trap_isolation_notify` and `proofpoint_trap_recheck`. The code was in each archive's `.py`, so the playbooks ran, but not in its `.json`, from which the VPE builds the playbook: *Validate Python* reported its helper functions as undefined (for example `_email_html_to_markdown`), and saving one of these playbooks deleted them, after which it fails when it runs. This package carries the code in both files. Re-import all four — required if you saved any of them after importing an earlier package — and re-activate `proofpoint_trap_attachments` and `proofpoint_trap_recheck`.
 
 - **`proofpoint_trap_summary` now runs by itself, and `proofpoint_trap_attachments` now processes every new incident's emails (2026-09-29).** Re-import `proofpoint_trap_detail`, `proofpoint_trap_triage` and `proofpoint_trap_summary`, then **activate `proofpoint_trap_summary`** — it is an automation playbook now, with no inputs; it no longer needs an analyst to run it. When `proofpoint_trap_detail` finishes a container, its `Enrichment Complete` artifact now starts the automation playbooks again. Before, `proofpoint_trap_attachments` ran only when the container was created, before any email had been downloaded, so it processed a new incident's emails only after `proofpoint_trap_recheck` saw the incident change. On that same trigger `proofpoint_trap_summary` writes or rewrites the `TRAP Summary` note (tables show at most 250 rows each), and `proofpoint_trap_triage` sets the container severity again: new artifacts arrive at SOAR's default severity `medium` and had raised every incident mapped to `low` back to `medium`. Its severity note is added only when the severity derived from TRAP changes. Attachments extracted on that pass may appear in the summary only at its next refresh.
+
+- **Container names, a comment in TRAP, and a link to TRAP (2026-09-29).** Install connector v1.0.37 over the existing Proofpoint TRAP app (a normal in-place upgrade: `get incident` now also returns the incident's TRAP web page), re-import `proofpoint_trap_detail` and re-activate it, and create the custom list `proofpoint_trap_excluded_senders` (see "Custom lists you fill in"). What changes: a container whose TRAP incident has no summary is named `TRAP-<id>: <first sender not in that list>` instead of `TRAP-<id>: No summary`; on an incident's first extraction SOAR adds a comment to the TRAP incident saying so, with a link to the SOAR case; and the `TRAP Detail` note has an `Open in TRAP` link to the incident. The link to SOAR uses SOAR's base URL (Administration > Company Settings): check that it is the address analysts open SOAR at, port included.
+
+- **Long notes are split instead of cut (2026-09-29).** A SOAR note shows at most about 22,000 characters here, so no note is longer than 20,000: a longer `Email Content` or `Attachment Extraction` note from `proofpoint_trap_attachments` becomes parts `... (1/N)`, `... (2/N)`, and the `TRAP Summary` from `proofpoint_trap_summary` becomes `TRAP Summary (1/N)`... (a table that continues repeats its header; the parts are rewritten on each update). Re-import both playbooks and re-activate them. An email body is still shortened after 20,000 characters; the full message is the `.eml` in the container's files.
+
+- **`proofpoint_trap_isolation_notify` lists its links in the container note, and every playbook description now starts with its type and number (2026-09-29).** The `TRAP Isolation Notify` note shows each isolation-browser link it emailed (the target as text, only the isolation-browser link clickable). The descriptions read `Automation playbook (PBn)` / `Data playbook (PBn)`. Re-import `proofpoint_trap_isolation_notify`; the other playbooks carry the new descriptions the next time you re-import them.
 
 ## Install order
 
@@ -99,6 +105,13 @@ are read back as real state and will make it act on things that never happened.
 - `proofpoint_trap_recheck_state`: `incident_id, signature` — written by the playbook, not by you.
 
 See the copied implementation plan doc in `docs/` for what the playbook stores and when.
+
+## Custom lists you fill in
+
+Settings the playbooks read. Create them (step above), then add your own rows below the
+header row when you need them; the use case works with them empty.
+
+- `proofpoint_trap_excluded_senders`: sender addresses `proofpoint_trap_detail` never uses to name a container, one per row (case does not matter) — typically an address present on every incident. When TRAP gives an incident no summary, the container is named `TRAP-<id>: <first sender not in this list>` instead of `TRAP-<id>: No summary`. Leave it empty to use the first sender; the header row is ignored.
 
 ## Verification
 

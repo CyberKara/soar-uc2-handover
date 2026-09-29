@@ -1,5 +1,5 @@
 """
-Automation playbook for label proofpoint_trap. Fetches the TRAP incident with its events, downloads each event&#39;s original email, and creates the derived artifacts (sender/recipient emails, domains, threat URLs, click IPs, MIME bodies), a detail note, and a final Enrichment Complete artifact. A failed fetch or platform write adds an error note and an Enrichment Failed artifact instead, so a later run can retry. Assets are selected in each action block, never in code, so an importer can point them at their own asset names.
+Automation playbook (PB1) for label proofpoint_trap. Fetches the TRAP incident with its events, downloads each event&#39;s original email, and creates the derived artifacts (sender/recipient emails, domains, threat URLs, click IPs, MIME bodies), a detail note linking to the incident in TRAP, and a final Enrichment Complete artifact that runs automation again once the enrichment is on the container. Renames a container TRAP gave no summary after its first sender not in the custom list proofpoint_trap_excluded_senders, and on the incident&#39;s first enrichment comments on the TRAP incident with a link to the SOAR case. A failed fetch or platform write adds an error note and an Enrichment Failed artifact instead, so a later run can retry. Assets are selected in each action block, never in code, so an importer can point them at their own asset names.
 """
 
 
@@ -462,6 +462,43 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
                 "run_automation": False,
             })
 
+    # Real TRAP incidents often have no summary or description, and the
+    # connector then names the container "TRAP-<id>: No summary" (it lists
+    # incidents without their events, so it has no sender yet). Name it after
+    # the sender instead: the first sender address, in alert order, that is not
+    # in the custom list proofpoint_trap_excluded_senders (one address per row,
+    # e.g. a mailbox present on every incident). Only that fallback name is
+    # replaced, so a real summary or an earlier rename is never overwritten.
+    fallback_name = "TRAP-{}: No summary".format(incident_id)
+    if (container.get("name") or "") == fallback_name:
+        excluded = set()
+        list_ok, list_message, list_rows = phantom.get_list(list_name="proofpoint_trap_excluded_senders")
+        if list_ok:
+            for row in list_rows or []:
+                for value in row or []:
+                    if value and "@" in str(value):
+                        excluded.add(str(value).strip().lower())
+        else:
+            phantom.debug("No proofpoint_trap_excluded_senders list ({}): every sender counts".format(list_message))
+        senders = [a["cef"]["emailAddress"] for a in artifacts if a["name"] == "Sender Email"]
+        candidates = [s for s in senders if s.strip().lower() not in excluded]
+        if candidates:
+            new_name = "TRAP-{}: {}".format(incident_id, candidates[0])
+            if len(candidates) > 1:
+                new_name += " (+{} more)".format(len(candidates) - 1)
+            rename = phantom.requests.post(
+                uri=phantom.build_phantom_rest_url("container", container.get("id")),
+                data=json.dumps({"name": new_name}),
+                verify=False,
+            )
+            if rename.status_code < 300:
+                phantom.debug("Container renamed to {!r}".format(new_name))
+            else:
+                phantom.error("Could not rename the container to {!r} (HTTP {}): {}".format(
+                    new_name, rename.status_code, rename.text[:200]))
+        else:
+            phantom.debug("Every sender is in proofpoint_trap_excluded_senders: name stays {!r}".format(fallback_name))
+
     # Post only what is not on the container yet. A re-run (proofpoint_trap_recheck
     # flags a changed incident, usually one that gained alerts) rebuilds the list
     # from the whole incident; without this it re-posted every artifact each
@@ -645,16 +682,22 @@ def prepare_detail_note(action=None, success=None, container=None, results=None,
     score = result_data[0][2] if result_data else "?"
     state = result_data[0][3] if result_data else "?"
 
+    # The incident's page in the TRAP web UI (connector 1.0.37+); omitted when absent.
+    url_rows = phantom.collect2(container=container, datapath=["get_trap_incident:action_result.data.*.incident_url"])
+    incident_url = url_rows[0][0] if url_rows and url_rows[0] and url_rows[0][0] else ""
+    trap_link = "**Open in TRAP:** [incident {}]({})\n".format(incident_id, incident_url) if incident_url else ""
+
     prepare_detail_note__note_title = "TRAP Detail - Incident {}".format(incident_id)
     prepare_detail_note__note_content = (
         "# TRAP Incident Detail\n"
         "**Incident ID:** {}\n"
+        "{}"
         "**Summary:** {}\n"
         "**State:** {} | **Score:** {} | **Events:** {}\n"
         "**Alerts processed:** {}\n"
         "**Artifacts from events:** {} new, {} already on the container\n\n"
         "Event artifacts (emails, domains, IPs) have been created on this container."
-    ).format(incident_id, summary, state, score, event_count,
+    ).format(incident_id, trap_link, summary, state, score, event_count,
              alert_count if alert_count is not None else "?", artifact_count, already_present)
 
     # Also saved as run data: dispatch_detail_note reads these keys.
@@ -958,7 +1001,7 @@ def dispatch_enrichment_complete(action=None, success=None, container=None, resu
     ## Custom Code End
     ################################################################################
 
-    phantom.act("add artifact", parameters=parameters, name="dispatch_enrichment_complete", assets=["soar8"])
+    phantom.act("add artifact", parameters=parameters, name="dispatch_enrichment_complete", assets=["soar8"], callback=comment_on_trap_incident)
 
     return
 
@@ -1054,6 +1097,59 @@ def check_reentry(action=None, success=None, container=None, results=None, handl
     phantom.save_block_result(key="check_reentry_called", value="True")
 
     filter_event_info(container=container)
+
+    return
+
+
+@phantom.playbook_block()
+def comment_on_trap_incident(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
+    phantom.debug("comment_on_trap_incident() called")
+
+    # phantom.debug('Action: {0} {1}'.format(action['name'], ('SUCCEEDED' if success else 'FAILED')))
+
+    ################################################################################
+    # Comment on the TRAP incident with a link to this SOAR case, on the first enrichment only.
+    ################################################################################
+
+    build_artifact_list__incident_id = json.loads(_ if (_ := phantom.get_run_data(key="build_artifact_list:incident_id")) != "" else "null")  # pylint: disable=used-before-assignment
+
+    parameters = []
+
+    if build_artifact_list__incident_id is not None:
+        parameters.append({
+            "summary": "Extracted by SOAR automation",
+            "incident_id": build_artifact_list__incident_id,
+        })
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+    ################################################################################
+
+    # Tell TRAP that SOAR has taken the incident, with a link to this case. Only
+    # on the incident's first enrichment (check_reentry's run index 0): a re-run
+    # after proofpoint_trap_recheck flags a change posts nothing. The link is
+    # SOAR's configured base URL (Administration > Company Settings) plus
+    # /mission/<container id>, the case page.
+    run_index = json.loads(phantom.get_run_data(key="check_reentry:run_index") or "null")
+    incident_id = json.loads(phantom.get_run_data(key="build_artifact_list:incident_id") or "null")
+    if run_index != 0 or incident_id is None:
+        phantom.debug("Not the incident's first enrichment (run index {}): no TRAP comment".format(run_index))
+        return
+
+    base_url = (phantom.get_base_url() or "").rstrip("/")
+    case_link = "{}/mission/{}".format(base_url, container.get("id")) if base_url else "case {}".format(container.get("id"))
+    parameters = [{
+        "incident_id": incident_id,
+        "summary": "This incident has been extracted by SOAR automation, please review it in SOAR: {}".format(case_link),
+    }]
+
+    ################################################################################
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
+    phantom.act("add comment", parameters=parameters, name="comment_on_trap_incident", assets=["proofpoint_trap_mock"])
 
     return
 

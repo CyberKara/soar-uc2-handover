@@ -4,6 +4,7 @@ import json
 import sys
 from datetime import datetime, timedelta, timezone
 from email.parser import BytesHeaderParser
+from urllib.parse import urlparse
 
 import requests
 import urllib3
@@ -704,6 +705,14 @@ class ProofpointTrapConnector(BaseConnector):
     # Action: get incident
     # ------------------------------------------------------------------
 
+    def _incident_ui_url(self, incident_id):
+        """The incident's page in the TRAP web UI: /incidents/<id> on the host
+        of base_url (the web UI and the API share it)."""
+        parsed = urlparse(self._base_url or "")
+        if not parsed.scheme or not parsed.netloc:
+            return ""
+        return "{}://{}/incidents/{}".format(parsed.scheme, parsed.netloc, incident_id)
+
     def _handle_get_incident(self, param):
         """Retrieve one or more TRAP incidents. Accepts str or list."""
         action_result = self.add_action_result(ActionResult(dict(param)))
@@ -762,6 +771,7 @@ class ProofpointTrapConnector(BaseConnector):
                 errors.append("id={}: {}".format(incident_id, action_result.get_message()))
                 continue
 
+            incident["incident_url"] = self._incident_ui_url(incident_id)
             action_result.add_data(incident)
             last_event_count = incident.get("event_count", 0)
             succeeded += 1

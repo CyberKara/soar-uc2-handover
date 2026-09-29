@@ -1,5 +1,5 @@
 """
-Automation playbook (PB2) triggered on container creation. Reads the TRAP incident ID and raw TRAP Severity off the Event Info artifact and promotes the container&#39;s severity from TRAP&#39;s own Severity (the connector creates the container at a neutral default). No writes back to TRAP. Analyst-driven actions (acknowledge, close) live in separate manually-launched playbooks: proofpoint_trap_acknowledge, proofpoint_trap_close.
+Automation playbook (PB2) for label proofpoint_trap, run on every automation trigger of the container (ingest, each Enrichment Complete, each Event Info Update). Reads the TRAP incident ID and raw TRAP Severity off the Event Info artifact and sets the container&#39;s severity from it each run, since new artifacts arrive at SOAR&#39;s default severity and raise a lower one. Adds a TRAP Triage - Severity note when that severity first applies or changes. No writes back to TRAP. Analyst-driven actions (acknowledge, close) live in separate manually-launched playbooks: proofpoint_trap_acknowledge, proofpoint_trap_close.
 """
 
 

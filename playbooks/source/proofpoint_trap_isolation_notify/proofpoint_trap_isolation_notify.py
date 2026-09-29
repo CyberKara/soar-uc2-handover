@@ -1,5 +1,5 @@
 """
-Email the container owner isolation-browser links for the container URL and every threat URL found in the TRAP incident.
+Data playbook (PB6) run by an analyst from a Proofpoint TRAP container. Emails the container owner isolation-browser links for the container URL and every threat URL found in the TRAP incident, and lists the same links in its TRAP Isolation Notify note.
 """
 
 
@@ -50,6 +50,32 @@ from datetime import datetime, timedelta
 import urllib.parse
 
 DEFAULT_ISOLATION_BROWSER_URL = "https://my_isolated_browser/browser?url="
+# The target SOAR shows at most about 22,000 characters of a note, so no note
+# is posted longer than this; a longer one is split by _note_parts().
+_NOTE_MAX_CHARS = 20000
+
+
+def _note_parts(title, content, limit=_NOTE_MAX_CHARS):
+    """[(title, content)] for one note, or numbered parts "title (k/N)" cut at
+    line boundaries when content is longer than limit. A line longer than the
+    limit is cut inside itself. Parts after the first open with a heading."""
+    if len(content) <= limit:
+        return [(title, content)]
+    budget = limit - 300  # room for the heading added to later parts
+    chunks, current, size = [], [], 0
+    for line in content.split("\n"):
+        for piece in [line[i:i + budget] for i in range(0, len(line), budget)] or [""]:
+            if current and size + len(piece) + 1 > budget:
+                chunks.append("\n".join(current))
+                current, size = [], 0
+            current.append(piece)
+            size += len(piece) + 1
+    if current:
+        chunks.append("\n".join(current))
+    total = len(chunks)
+    return [("{} ({}/{})".format(title, n, total),
+             chunk if n == 1 else "# {} ({}/{}, continued)\n\n{}".format(title, n, total, chunk))
+            for n, chunk in enumerate(chunks, 1)]
 ################################################################################
 ## Global Custom Code End
 ################################################################################
@@ -261,6 +287,11 @@ def resolve_recipient_and_build_links(action=None, success=None, container=None,
     phantom.save_run_data(key="resolve_recipient_and_build_links:subject", value=json.dumps(resolve_recipient_and_build_links__subject))
     phantom.save_run_data(key="resolve_recipient_and_build_links:body", value=json.dumps(resolve_recipient_and_build_links__body))
     phantom.save_run_data(key="resolve_recipient_and_build_links:link_count", value=str(len(targets)))
+    # The links themselves, for the container note (add_isolation_note).
+    phantom.save_run_data(key="resolve_recipient_and_build_links:links", value=json.dumps([
+        [label, target, "{}{}".format(isolation_browser_url, urllib.parse.quote(target, safe=""))]
+        for label, target in targets
+    ]))
 
     playbook_output = json.loads(phantom.get_run_data(key="playbook_output") or "{}")
     playbook_output.update({"recipient_email": recipient_email, "link_count": len(targets)})
@@ -363,22 +394,31 @@ def add_isolation_note(action=None, success=None, container=None, results=None, 
     playbook_output["status"] = "success" if send_status == "success" else "failed"
     phantom.save_run_data(key="playbook_output", value=json.dumps(playbook_output))
 
-    note_content = "\n".join([
+    note_lines = [
         "# TRAP Isolation Notify",
         "**Incident ID:** {}".format(incident_id),
         "**Recipient:** {}".format(recipient_email),
         "**Links sent:** {}".format(link_count),
         "**Send status:** {}".format(send_status),
         "**Send message:** {}".format(send_message),
-    ])
+    ]
+    # The same links the email carries. Only the isolation-browser link is
+    # clickable; the target (a threat URL) is shown as code so it cannot be
+    # clicked directly.
+    links = json.loads(phantom.get_run_data(key="resolve_recipient_and_build_links:links") or "[]")
+    if links:
+        note_lines += ["", "## Isolation-browser links", ""]
+        note_lines += ["- **{}** `{}` — [open in the isolation browser]({})".format(
+            label, str(target).replace("`", "'"), isolation_link) for label, target, isolation_link in links]
 
-    phantom.add_note(
-        container=container,
-        note_type="general",
-        title="TRAP Isolation Notify",
-        content=note_content,
-        note_format="markdown",  # the content is markdown; add_note() defaults to html
-    )
+    for part_title, part_content in _note_parts("TRAP Isolation Notify", "\n".join(note_lines)):
+        phantom.add_note(
+            container=container,
+            note_type="general",
+            title=part_title,
+            content=part_content,
+            note_format="markdown",  # the content is markdown; add_note() defaults to html
+        )
 
     phantom.debug("Isolation notify note added")
 

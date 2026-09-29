@@ -15,6 +15,34 @@ failures` note and marks a failed enrichment `Enrichment Failed`, which the re-e
 not count, so it can be retried. PB7 was live-verified later that day (Timer asset, 15 min;
 see "PB7 live-verified 2026-09-22" below). Open: PB4 stays on hold. Details: `docs/next-steps.md`, "UC2 audit (2026-09-21)".
 
+**Notes over ~22,000 characters are cut on the appliance (user, 2026-09-29).** soar8 stores at least
+1,000,000 characters (REST, `phantom.add_note()`, native "add note" — measured on test container 1321), so
+the lab never showed it. Every UC2 note now stays at or under 20,000: PB3's `Email Content` and `Attachment
+Extraction` notes split at line boundaries into "Title (k/N)" (`_note_parts()`, Global Custom Code; the email
+body itself stays capped at 20,000 — user: a good limit); PB8 packs the summary into notes of at most 20,000,
+splitting between tables and repeating a continued table's header, rewrites the parts in place and blanks
+parts left over from a longer earlier summary as "TRAP Summary (unused)" (reused if it grows again) — a
+playbook may not delete notes: `DELETE /rest/note` answers 403 for the `automation` user. Other UC2 notes
+are fixed-size.
+
+**Appliance feedback, 2026-09-29 (user).** Three changes, connector v1.0.37 + PB1:
+1. **Container name when TRAP gives no summary.** Real incidents have an empty summary and
+   description, so the connector names the container `TRAP-<id>: No summary`; it polls with
+   `expand_events=false`, so it has no sender at that point. PB1's `build_artifact_list` renames
+   that fallback name (only that one) to `TRAP-<id>: <first sender not excluded>` (+ "(+N more)"),
+   senders in alert order, over REST. Exclusions: custom list `proofpoint_trap_excluded_senders`,
+   one address per row, case-insensitive, filled by the operator (every incident carries one known
+   address that must not be used). Never in code: the handover mirror is public. All excluded =>
+   the name stays.
+2. **Comment on the TRAP incident** — new PB1 action block `comment_on_trap_incident` (connector
+   `add comment`) after `dispatch_enrichment_complete`, on the first enrichment only (run index 0):
+   "This incident has been extracted by SOAR automation, please review it in SOAR: <link>", link =
+   `phantom.get_base_url()` + `/mission/<container id>` (route read from the 8.6 UI bundle). The base
+   URL is Administration > Company Settings (REST refuses to change it); soar8's lacked `:8443`.
+3. **Link to TRAP in the `TRAP Detail` note** — connector `get incident` returns `incident_url` =
+   `<scheme>://<host of base_url>/incidents/<id>` (user: that is the TRAP web UI's incident page, on the
+   API's host); the note shows `Open in TRAP`.
+
 **PB8 is an automation playbook; `Enrichment Complete` runs automation (2026-09-29, user
 decision).** Analysts cannot run PB8 by hand, so it became automation (label `proofpoint_trap`,
 activated). An automation playbook fires only on an artifact created with `run_automation=True`,

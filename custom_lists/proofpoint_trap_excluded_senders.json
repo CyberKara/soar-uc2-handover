@@ -1,0 +1,8 @@
+{
+  "name": "proofpoint_trap_excluded_senders",
+  "content": [
+    [
+      "email"
+    ]
+  ]
+}

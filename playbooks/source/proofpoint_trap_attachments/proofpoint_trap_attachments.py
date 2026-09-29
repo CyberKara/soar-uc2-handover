@@ -1,5 +1,5 @@
 """
-Automation playbook triggered on artifact creation for label &#39;proofpoint_trap&#39;. Scans the container for &#39;MIME Body&#39; artifacts (vaulted raw .eml, created by the connector&#39;s on_poll -- see FR-21), parses each one for file attachments, and vaults each attachment as its own &#39;Email Attachment&#39; artifact (vaultId, fileName, fileHashSha256).
+Automation playbook (PB3) for label &#39;proofpoint_trap&#39;, run on every automation trigger of the container. Processes each &#39;MIME Body&#39; artifact not yet processed (vaulted raw .eml from proofpoint_trap_detail or proofpoint_trap_recheck): an &#39;Email Content&#39; note showing the email safely, each file attachment vaulted as its own &#39;Email Attachment&#39; artifact (vaultId, fileName, fileHashSha256), and an &#39;Attachment Extraction&#39; note. A note longer than 20,000 characters is split into parts.
 """
 
 
@@ -31,6 +31,32 @@ _BLOCK_TAGS = {"html", "body", "p", "div", "section", "article", "header", "foot
 _VOID_TAGS = {"br", "img", "hr", "meta", "link", "input", "area", "base", "col", "embed", "source", "track", "wbr", "param"}
 _HIDDEN_STYLE_RE = re.compile(r"display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0(?:px|pt|em|%)?\s*(?:;|$)|opacity\s*:\s*0(?:\.0+)?\s*(?:;|$)", re.I)
 _MAX_BODY_CHARS = 20000
+# The target SOAR shows at most about 22,000 characters of a note, so no note
+# is posted longer than this; a longer one is split by _note_parts().
+_NOTE_MAX_CHARS = 20000
+
+
+def _note_parts(title, content, limit=_NOTE_MAX_CHARS):
+    """[(title, content)] for one note, or numbered parts "title (k/N)" cut at
+    line boundaries when content is longer than limit. A line longer than the
+    limit is cut inside itself. Parts after the first open with a heading."""
+    if len(content) <= limit:
+        return [(title, content)]
+    budget = limit - 300  # room for the heading added to later parts
+    chunks, current, size = [], [], 0
+    for line in content.split("\n"):
+        for piece in [line[i:i + budget] for i in range(0, len(line), budget)] or [""]:
+            if current and size + len(piece) + 1 > budget:
+                chunks.append("\n".join(current))
+                current, size = [], 0
+            current.append(piece)
+            size += len(piece) + 1
+    if current:
+        chunks.append("\n".join(current))
+    total = len(chunks)
+    return [("{} ({}/{})".format(title, n, total),
+             chunk if n == 1 else "# {} ({}/{}, continued)\n\n{}".format(title, n, total, chunk))
+            for n, chunk in enumerate(chunks, 1)]
 
 
 def _defang(url):
@@ -687,24 +713,25 @@ def extract_attachments(action=None, success=None, container=None, results=None,
 
         # Posted over REST as a markdown note: phantom.add_note()'s HTML
         # sanitizer mangled real email bodies, and markdown notes render
-        # cleanly (tables included).
-        try:
-            note_resp = phantom.requests.post(
-                uri=phantom.build_phantom_rest_url("note"),
-                data=json.dumps({
-                    "container_id": container_id,
-                    "title": "Email Content — {}".format(source_file_name),
-                    "content": "\n".join(lines),
-                    "note_type": "general",
-                    "note_format": "markdown",
-                }),
-                verify=False,
-            )
-            if note_resp.status_code >= 300:
-                phantom.debug("Could not add Email Content note for {}: HTTP {} {}".format(
-                    source_file_name, note_resp.status_code, note_resp.text[:200]))
-        except Exception as e:
-            phantom.debug("Could not add Email Content note for {}: {}".format(source_file_name, str(e)))
+        # cleanly (tables included). Split into parts past _NOTE_MAX_CHARS.
+        for part_title, part_content in _note_parts("Email Content — {}".format(source_file_name), "\n".join(lines)):
+            try:
+                note_resp = phantom.requests.post(
+                    uri=phantom.build_phantom_rest_url("note"),
+                    data=json.dumps({
+                        "container_id": container_id,
+                        "title": part_title,
+                        "content": part_content,
+                        "note_type": "general",
+                        "note_format": "markdown",
+                    }),
+                    verify=False,
+                )
+                if note_resp.status_code >= 300:
+                    phantom.debug("Could not add note {!r}: HTTP {} {}".format(
+                        part_title, note_resp.status_code, note_resp.text[:200]))
+            except Exception as e:
+                phantom.debug("Could not add note {!r}: {}".format(part_title, str(e)))
 
         per_email_summary.append("**{}** (event {}): {} attachment(s)".format(source_file_name, event_id, extracted_this_email))
 
@@ -729,13 +756,14 @@ def extract_attachments(action=None, success=None, container=None, results=None,
             "**Total attachments extracted:** {}\n\n"
             "{}"
         ).format(total_extracted, "\n".join("- " + line for line in per_email_summary))
-        phantom.add_note(
-            container=container,
-            note_type="general",
-            title="Attachment Extraction",
-            content=note_content,
-            note_format="markdown",  # the content is markdown; add_note() defaults to html
-        )
+        for part_title, part_content in _note_parts("Attachment Extraction", note_content):
+            phantom.add_note(
+                container=container,
+                note_type="general",
+                title=part_title,
+                content=part_content,
+                note_format="markdown",  # the content is markdown; add_note() defaults to html
+            )
 
     phantom.debug("Attachment extraction complete: {} attachment(s) across {} MIME body/bodies".format(total_extracted, len(mime_artifacts)))
 

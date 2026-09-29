@@ -131,24 +131,22 @@ def build_summary(action=None, success=None, container=None, results=None, handl
         by_name.setdefault(artifact.get("name") or "(no name)", []).append(artifact)
 
     incident_id = container.get("source_data_identifier") or "?"
-    lines = [
+    intro = [
         "# TRAP Summary — Incident {}".format(incident_id),
         "Updated {} UTC — {} artifacts on this container.".format(
             datetime.utcnow().strftime("%Y-%m-%d %H:%M"), len(artifacts)),
         "",
     ]
 
+    # (title, header lines, row lines, closing lines) per table
+    tables = []
+
     def add_table(title, rows, columns):
-        lines.append("## {} ({})".format(title, len(rows)))
-        lines.append("")
-        lines.append("| " + " | ".join(header for header, _ in columns) + " |")
-        lines.append("|" + "---|" * len(columns))
-        for artifact in rows[:MAX_ROWS]:
-            lines.append("| " + " | ".join(cell(getter(artifact)) for _, getter in columns) + " |")
-        if len(rows) > MAX_ROWS:
-            lines.append("")
-            lines.append("… {} more not shown.".format(len(rows) - MAX_ROWS))
-        lines.append("")
+        header = ["| " + " | ".join(h for h, _ in columns) + " |", "|" + "---|" * len(columns)]
+        row_lines = ["| " + " | ".join(cell(getter(artifact)) for _, getter in columns) + " |"
+                     for artifact in rows[:MAX_ROWS]]
+        closing = ["", "… {} more not shown.".format(len(rows) - MAX_ROWS), ""] if len(rows) > MAX_ROWS else [""]
+        tables.append(("{} ({})".format(title, len(rows)), header, row_lines, closing))
 
     covered = set()
     for title, names, columns in sections:
@@ -165,8 +163,42 @@ def build_summary(action=None, success=None, container=None, results=None, handl
             ("Fields", lambda a: ", ".join("{}={}".format(k, v) for k, v in sorted((a.get("cef") or {}).items()))),
         ])
 
-    build_summary__note_content = "\n".join(lines)
-    phantom.debug("Summary built: {} artifacts, {} types".format(len(artifacts), len(by_name)))
+    # The target SOAR shows at most about 22,000 characters of a note, so the
+    # summary is written as notes of at most NOTE_MAX_CHARS. A table that does
+    # not fit continues in the next note under a repeat of its header, so every
+    # part renders as tables.
+    NOTE_MAX_CHARS = 20000
+
+    def size_of(block):
+        return sum(len(line) + 1 for line in block)
+
+    parts, current = [], list(intro)
+    for title, header, row_lines, closing in tables:
+        started = False
+        for row in row_lines:
+            head = ["## {} (continued)".format(title), ""] + header if started else ["## {}".format(title), ""] + header
+            if current and size_of(current) + size_of(head + [row]) > NOTE_MAX_CHARS - 300:
+                parts.append(current)
+                current = []
+            elif started:
+                head = []
+            current += head + [row]
+            started = True
+        if current and size_of(current) + size_of(closing) > NOTE_MAX_CHARS - 300:
+            parts.append(current)
+            current = []
+        current += closing
+    if current:
+        parts.append(current)
+
+    total = len(parts)
+    build_summary__note_content = []
+    for number, part in enumerate(parts, 1):
+        part_title = "TRAP Summary" if total == 1 else "TRAP Summary ({}/{})".format(number, total)
+        if number > 1:
+            part = ["# TRAP Summary — Incident {} ({}/{}, continued)".format(incident_id, number, total), ""] + part
+        build_summary__note_content.append([part_title, "\n".join(part)])
+    phantom.debug("Summary built: {} artifacts, {} types, {} note(s)".format(len(artifacts), len(by_name), total))
 
     # Also saved as run data: write_summary_note's input reads this key.
     phantom.save_run_data(key="build_summary:note_content", value=json.dumps(build_summary__note_content))
@@ -200,12 +232,17 @@ def write_summary_note(action=None, success=None, container=None, results=None, 
     ################################################################################
     ################################################################################
 
-    # One summary note per container, rewritten in place on every run:
-    # phantom.add_note() can only create a note, so an existing "TRAP Summary"
-    # note is updated over REST and a new one is created only on the first run.
-    title = "TRAP Summary"
-    content = build_summary__note_content
-    if not content:
+    # The summary is one note, or parts "TRAP Summary (k/N)" when it is longer
+    # than a note may be (build_summary). Every run rewrites them in place:
+    # part k goes to the k-th oldest existing summary note, missing ones are
+    # created, and parts left over from a longer earlier summary are blanked as
+    # "TRAP Summary (unused)" -- a playbook may not delete notes (REST DELETE
+    # answers 403 for the automation user) -- and reused if it grows again.
+    # phantom.add_note() can only create a note, hence REST.
+    parts = build_summary__note_content
+    if isinstance(parts, str):
+        parts = [["TRAP Summary", parts]]
+    if not parts:
         phantom.error("No summary content to write")
         return
 
@@ -214,7 +251,7 @@ def write_summary_note(action=None, success=None, container=None, results=None, 
     try:
         existing = phantom.requests.get(
             uri=note_url,
-            params={"_filter_container": container_id, "_filter_title": '"{}"'.format(title),
+            params={"_filter_container": container_id, "_filter_title__startswith": '"TRAP Summary"',
                     "sort": "id", "order": "asc", "page_size": 0},
             verify=False,
         ).json().get("data") or []
@@ -222,34 +259,42 @@ def write_summary_note(action=None, success=None, container=None, results=None, 
         phantom.error("Could not list the notes of container {}: {}".format(container_id, str(e)))
         existing = []
 
-    note_id = None
-    if existing:
-        note_id = existing[0]["id"]
-        response = phantom.requests.post(
-            uri="{}/{}".format(note_url, note_id),
-            data=json.dumps({"title": title, "content": content, "note_format": "markdown"}),
-            verify=False,
-        )
-        action = "updated"
-    else:
-        response = phantom.requests.post(
-            uri=note_url,
-            data=json.dumps({"container_id": container_id, "title": title, "content": content,
-                             "note_type": "general", "note_format": "markdown"}),
-            verify=False,
-        )
-        action = "created"
+    for index, (part_title, part_content) in enumerate(parts):
+        if index < len(existing):
+            action = "updated"
+            response = phantom.requests.post(
+                uri="{}/{}".format(note_url, existing[index]["id"]),
+                data=json.dumps({"title": part_title, "content": part_content, "note_format": "markdown"}),
+                verify=False,
+            )
+        else:
+            action = "created"
+            response = phantom.requests.post(
+                uri=note_url,
+                data=json.dumps({"container_id": container_id, "title": part_title, "content": part_content,
+                                 "note_type": "general", "note_format": "markdown"}),
+                verify=False,
+            )
+        try:
+            body = response.json()
+        except Exception:
+            body = {}
+        if response.status_code >= 300 or body.get("failed"):
+            phantom.error("{} could not be {} (HTTP {}): {}".format(
+                part_title, action, response.status_code, str(body)[:300]))
+        else:
+            phantom.debug("{} {} on container {}".format(part_title, action, container_id))
 
-    try:
-        body = response.json()
-    except Exception:
-        body = {}
-    if response.status_code >= 300 or body.get("failed"):
-        phantom.error("TRAP Summary note could not be {} (HTTP {}): {}".format(
-            action, response.status_code, str(body)[:300]))
-    else:
-        phantom.debug("TRAP Summary note {} on container {} (id {})".format(
-            action, container_id, note_id or body.get("id")))
+    for stale in existing[len(parts):]:
+        response = phantom.requests.post(
+            uri="{}/{}".format(note_url, stale["id"]),
+            data=json.dumps({"title": "TRAP Summary (unused)",
+                             "content": "Not in use: the TRAP Summary now fits in {} note(s).".format(len(parts)),
+                             "note_format": "markdown"}),
+            verify=False,
+        )
+        phantom.debug("Blanked leftover summary part {!r} (note {}): HTTP {}".format(
+            stale.get("title"), stale["id"], response.status_code))
 
     ################################################################################
     ################################################################################

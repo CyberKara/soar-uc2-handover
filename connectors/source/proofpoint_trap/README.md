@@ -121,6 +121,11 @@ Calls the TRAP API to verify the API key and network connectivity.
 
 Both `summary` and `detail` are **required** by the TRAP API. The action will fail if either is missing.
 
+### get incident
+
+Each incident in the result also carries `incident_url` (since 1.0.37): the incident's page in the
+TRAP web UI, `<scheme>://<host of base_url>/incidents/<id>`. The web UI and the API share the host.
+
 ### add comment
 
 `summary` is required, `detail` is optional.
