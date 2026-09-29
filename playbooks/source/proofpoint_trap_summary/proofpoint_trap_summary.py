@@ -25,6 +25,11 @@ def build_summary(action=None, success=None, container=None, results=None, handl
     # Build one markdown table per artifact type from every artifact on the container.
     ################################################################################
 
+    id_value = container.get("id", None)
+    playbook_input_max_rows = phantom.collect2(container=container, datapath=["playbook_input:max_rows"])
+
+    playbook_input_max_rows_values = [item[0] for item in playbook_input_max_rows]
+
     build_summary__note_content = None
 
     ################################################################################
@@ -36,7 +41,19 @@ def build_summary(action=None, success=None, container=None, results=None, handl
     # container (read over REST: all of them, whichever run or playbook created
     # them). Known UC2 types get chosen columns; any other type gets a generic
     # table so nothing on the container is left out.
+    # Playbook input max_rows (optional): rows shown per table, default 250.
     MAX_ROWS = 250
+    raw_max_rows = next((v for v in playbook_input_max_rows_values if v not in (None, "")), None)
+    if raw_max_rows is not None:
+        try:
+            MAX_ROWS = max(1, int(str(raw_max_rows).strip()))
+        except ValueError:
+            phantom.debug("Ignoring max_rows input {!r}: not a whole number".format(raw_max_rows))
+
+    # Playbook outputs, read by on_finish. Starts as failed; each step that
+    # succeeds updates it.
+    playbook_output = {"status": "failed", "note_id": None, "artifact_count": None}
+    phantom.save_run_data(key="playbook_output", value=json.dumps(playbook_output))
 
     def cell(value, limit=200):
         text = "" if value is None else str(value)
@@ -104,7 +121,7 @@ def build_summary(action=None, success=None, container=None, results=None, handl
         ]),
     ]
 
-    container_id = container.get("id")
+    container_id = id_value
     try:
         response = phantom.requests.get(
             uri=phantom.build_phantom_rest_url("artifact"),
@@ -158,7 +175,10 @@ def build_summary(action=None, success=None, container=None, results=None, handl
     build_summary__note_content = "\n".join(lines)
     phantom.debug("Summary built: {} artifacts, {} types".format(len(artifacts), len(by_name)))
 
-    # Also saved as run data: write_summary_note reads this key.
+    playbook_output["artifact_count"] = len(artifacts)
+    phantom.save_run_data(key="playbook_output", value=json.dumps(playbook_output))
+
+    # Also saved as run data: write_summary_note's input reads this key.
     phantom.save_run_data(key="build_summary:note_content", value=json.dumps(build_summary__note_content))
 
     ################################################################################
@@ -183,6 +203,8 @@ def write_summary_note(action=None, success=None, container=None, results=None, 
     # Write the 'TRAP Summary' note: update it in place if it exists, create it otherwise.
     ################################################################################
 
+    build_summary__note_content = json.loads(_ if (_ := phantom.get_run_data(key="build_summary:note_content")) != "" else "null")  # pylint: disable=used-before-assignment
+
     ################################################################################
     ## Custom Code Start
     ################################################################################
@@ -192,7 +214,7 @@ def write_summary_note(action=None, success=None, container=None, results=None, 
     # phantom.add_note() can only create a note, so an existing "TRAP Summary"
     # note is updated over REST and a new one is created only on the first run.
     title = "TRAP Summary"
-    content = json.loads(phantom.get_run_data(key="build_summary:note_content") or "null")
+    content = build_summary__note_content
     if not content:
         phantom.error("No summary content to write")
         return
@@ -210,6 +232,7 @@ def write_summary_note(action=None, success=None, container=None, results=None, 
         phantom.error("Could not list the notes of container {}: {}".format(container_id, str(e)))
         existing = []
 
+    note_id = None
     if existing:
         note_id = existing[0]["id"]
         response = phantom.requests.post(
@@ -235,7 +258,11 @@ def write_summary_note(action=None, success=None, container=None, results=None, 
         phantom.error("TRAP Summary note could not be {} (HTTP {}): {}".format(
             action, response.status_code, str(body)[:300]))
     else:
+        note_id = note_id or body.get("id")
         phantom.debug("TRAP Summary note {} on container {}".format(action, container_id))
+        playbook_output = json.loads(phantom.get_run_data(key="playbook_output") or "{}")
+        playbook_output.update({"status": "success", "note_id": note_id})
+        phantom.save_run_data(key="playbook_output", value=json.dumps(playbook_output))
 
     ################################################################################
     ################################################################################
@@ -251,26 +278,31 @@ def write_summary_note(action=None, success=None, container=None, results=None, 
 def on_finish(container, summary):
     phantom.debug("on_finish() called")
 
+    output = {
+        "status": None,
+        "note_id": None,
+        "artifact_count": None,
+    }
+
     ################################################################################
     ## Custom Code Start
     ################################################################################
     ################################################################################
 
-    # This function is called after all actions are completed.
-    # summary of all the action and/or all details of actions
-    # can be collected here.
-
-    # summary_json = phantom.get_summary()
-    # if 'result' in summary_json:
-        # for action_result in summary_json['result']:
-            # if 'action_run_id' in action_result:
-                # action_results = phantom.get_action_results(action_run_id=action_result['action_run_id'], result_data=False, flatten=False)
-                # phantom.debug(action_results)
+    # Populate the generated `output` dict; the save after Custom Code End emits it.
+    # No block recorded an outcome (e.g. the run stopped early): report failed.
+    raw_output = phantom.get_run_data(key="playbook_output")
+    if raw_output:
+        output.update(json.loads(raw_output))
+    if output["status"] is None:
+        output["status"] = "failed"
 
     ################################################################################
     ################################################################################
     ## Custom Code End
     ################################################################################
+
+    phantom.save_playbook_output_data(output=output)
 
     return
 

@@ -21,20 +21,18 @@ Ingest and manage incidents from Proofpoint Threat Response Auto-Pull (TRAP) on-
 
 ## Installation
 
-On the SOAR host:
+Build on a connected host and install the package; never compile on the target
+SOAR (air-gapped deployments have no build tooling or network there).
+
+Build (from the `soar-connectors` repo root):
 
 ```bash
-cd /data/splunk/soar8/soar-connectors/connectors/proofpoint_trap
-/opt/phantom/bin/phenv compile_app -i
+tools/build.sh proofpoint_trap          # -> dist/proofpoint_trap-v<version>.tgz
 ```
 
-Or build a tarball:
-
-```bash
-/opt/phantom/bin/phenv compile_app -t
-```
-
-Upload via **Apps > Install App**.
+Transfer the `.tgz` to the target and install it via **Apps > Install App** in the
+SOAR UI. SOAR refuses a package whose `app_version` is not higher than the one
+already installed.
 
 ## Asset Configuration
 

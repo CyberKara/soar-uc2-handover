@@ -85,12 +85,30 @@ def read_incident_id(action=None, success=None, container=None, results=None, ha
     phantom.debug("Extracted incident ID: {}".format(read_incident_id__incident_id))
 
     severity_map = {"Critical": "high", "High": "medium", "Informational": "low"}
+    previous_severity = container.get("severity")
     mapped_severity = severity_map.get(trap_severity, "low")
     phantom.set_severity(container=container, severity=mapped_severity)
     phantom.debug(
         "Promoted container severity to '{}' (TRAP Severity: '{}')".format(
             mapped_severity, trap_severity
         )
+    )
+
+    if trap_severity in severity_map:
+        reason = "TRAP Severity `{}` maps to SOAR `{}`.".format(trap_severity, mapped_severity)
+    else:
+        reason = (
+            "TRAP Severity `{}` is not in the mapping (Critical, High, Informational), "
+            "so the default `low` was applied.".format(trap_severity)
+        )
+    phantom.add_note(
+        container=container,
+        note_type="general",
+        title="TRAP Triage - Severity",
+        content="**Severity: `{}` -> `{}`**\n\n{}\n\nTRAP incident ID: {}\n\nMapping: Critical -> high, High -> medium, Informational -> low, anything else -> low.".format(
+            previous_severity, mapped_severity, reason, read_incident_id__incident_id
+        ),
+        note_format="markdown"
     )
 
     # Also saved as run data, so a consumer never depends on how the VPE names it.

@@ -13,5 +13,5 @@
     "server",
     "sender_address"
   ],
-  "note": "Reference for manually configuring this asset via Apps > Configure New Asset in the target SOAR GUI. Not a REST-postable creation payload \u2014 asset creation semantics differ from the read-merge-write update pattern used elsewhere in this toolchain, and this has not been verified as directly importable."
+  "note": "Reference for manually configuring this asset via Apps > Configure New Asset in the target SOAR GUI. Not a REST-postable creation payload \u2014 asset creation semantics differ from the read-merge-write update pattern used elsewhere in this toolchain, and this has not been verified as directly importable. SOURCE ASSET POINTED AT THIS LAB'S OWN INFRASTRUCTURE (`server`): the values kept here (`allow_smtputf8`, `encoding`, `port`, `ssl_config`) were set for that lab endpoint, not for yours. Review every field before reuse."
 }

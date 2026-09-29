@@ -51,6 +51,12 @@ def prompt_close_reason(action=None, success=None, container=None, results=None,
     # Ask the analyst for a closure reason (approver: container owner, else soar_local_admin).
     ################################################################################
 
+    playbook_input_approver = phantom.collect2(container=container, datapath=["playbook_input:approver"])
+    playbook_input_respond_in_mins = phantom.collect2(container=container, datapath=["playbook_input:respond_in_mins"])
+
+    playbook_input_approver_values = [item[0] for item in playbook_input_approver]
+    playbook_input_respond_in_mins_values = [item[0] for item in playbook_input_respond_in_mins]
+
     ################################################################################
     ## Custom Code Start
     ################################################################################
@@ -61,7 +67,18 @@ def prompt_close_reason(action=None, success=None, container=None, results=None,
     # this approver fallback -- TRAP containers never get an owner assigned. The
     # callback continues the flow; the return below stops the generated call to
     # process_close_reason from also running right away.
-    user = container.get('owner_name', None) or 'soar_local_admin'
+
+    # Playbook inputs (optional): approver replaces the owner fallback and
+    # respond_in_mins the 30-minute timeout.
+    approver = next((v for v in playbook_input_approver_values if v not in (None, "")), None)
+    user = str(approver).strip() if approver else (container.get('owner_name', None) or 'soar_local_admin')
+    respond_in_mins = 30
+    raw_minutes = next((v for v in playbook_input_respond_in_mins_values if v not in (None, "")), None)
+    if raw_minutes is not None:
+        try:
+            respond_in_mins = max(1, int(str(raw_minutes).strip()))
+        except ValueError:
+            phantom.debug("Ignoring respond_in_mins input {!r}: not a whole number".format(raw_minutes))
     role = None
     message = """**TRAP Incident {0}**
 Container: {1}
@@ -84,7 +101,7 @@ closure reason as a comment. Provide a closure reason."""
         },
     ]
 
-    phantom.prompt2(container=container, user=user, role=role, message=message, respond_in_mins=30, name="prompt_close_reason", parameters=parameters, response_types=response_types, callback=process_close_reason)
+    phantom.prompt2(container=container, user=user, role=role, message=message, respond_in_mins=respond_in_mins, name="prompt_close_reason", parameters=parameters, response_types=response_types, callback=process_close_reason)
 
     return
 
@@ -336,9 +353,13 @@ def add_close_note(action=None, success=None, container=None, results=None, hand
             phantom.set_status(container=container, status="closed")
             note_lines.append("")
             note_lines.append("Container status set to **closed**.")
+
+        succeeded = [close_status, comment_status].count("success")
+        outcome = "success" if succeeded == 2 else ("partial" if succeeded else "failed")
     else:
         note_lines.append("")
         note_lines.append("Analyst prompt expired without response. No TRAP action taken.")
+        outcome = "expired"
 
     note_content = "\n".join(note_lines)
 
@@ -351,6 +372,10 @@ def add_close_note(action=None, success=None, container=None, results=None, hand
     )
 
     phantom.debug("Close note added")
+
+    # Playbook outputs, read by on_finish.
+    playbook_output = {"status": outcome, "incident_id": incident_id, "reason": reason}
+    phantom.save_run_data(key="playbook_output", value=json.dumps(playbook_output))
 
     ################################################################################
     ################################################################################
@@ -456,26 +481,31 @@ def check_prompt_status(action=None, success=None, container=None, results=None,
 def on_finish(container, summary):
     phantom.debug("on_finish() called")
 
+    output = {
+        "status": None,
+        "incident_id": None,
+        "reason": None,
+    }
+
     ################################################################################
     ## Custom Code Start
     ################################################################################
     ################################################################################
 
-    # This function is called after all actions are completed.
-    # summary of all the action and/or all details of actions
-    # can be collected here.
-
-    # summary_json = phantom.get_summary()
-    # if 'result' in summary_json:
-        # for action_result in summary_json['result']:
-            # if 'action_run_id' in action_result:
-                # action_results = phantom.get_action_results(action_run_id=action_result['action_run_id'], result_data=False, flatten=False)
-                # phantom.debug(action_results)
+    # Populate the generated `output` dict; the save after Custom Code End emits it.
+    # No block recorded an outcome (e.g. the run stopped early): report failed.
+    raw_output = phantom.get_run_data(key="playbook_output")
+    if raw_output:
+        output.update(json.loads(raw_output))
+    if output["status"] is None:
+        output["status"] = "failed"
 
     ################################################################################
     ################################################################################
     ## Custom Code End
     ################################################################################
+
+    phantom.save_playbook_output_data(output=output)
 
     return
 

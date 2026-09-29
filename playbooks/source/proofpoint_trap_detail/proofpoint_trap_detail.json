@@ -648,10 +648,10 @@
         "output_spec": [],
         "playbook_type": "automation",
         "python_version": "3.13",
-        "schema": "5.0.5",
-        "version": "6.4.1.100"
+        "schema": "5.0.24",
+        "version": "8.6.0.530"
     },
-    "create_time": "2026-09-29T00:23:59.100473Z",
+    "create_time": "2026-09-29T11:23:01.101088Z",
     "draft_mode": false,
     "labels": [
         "proofpoint_trap"

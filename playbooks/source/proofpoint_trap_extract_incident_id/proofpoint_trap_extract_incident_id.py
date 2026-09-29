@@ -2,8 +2,6 @@ def proofpoint_trap_extract_incident_id(**kwargs):
     """
     Read the TRAP incident ID and raw TRAP Severity off the container's Event Info/Event Info Update artifacts.
     
-    Args:
-    
     Returns a JSON-serializable object that implements the configured data paths:
         incident_id: TRAP incident ID, or None if not found.
         trap_severity: Raw TRAP Severity value, or None if not found/not present.
@@ -12,6 +10,12 @@ def proofpoint_trap_extract_incident_id(**kwargs):
     import json
     import phantom.rules as phantom
     from phantom.decided.context import get_current_container_id_
+
+    # The incident ID and raw TRAP Severity sit on the "Event Info" artifact (connector on_poll)
+    # and on any later "Event Info Update" (proofpoint_trap_recheck, PB7); the highest artifact id
+    # wins, so an update overrides the original. A custom function gets no container object for
+    # phantom.collect2(), so artifacts are read over REST -- every artifact on the container, the
+    # same view as collect2(scope="all"). Used by proofpoint_trap_triage/_acknowledge/_close.
 
     outputs = {"incident_id": None, "trap_severity": None}
 

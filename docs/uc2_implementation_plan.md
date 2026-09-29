@@ -15,6 +15,25 @@ failures` note and marks a failed enrichment `Enrichment Failed`, which the re-e
 not count, so it can be retried. PB7 was live-verified later that day (Timer asset, 15 min;
 see "PB7 live-verified 2026-09-22" below). Open: PB4 stays on hold. Details: `docs/next-steps.md`, "UC2 audit (2026-09-21)".
 
+**Data playbooks declare inputs and outputs (2026-09-29).** The VPE showed PB4/PB5/PB8's Start
+block and PB4/PB5/PB6/PB8's End block "Unconfigured" (no `input_spec` / `output_spec`). All
+inputs are optional and a blank one keeps the old behaviour:
+
+| PB | Inputs | Outputs (`status` = success / partial / failed; PB5 also expired) |
+|---|---|---|
+| PB4 acknowledge | `approver` (default: owner, else soar_local_admin), `respond_in_mins` (default 30) | `status`, `incident_id`, `comment` |
+| PB5 close | `approver`, `respond_in_mins` (same defaults) | `status`, `incident_id`, `reason` |
+| PB6 isolation_notify | `isolation_browser_url` (unchanged) | `status`, `incident_id`, `recipient_email`, `link_count` |
+| PB8 summary | `max_rows` (default 250 rows per table) | `status`, `note_id`, `artifact_count` |
+
+Blocks write a `playbook_output` run-data key; `on_finish` fills the VPE's generated `output`
+dict from it (`status` defaults to failed when a run stops early). PB8's two code blocks also
+gained block inputs (`container:id`, `playbook_input:max_rows`,
+`build_summary:custom_function:note_content`). Live-tested on soar8 (ids 160/161/162/164): PB8
+with `max_rows=2` truncated its tables; PB5 with `approver`/`respond_in_mins=1` expired → `expired`;
+PB6 on an unowned container → `failed`; PB4 → `failed` (the on-hold assignee defect, plus the mock
+no longer knowing week-old incident 1789525159 — the `partial` path is untested).
+
 **PB1 rewritten 2026-09-28 — a VPE save no longer breaks it; re-runs post only what is new.**
 User requirement: saving must never break the playbook, and an importer always picks their own
 asset names in the action blocks (a save). On the real appliance a save had turned

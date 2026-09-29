@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Paquet de transfert (déploiement air-gapped)
 
-Généré le 2026-09-29 00:35 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
+Généré le 2026-09-29 11:25 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
 
 Ce paquet est autonome — tout ce qu'il faut pour déployer ce cas d'usage manuellement
 dans un environnement sans accès réseau vers ce dépôt ni vers `soar8`.
@@ -31,6 +31,8 @@ d'installation.
 - **`proofpoint_trap_detail` doit être réimporté (2026-09-28) — contrairement à la mise à jour du connecteur ci-dessus.** Il résiste désormais à un enregistrement dans le VPE et ses réexécutions ne publient que les nouveaux artefacts. Réimportez-le depuis `playbooks/` — la nouvelle copie remplace la vôtre, y compris tout bloc renommé avec `_0` par un enregistrement antérieur — puis réactivez-le. Après l'import, vous pouvez rediriger ses blocs d'action vers vos propres noms d'assets et enregistrer : il ne casse plus. Deux blocs changent de nom (`build_artifact_list`, `dispatch_artifact_list`). Une réexécution, que `proofpoint_trap_recheck` déclenche à chaque modification d'un incident, ne publie plus que les artefacts absents du conteneur au lieu de toute la liste, et la note de détail indique « N new, M already on the container ». L'artefact `Enrichment Complete` ajoute `alertCount` (alertes traitées), `eventCount` (le décompte de TRAP) et `artifactsAlreadyPresent` ; `artifactsCreated` ne compte plus que les nouveaux artefacts.
 
 - **Chaque playbook UC2 résiste désormais à un enregistrement dans le VPE, et `proofpoint_trap_summary` est nouveau (2026-09-28).** Réimportez tous les playbooks depuis `playbooks/` (les nouvelles copies remplacent les vôtres) et réactivez ceux d'automatisation (`proofpoint_trap_detail`, `proofpoint_trap_triage`, `proofpoint_trap_attachments`, `proofpoint_trap_recheck`). Ensuite, vous pouvez rediriger n'importe quel bloc d'action vers vos propres noms d'assets et enregistrer. Ce qui change : `proofpoint_trap_acknowledge` et `proofpoint_trap_close` sollicitent le propriétaire du conteneur, ou `soar_local_admin` si le conteneur n'a pas de propriétaire (comme avant, mais ce repli résiste désormais à un enregistrement) ; une demande de clôture restée sans réponse écrit quand même sa note ; `proofpoint_trap_attachments` n'accède plus au système de fichiers (le validateur de SOAR le signalait) et lit et enregistre les fichiers du Vault via l'API REST de SOAR ; sa note `Email Content` par e-mail affiche désormais le corps sous forme de texte sûr (liens avec leur vraie cible, neutralisés et non cliquables, alerte quand le texte d'un lien désigne un autre site, images et scripts retirés, texte caché et formulaires signalés). Les notes d'acquittement, de clôture, d'isolation et de pièces jointes sont désormais enregistrées en markdown : leur texte en gras et leurs titres s'affichent correctement. `proofpoint_trap_summary` se lance à la main depuis un conteneur : il écrit une note `TRAP Summary` avec un tableau par type d'artefact et réécrit cette même note à chaque exécution.
+
+- **Réimportez à nouveau la fonction personnalisée et tous les playbooks (2026-09-29).** Importez `proofpoint_trap_extract_incident_id` avec *Import Custom Function* (étape 4), pas avec l'import de playbook : son en-tête correspond désormais à celui que génère l'éditeur de SOAR 8.6, l'éditeur ne la signale donc plus comme modifiée hors de l'éditeur et elle s'enregistre comme fonction publiée au lieu d'un brouillon. Réimportez ensuite chaque playbook et réactivez ceux d'automatisation. Ce qui change : `proofpoint_trap_triage` ajoute une note `TRAP Triage - Severity` qui indique la sévérité appliquée, la valeur TRAP d'origine, et quand une valeur inconnue a été ramenée à `low`. Les playbooks lancés à la main n'affichent plus leur bloc Start ou End comme « Unconfigured » dans le VPE : ils acceptent des entrées facultatives (`proofpoint_trap_acknowledge` et `proofpoint_trap_close` : `approver`, `respond_in_mins` ; `proofpoint_trap_summary` : `max_rows` ; laissées vides, le comportement reste inchangé) et renvoient une sortie `status` avec l'identifiant de l'incident et un résultat clé. Chaque playbook porte désormais les marqueurs de version qu'écrit l'éditeur de SOAR 8.6.
 
 ## Ordre d'installation
 
@@ -79,8 +81,14 @@ d'installation.
    (la structure de premier niveau du fichier est `{"name": ..., "content": [...]}` —
    correspond directement au payload REST attendu.)
 4. **Importer les fonctions personnalisées, puis les playbooks** (dans cet ordre — les
-   playbooks référencent les CF) depuis `playbooks/*.tgz`, via Apps/Playbooks > Import dans
-   l'interface SOAR cible.
+   playbooks référencent les CF). `playbooks/` contient les deux, et chacun passe par son
+   propre import :
+   - **Fonctions personnalisées** — `playbooks/proofpoint_trap_extract_incident_id.tgz` : dans l'onglet Custom Functions de la
+     page Playbooks, le bouton d'envoi dont l'infobulle indique *Import Custom Function*.
+     L'import de playbook refuse une archive de CF (« failed to identify the import as a
+     playbook »). Si la CF apparaît ensuite en brouillon, ouvrez-la dans l'éditeur et
+     enregistrez-la.
+   - **Playbooks** — tous les autres `playbooks/*.tgz` : *Import Playbook* sur la page Playbooks.
    (`playbooks/source/` est le même code extrait pour lecture — ne pas importer depuis
    ce dossier, l'interface a besoin du `.tgz`.)
 5. **Activer les playbooks d'automatisation** (`proofpoint_trap_detail`, `proofpoint_trap_triage`, `proofpoint_trap_attachments`, `proofpoint_trap_recheck`) et définir leur utilisateur

@@ -132,6 +132,10 @@ def read_incident_id(action=None, success=None, container=None, results=None, ha
     # Also saved as run data: later blocks read this key in their own Custom Code.
     phantom.save_run_data(key="read_incident_id:incident_id", value=json.dumps(read_incident_id__incident_id))
 
+    # Playbook outputs, read by on_finish (status stays failed until the email is sent).
+    playbook_output = {"status": "failed", "incident_id": read_incident_id__incident_id}
+    phantom.save_run_data(key="playbook_output", value=json.dumps(playbook_output))
+
     ################################################################################
     ################################################################################
     ## Custom Code End
@@ -258,6 +262,10 @@ def resolve_recipient_and_build_links(action=None, success=None, container=None,
     phantom.save_run_data(key="resolve_recipient_and_build_links:body", value=json.dumps(resolve_recipient_and_build_links__body))
     phantom.save_run_data(key="resolve_recipient_and_build_links:link_count", value=str(len(targets)))
 
+    playbook_output = json.loads(phantom.get_run_data(key="playbook_output") or "{}")
+    playbook_output.update({"recipient_email": recipient_email, "link_count": len(targets)})
+    phantom.save_run_data(key="playbook_output", value=json.dumps(playbook_output))
+
     ################################################################################
     ################################################################################
     ## Custom Code End
@@ -351,6 +359,10 @@ def add_isolation_note(action=None, success=None, container=None, results=None, 
     send_status = send_data[0][0] if send_data and send_data[0][0] else "not run"
     send_message = send_data[0][1] if send_data and len(send_data[0]) > 1 and send_data[0][1] else ""
 
+    playbook_output = json.loads(phantom.get_run_data(key="playbook_output") or "{}")
+    playbook_output["status"] = "success" if send_status == "success" else "failed"
+    phantom.save_run_data(key="playbook_output", value=json.dumps(playbook_output))
+
     note_content = "\n".join([
         "# TRAP Isolation Notify",
         "**Incident ID:** {}".format(incident_id),
@@ -389,24 +401,32 @@ def add_isolation_note(action=None, success=None, container=None, results=None, 
 def on_finish(container, summary):
     phantom.debug("on_finish() called")
 
+    output = {
+        "status": None,
+        "incident_id": None,
+        "recipient_email": None,
+        "link_count": None,
+    }
+
     ################################################################################
     ## Custom Code Start
     ################################################################################
+    ################################################################################
 
-    # This function is called after all actions are completed.
-    # summary of all the action and/or all details of actions
-    # can be collected here.
+    # Populate the generated `output` dict; the save after Custom Code End emits it.
+    # No block recorded an outcome (e.g. the run stopped early): report failed.
+    raw_output = phantom.get_run_data(key="playbook_output")
+    if raw_output:
+        output.update(json.loads(raw_output))
+    if output["status"] is None:
+        output["status"] = "failed"
 
-    # summary_json = phantom.get_summary()
-    # if 'result' in summary_json:
-        # for action_result in summary_json['result']:
-            # if 'action_run_id' in action_result:
-                # action_results = phantom.get_action_results(action_run_id=action_result['action_run_id'], result_data=False, flatten=False)
-                # phantom.debug(action_results)
-
+    ################################################################################
     ################################################################################
     ## Custom Code End
     ################################################################################
+
+    phantom.save_playbook_output_data(output=output)
 
     return
 
