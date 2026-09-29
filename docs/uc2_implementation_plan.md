@@ -58,6 +58,22 @@ comment, container closed) and denied (else path, note written through the join)
 container and writes ONE "TRAP Summary" note, a markdown table per artifact type, rewritten in place
 on each run (REST, since `phantom.add_note()` cannot update); 250-row cap per table. The user confirmed
 the markdown tables render as tables in the SOAR note view.
+
+**PB3's "Email Content" note shows the body safely (2026-09-28, later; user-confirmed rendering).** The body was
+passed as raw HTML to `phantom.add_note()`, whose sanitizer mangled real emails (and raw REST would keep live
+links and remote images, i.e. tracking pixels). It is now converted to escaped markdown
+(`_email_html_to_markdown`, PB3 Global Custom Code, standard-library `html.parser`) and posted as a markdown note
+over REST: paragraphs/bold/headings/lists/data tables kept; scripts and styles dropped; images as placeholders
+with their defanged source; every link as its text plus the defanged real target (Proofpoint URL Defense v2/v3
+decoded), with a ⚠ line when the visible text names a different host; hidden (`display:none`, `font-size:0`)
+text shown as `[hidden]`; forms marked with their target and `[password field]`; From/To/Subject/Date added.
+Only newly processed emails get it; existing notes keep the old format.
+
+**Notes are stored as markdown (2026-09-29).** `phantom.add_note()` defaults to `note_format="html"`, so the
+markdown written by PB3 (Attachment Extraction), PB4, PB5 and PB6 showed `**` and `#` literally (user report;
+editing such a note in the GUI inserts `<strong>`). Those calls now pass `note_format="markdown"`; live-verified,
+new notes stored as markdown. Notes created before the fix stay html (converting them is the user's call).
+
 - **Re-runs post only new artifacts.** A re-run (PB7 flags a changed incident, usually one that
   gained alerts) used to re-post the whole list — 180 → 323 `add artifact` calls per run on a real
   appliance incident, nearly all rejected as duplicates. `build_artifact_list` now skips any

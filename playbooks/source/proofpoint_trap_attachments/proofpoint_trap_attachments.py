@@ -8,6 +8,345 @@ import json
 from datetime import datetime, timedelta
 
 
+################################################################################
+## Global Custom Code Start
+################################################################################
+
+
+
+# Safe markdown rendering of an email body for the "Email Content" note.
+# Nothing from the email may load or be clickable in the analyst's browser:
+# scripts/styles/iframes are dropped, images become placeholders, every link is
+# shown as its text plus the defanged real target in a code span, and all text
+# is escaped so email content cannot inject markup into the note.
+# Standard library only (html.parser): SOAR's validator flags lxml.
+import re
+import html as _html_mod
+from html.parser import HTMLParser
+
+_URL_RE = re.compile(r"(?:https?|ftp)://[^\s<>\"'`]+", re.I)
+_SKIP_TAGS = {"script", "style", "head", "title", "noscript", "template", "iframe", "object", "embed", "svg", "meta", "link"}
+_BLOCK_TAGS = {"html", "body", "p", "div", "section", "article", "header", "footer", "center", "blockquote", "main", "aside", "nav",
+               "table", "tbody", "thead", "tfoot", "tr", "ul", "ol", "li", "h1", "h2", "h3", "h4", "h5", "h6", "form", "hr", "pre", "address"}
+_VOID_TAGS = {"br", "img", "hr", "meta", "link", "input", "area", "base", "col", "embed", "source", "track", "wbr", "param"}
+_HIDDEN_STYLE_RE = re.compile(r"display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0(?:px|pt|em|%)?\s*(?:;|$)|opacity\s*:\s*0(?:\.0+)?\s*(?:;|$)", re.I)
+_MAX_BODY_CHARS = 20000
+
+
+def _defang(url):
+    url = (url or "").strip()
+    url = re.sub(r"^http", "hxxp", url, flags=re.I)
+    url = re.sub(r"^ftp", "fxp", url, flags=re.I)
+    m = re.match(r"^([a-z]+://)([^/?#]*)(.*)$", url, re.I)
+    if m:
+        url = m.group(1) + m.group(2).replace(".", "[.]") + m.group(3)
+    return url
+
+
+def _code(text):
+    return "`" + (text or "").replace("`", "'").replace("\n", " ") + "`"
+
+
+def _md_escape(text):
+    text = _html_mod.escape(text or "", quote=False)
+    return re.sub(r"([\\`*_\[\]#|])", r"\\\1", text)
+
+
+def _md_text(text):
+    """Escape plain text for markdown, turning bare URLs into defanged code spans."""
+    out, pos = [], 0
+    for m in _URL_RE.finditer(text or ""):
+        out.append(_md_escape(text[pos:m.start()]))
+        out.append(_code(_defang(m.group(0))))
+        pos = m.end()
+    out.append(_md_escape((text or "")[pos:]))
+    return "".join(out)
+
+
+def _urldefense_original(url):
+    """The original URL behind a Proofpoint URL Defense link (v2 fully, v3 up to
+    its '*' placeholders), or None when the link is not a URL Defense one."""
+    import urllib.parse
+    m = re.match(r"^https?://urldefense(?:\.proofpoint)?\.com/v2/url\?(.*)$", url or "", re.I)
+    if m:
+        u = urllib.parse.parse_qs(m.group(1)).get("u", [""])[0]
+        return urllib.parse.unquote(u.replace("-", "%").replace("_", "/")) or None
+    m = re.match(r"^https?://urldefense\.com/v3/__(.+?)__;", url or "", re.I)
+    if m:
+        return m.group(1)
+    return None
+
+
+def _host(value):
+    m = re.match(r"^\s*(?:[a-z]+://)?([^/\s?#:]+)", value or "", re.I)
+    return m.group(1).lower() if m else ""
+
+
+class _Tree(HTMLParser):
+    def __init__(self):
+        HTMLParser.__init__(self, convert_charrefs=True)
+        self.root = {"tag": "root", "attrs": {}, "children": []}
+        self.stack = [self.root]
+
+    def handle_starttag(self, tag, attrs):
+        node = {"tag": tag, "attrs": dict(attrs), "children": []}
+        self.stack[-1]["children"].append(node)
+        if tag not in _VOID_TAGS:
+            self.stack.append(node)
+
+    def handle_startendtag(self, tag, attrs):
+        self.stack[-1]["children"].append({"tag": tag, "attrs": dict(attrs), "children": []})
+
+    def handle_endtag(self, tag):
+        for i in range(len(self.stack) - 1, 0, -1):
+            if self.stack[i]["tag"] == tag:
+                del self.stack[i:]
+                return
+
+    def handle_data(self, data):
+        self.stack[-1]["children"].append(data)
+
+
+def _is_hidden(node):
+    attrs = node.get("attrs") or {}
+    return "hidden" in attrs or bool(_HIDDEN_STYLE_RE.search(attrs.get("style") or ""))
+
+
+def _has_block(node):
+    for child in node.get("children") or []:
+        if isinstance(child, dict) and (child["tag"] in _BLOCK_TAGS or child["tag"] == "br" or _has_block(child)):
+            return True
+    return False
+
+
+def _has_tag(node, tag):
+    for child in node.get("children") or []:
+        if isinstance(child, dict) and (child["tag"] == tag or _has_tag(child, tag)):
+            return True
+    return False
+
+
+def _inline(node, notes):
+    """Render a node's content as one line of escaped markdown."""
+    parts = []
+    for child in node.get("children") or []:
+        if isinstance(child, str):
+            parts.append(_md_text(re.sub(r"\s+", " ", child)))
+            continue
+        tag = child["tag"]
+        if tag in _SKIP_TAGS:
+            continue
+        if _is_hidden(child):
+            hidden = re.sub(r"\s+", " ", _plain(child)).strip()
+            if hidden:
+                parts.append(" [hidden] " + _md_escape(hidden[:300]) + " ")
+            continue
+        if tag == "br":
+            parts.append(" ")
+        elif tag == "img":
+            parts.append(_image(child))
+        elif tag == "a":
+            parts.append(_link(child, notes))
+        elif tag in ("b", "strong"):
+            inner = _inline(child, notes).strip()
+            parts.append("**" + inner + "**" if inner else "")
+        elif tag in ("i", "em"):
+            inner = _inline(child, notes).strip()
+            parts.append("*" + inner + "*" if inner else "")
+        elif tag == "input":
+            if (child["attrs"].get("type") or "").lower() == "password":
+                parts.append(" [password field] ")
+        else:
+            parts.append(_inline(child, notes))
+    return re.sub(r"[ \t]+", " ", "".join(parts))
+
+
+def _plain(node):
+    out = []
+    for child in node.get("children") or []:
+        if isinstance(child, str):
+            out.append(child)
+        elif child["tag"] not in _SKIP_TAGS:
+            out.append(" " + _plain(child) + " ")
+    return "".join(out)
+
+
+def _image(node):
+    attrs = node.get("attrs") or {}
+    src = (attrs.get("src") or "").strip()
+    alt = re.sub(r"\s+", " ", attrs.get("alt") or "").strip()
+    label = "[image" + (": " + _md_escape(alt[:80]) if alt else "") + "]"
+    if src.lower().startswith(("http://", "https://", "//")):
+        return " " + label + " " + _code(_defang(src if not src.startswith("//") else "https:" + src)) + " "
+    if src.lower().startswith("cid:"):
+        return " " + label.replace("[image", "[inline image", 1) + " "
+    if src.lower().startswith("data:"):
+        return " " + label.replace("[image", "[embedded image", 1) + " "
+    return " " + label + " "
+
+
+def _link(node, notes):
+    href = ((node.get("attrs") or {}).get("href") or "").strip()
+    text = _inline(node, notes).strip()
+    raw_text = re.sub(r"\s+", " ", _plain(node)).strip()
+    low = href.lower()
+    if low.startswith("javascript:"):
+        return (text + " " if text else "") + "[javascript link removed]"
+    if low.startswith("mailto:"):
+        return (text + " " if text else "") + "(mail to " + _code(href[7:]) + ")"
+    if not low.startswith(("http://", "https://", "ftp://", "//")):
+        return text
+    target = _defang(href if not href.startswith("//") else "https:" + href)
+    original = _urldefense_original(href)
+    if original:
+        target += " (URL Defense, original: " + _defang(original) + ")"
+    shown_host, real_host = _host(raw_text), _host((original or href).lstrip("/"))
+    looks_like_url = bool(re.match(r"^\s*(?:[a-z]+://|www\.)|^[\w-]+(?:\.[\w-]+)+(?:/|\s*$)", raw_text, re.I))
+    related = real_host.endswith("." + shown_host) or shown_host.endswith("." + real_host)
+    if looks_like_url and shown_host and real_host and shown_host != real_host and not related:
+        notes.append("Link text shows {} but goes to {}".format(_code(shown_host), _code(_defang("http://" + real_host)[7:])))
+        return (text or "") + " → " + _code(target) + " ⚠"
+    if text and raw_text.rstrip("/") not in (href.rstrip("/"), (original or "").rstrip("/")):
+        return text + " → " + _code(target)
+    return _code(target)
+
+
+def _blocks(node, notes, out):
+    """Append rendered markdown blocks (paragraph strings) for a node's children."""
+    line = []
+
+    def flush():
+        text = re.sub(r"[ \t]+", " ", "".join(line)).strip()
+        if text:
+            out.append(text)
+        del line[:]
+
+    for child in node.get("children") or []:
+        if isinstance(child, str):
+            line.append(_md_text(re.sub(r"\s+", " ", child)))
+            continue
+        tag = child["tag"]
+        if tag in _SKIP_TAGS:
+            continue
+        if _is_hidden(child):
+            hidden = re.sub(r"\s+", " ", _plain(child)).strip()
+            if hidden:
+                line.append(" [hidden] " + _md_escape(hidden[:300]) + " ")
+            continue
+        if tag not in _BLOCK_TAGS and tag != "br":
+            if tag == "img":
+                line.append(_image(child))
+            elif tag == "a":
+                line.append(_link(child, notes))
+            elif tag in ("b", "strong"):
+                inner = _inline(child, notes).strip()
+                line.append("**" + inner + "**" if inner else "")
+            elif tag in ("i", "em"):
+                inner = _inline(child, notes).strip()
+                line.append("*" + inner + "*" if inner else "")
+            elif tag == "input":
+                if (child["attrs"].get("type") or "").lower() == "password":
+                    line.append(" [password field] ")
+            else:
+                # inline wrapper (span, font, i, u, ...) that may hold blocks
+                if _has_block(child):
+                    flush()
+                    _blocks(child, notes, out)
+                else:
+                    line.append(_inline(child, notes))
+            continue
+        flush()
+        if tag == "br":
+            continue
+        if tag == "hr":
+            out.append("---")
+        elif tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
+            text = _inline(child, notes).strip()
+            if text:
+                out.append("**" + text + "**")
+        elif tag in ("ul", "ol"):
+            items, n = [], 0
+            for item in child["children"]:
+                if isinstance(item, dict) and item["tag"] == "li":
+                    n += 1
+                    text = _inline(item, notes).strip()
+                    if text:
+                        items.append(("{}. ".format(n) if tag == "ol" else "- ") + text)
+            if items:
+                out.append("\n".join(items))
+        elif tag == "table":
+            _table(child, notes, out)
+        elif tag == "form":
+            action = (child["attrs"].get("action") or "").strip()
+            out.append("[form" + (" submits to " + _code(_defang(action)) if action else "") + "]")
+            _blocks(child, notes, out)
+        elif tag == "pre":
+            for text_line in _plain(child).splitlines():
+                if text_line.strip():
+                    out.append(_md_text(text_line.strip()))
+        else:
+            _blocks(child, notes, out)
+    flush()
+
+
+def _rows(table):
+    rows = []
+    for child in table["children"]:
+        if not isinstance(child, dict):
+            continue
+        if child["tag"] == "tr":
+            rows.append(child)
+        elif child["tag"] in ("tbody", "thead", "tfoot"):
+            rows.extend(_rows(child))
+    return rows
+
+
+def _table(table, notes, out):
+    rows = _rows(table)
+    cells = [[c for c in r["children"] if isinstance(c, dict) and c["tag"] in ("td", "th")] for r in rows]
+    width = max([len(c) for c in cells] or [0])
+    if _has_tag(table, "table") or width < 2 or len(rows) < 2:
+        # a layout table (nested, or a single column): flatten it to lines
+        for row in rows:
+            for cell in row["children"]:
+                if isinstance(cell, dict):
+                    _blocks(cell, notes, out)
+        return
+    grid = []
+    for row_cells in cells:
+        texts = [_inline(c, notes).strip().replace("\n", " ") for c in row_cells]
+        grid.append(texts + [""] * (width - len(texts)))
+    out.append("\n".join(["| " + " | ".join(grid[0]) + " |", "|" + "---|" * width]
+                         + ["| " + " | ".join(r) + " |" for r in grid[1:]]))
+
+
+def _email_html_to_markdown(html_text):
+    tree = _Tree()
+    try:
+        tree.feed(html_text or "")
+        tree.close()
+    except Exception:
+        return _email_text_to_markdown(re.sub(r"<[^>]+>", " ", html_text or ""))
+    notes, out = [], []
+    _blocks(tree.root, notes, out)
+    body = "\n\n".join(out)
+    if len(body) > _MAX_BODY_CHARS:
+        body = body[:_MAX_BODY_CHARS] + "\n\n… (truncated, {} more characters)".format(len(body) - _MAX_BODY_CHARS)
+    if notes:
+        body = "\n".join("⚠ " + n for n in sorted(set(notes))) + "\n\n" + body
+    return body
+
+
+def _email_text_to_markdown(text):
+    lines = [_md_text(line.rstrip()) for line in (text or "").splitlines()]
+    body = "  \n".join(lines).strip()
+    if len(body) > _MAX_BODY_CHARS:
+        body = body[:_MAX_BODY_CHARS] + "\n\n… (truncated, {} more characters)".format(len(body) - _MAX_BODY_CHARS)
+    return body
+################################################################################
+## Global Custom Code End
+################################################################################
+
 @phantom.playbook_block()
 def on_start(container):
     phantom.debug('on_start() called')
@@ -70,12 +409,13 @@ def extract_attachments(action=None, success=None, container=None, results=None,
     # allowlist, confirmed live 2026-08-12 by probing it directly: h1/h2/p/b/
     # ul/li/hr/span/br survive; pre/details/summary/code/div/i are silently
     # stripped (text kept, tag dropped); <a href=...> keeps the <a> tag but
-    # strips the href attribute, so links never work. Formatting below only
-    # uses the confirmed-safe tags — no <pre>, no <details>, no links. A raw
-    # HTML body from a real phishing email (tables, images, div layouts) will
-    # still get stripped down to bare readable text by this same sanitizer;
-    # that's a platform limitation, not something this playbook can route
-    # around short of writing HTML to a note some other way.
+    # strips the href attribute, so links never work. So the Email Content
+    # note is not written with add_note() any more: it is a markdown note
+    # posted over REST, and the body is converted to SAFE markdown first
+    # (_email_html_to_markdown in the Global Custom Code) -- scripts/styles
+    # dropped, images as placeholders, links shown as text plus the defanged
+    # target (URL Defense links decoded), hidden text and forms flagged, all
+    # email text escaped. Nothing from the email loads or is clickable.
     #
     # Re-scans all MIME Body artifacts on every run (same pattern as ip_enrich) and
     # skips any already marked processed via a data.attachments_extracted marker —
@@ -291,7 +631,11 @@ def extract_attachments(action=None, success=None, container=None, results=None,
             body_part = None
             phantom.debug("get_body() failed for {}: {}".format(source_file_name, str(e)))
 
-        body_html = None
+        # The body is shown as safe markdown: nothing from the email loads or is
+        # clickable in the analyst's browser (see _email_html_to_markdown in the
+        # Global Custom Code).
+        body_md = None
+        body_kind = None
         if body_part is not None:
             try:
                 body_content = body_part.get_content()
@@ -300,12 +644,11 @@ def extract_attachments(action=None, success=None, container=None, results=None,
                 phantom.debug("Could not decode body for {}: {}".format(source_file_name, str(e)))
             if body_content:
                 if body_part.get_content_type() == "text/html":
-                    body_html = body_content
+                    body_md = _email_html_to_markdown(body_content)
+                    body_kind = "HTML, shown as safe text: links defanged and not clickable, images and scripts removed"
                 else:
-                    # <pre> is stripped by phantom.add_note()'s sanitizer (see
-                    # docstring) — use <p>/<br>, the confirmed-safe equivalent
-                    # for preserving line breaks in plain text.
-                    body_html = "<p>{}</p>".format(html.escape(body_content).replace("\n", "<br>\n"))
+                    body_md = _email_text_to_markdown(body_content)
+                    body_kind = "plain text, URLs defanged"
 
         auth_results = parsed.get_all("Authentication-Results") or []
         received_chain = parsed.get_all("Received") or []
@@ -318,40 +661,48 @@ def extract_attachments(action=None, success=None, container=None, results=None,
         _, from_addr = parseaddr(from_header)
         return_path_mismatch = bool(return_path_addr) and bool(from_addr) and return_path_addr.lower() != from_addr.lower()
 
-        header_lines = ["<h1>Email Content — {} (event {})</h1>".format(html.escape(source_file_name), html.escape(event_id))]
+        lines = ["# Email Content — {} (event {})".format(_md_escape(source_file_name), _md_escape(event_id)), ""]
+        for label, value in (("From", from_header), ("To", parsed.get("To", "")),
+                             ("Subject", parsed.get("Subject", "")), ("Date", parsed.get("Date", ""))):
+            if value:
+                lines.append("**{}:** {}  ".format(label, _md_text(" ".join(str(value).split()))))
         if return_path:
-            mismatch_note = " — <b>does not match From ({})</b>".format(html.escape(from_addr)) if return_path_mismatch else ""
-            header_lines.append("<p><b>Return-Path:</b> {}{}</p>".format(html.escape(return_path), mismatch_note))
+            mismatch_note = " — **does not match From ({})**".format(_md_text(from_addr)) if return_path_mismatch else ""
+            lines.append("**Return-Path:** {}{}  ".format(_md_text(str(return_path)), mismatch_note))
         if reply_to:
-            header_lines.append("<p><b>Reply-To:</b> {}</p>".format(html.escape(reply_to)))
+            lines.append("**Reply-To:** {}  ".format(_md_text(str(reply_to))))
         if x_originating_ip:
-            header_lines.append("<p><b>X-Originating-IP:</b> {}</p>".format(html.escape(x_originating_ip)))
+            lines.append("**X-Originating-IP:** {}  ".format(_md_text(str(x_originating_ip))))
         if auth_results:
-            header_lines.append("<p><b>Authentication-Results:</b></p><ul>")
-            for ar in auth_results:
-                header_lines.append("<li>{}</li>".format(html.escape(ar)))
-            header_lines.append("</ul>")
+            lines += ["", "**Authentication-Results:**", ""]
+            lines += ["- " + _md_text(" ".join(str(ar).split())) for ar in auth_results]
         if received_chain:
-            # <details>/<summary> (for a collapsible view) and <pre> are both
-            # stripped by phantom.add_note()'s sanitizer (see docstring) —
-            # print the chain directly instead.
-            header_lines.append("<p><b>Received chain ({} hop(s)):</b></p>".format(len(received_chain)))
-            for hop in received_chain:
-                header_lines.append("<p>{}</p>".format(html.escape(hop).replace("\n", "<br>\n")))
-
-        note_html = "\n".join(header_lines)
-        if body_html:
-            note_html += "\n<hr>\n" + body_html
+            lines += ["", "**Received chain ({} hop(s)):**".format(len(received_chain)), ""]
+            lines += ["{}. {}".format(n, _md_text(" ".join(str(hop).split()))) for n, hop in enumerate(received_chain, 1)]
+        lines += ["", "---", ""]
+        if body_md:
+            lines += ["**Body** ({})".format(body_kind), "", body_md]
         else:
-            note_html += "\n<p><i>No readable body part found in this MIME message.</i></p>"
+            lines.append("*No readable body part found in this MIME message.*")
 
+        # Posted over REST as a markdown note: phantom.add_note()'s HTML
+        # sanitizer mangled real email bodies, and markdown notes render
+        # cleanly (tables included).
         try:
-            phantom.add_note(
-                container=container,
-                note_type="general",
-                title="Email Content — {}".format(source_file_name),
-                content=note_html,
+            note_resp = phantom.requests.post(
+                uri=phantom.build_phantom_rest_url("note"),
+                data=json.dumps({
+                    "container_id": container_id,
+                    "title": "Email Content — {}".format(source_file_name),
+                    "content": "\n".join(lines),
+                    "note_type": "general",
+                    "note_format": "markdown",
+                }),
+                verify=False,
             )
+            if note_resp.status_code >= 300:
+                phantom.debug("Could not add Email Content note for {}: HTTP {} {}".format(
+                    source_file_name, note_resp.status_code, note_resp.text[:200]))
         except Exception as e:
             phantom.debug("Could not add Email Content note for {}: {}".format(source_file_name, str(e)))
 
@@ -383,6 +734,7 @@ def extract_attachments(action=None, success=None, container=None, results=None,
             note_type="general",
             title="Attachment Extraction",
             content=note_content,
+            note_format="markdown",  # the content is markdown; add_note() defaults to html
         )
 
     phantom.debug("Attachment extraction complete: {} attachment(s) across {} MIME body/bodies".format(total_extracted, len(mime_artifacts)))

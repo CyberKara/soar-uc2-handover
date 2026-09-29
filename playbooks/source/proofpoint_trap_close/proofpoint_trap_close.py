@@ -346,7 +346,8 @@ def add_close_note(action=None, success=None, container=None, results=None, hand
         container=container,
         note_type="general",
         title="TRAP Close - {}".format(datetime.now().strftime("%Y-%m-%d %H:%M")),
-        content=note_content
+        content=note_content,
+        note_format="markdown",  # the content is markdown; add_note() defaults to html
     )
 
     phantom.debug("Close note added")

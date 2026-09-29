@@ -364,7 +364,8 @@ def add_isolation_note(action=None, success=None, container=None, results=None, 
         container=container,
         note_type="general",
         title="TRAP Isolation Notify",
-        content=note_content
+        content=note_content,
+        note_format="markdown",  # the content is markdown; add_note() defaults to html
     )
 
     phantom.debug("Isolation notify note added")
