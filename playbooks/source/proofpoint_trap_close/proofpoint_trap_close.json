@@ -554,7 +554,8 @@
         "playbook_type": "data",
         "python_version": "3.13",
         "schema": "5.0.24",
-        "version": "8.6.0.530"
+        "version": "8.6.0.530",
+        "playbook_trigger": "artifact_created"
     },
     "create_time": "2026-09-29T11:23:13.544002Z",
     "draft_mode": false,

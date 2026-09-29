@@ -498,7 +498,8 @@
                 }
             },
             "notes": "",
-            "description": "Data playbook (PB4) manually launched by an analyst from the container once they've reviewed the artifacts/notes PB1-PB3 produced. Prompts for a comment, then assigns the TRAP incident to SOAR, moves its status from new to open, and posts the comment. Independent of proofpoint_trap_triage/proofpoint_trap_close."
+            "description": "Data playbook (PB4) manually launched by an analyst from the container once they've reviewed the artifacts/notes PB1-PB3 produced. Prompts for a comment, then assigns the TRAP incident to SOAR, moves its status from new to open, and posts the comment. Independent of proofpoint_trap_triage/proofpoint_trap_close.",
+            "globalCustomCode": "\n\n\n# Design notes (kept here because a VPE save replaces the module docstring):\n# Proofpoint TRAP Acknowledge (PB4)\n#\n# Data playbook manually launched by an analyst from the container, once\n# they've reviewed the artifacts/enrichment notes PB1-PB3 produced. Prompts\n# for a comment, then writes three things to the real TRAP incident: the\n# comment, an assignee marking it claimed by SOAR, and a status change from\n# new to open. Independent of proofpoint_trap_triage/proofpoint_trap_close \u2014\n# no chaining.\n#\n# Trigger: Manual run by analyst\n\nACK_ASSIGNEE = \"SOAR\"\nACK_FALLBACK_COMMENT = \"Acknowledged by SOAR\""
         },
         "input_spec": [
             {
@@ -541,7 +542,8 @@
         "playbook_type": "data",
         "python_version": "3.13",
         "schema": "5.0.24",
-        "version": "8.6.0.530"
+        "version": "8.6.0.530",
+        "playbook_trigger": "artifact_created"
     },
     "create_time": "2026-09-29T11:23:10.626596Z",
     "draft_mode": false,
