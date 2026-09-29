@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Air-Gapped Handover Package
 
-Generated 2026-09-29 13:17 UTC from `proofpoint_trap` (source env: `soar8`).
+Generated 2026-09-29 14:38 UTC from `proofpoint_trap` (source env: `soar8`).
 
 This package is self-contained — everything needed to deploy this use case by hand
 in an environment with no network access back to this repo or to `soar8`.
@@ -34,6 +34,8 @@ previous package. On a completely fresh target, skip to Install order.
 - **Re-import the custom function and all the playbooks again (2026-09-29).** Import `proofpoint_trap_extract_incident_id` with *Import Custom Function* (step 4), not the playbook importer: its header now matches the one the SOAR 8.6 editor generates, so the editor no longer reports it as modified outside the editor and it saves as a published custom function instead of a draft. Then re-import every playbook and re-activate the automation ones. What changed: `proofpoint_trap_triage` adds a `TRAP Triage - Severity` note saying which severity it set, from which TRAP value, and when an unknown value fell back to `low`. The playbooks run by hand no longer show their Start or End block as "Unconfigured" in the VPE: they take optional inputs (`proofpoint_trap_acknowledge` and `proofpoint_trap_close`: `approver`, `respond_in_mins`; `proofpoint_trap_summary`: `max_rows`; left blank, each behaves as before) and return a `status` output with the incident id and a key result. Every playbook now carries the version stamps the SOAR 8.6 editor writes.
 
 - **Fix (2026-09-29): the packages of 2026-09-28 and 2026-09-29 shipped four playbooks without their Global Custom Code** — `proofpoint_trap_attachments`, `proofpoint_trap_acknowledge`, `proofpoint_trap_isolation_notify` and `proofpoint_trap_recheck`. The code was in each archive's `.py`, so the playbooks ran, but not in its `.json`, from which the VPE builds the playbook: *Validate Python* reported its helper functions as undefined (for example `_email_html_to_markdown`), and saving one of these playbooks deleted them, after which it fails when it runs. This package carries the code in both files. Re-import all four — required if you saved any of them after importing an earlier package — and re-activate `proofpoint_trap_attachments` and `proofpoint_trap_recheck`.
+
+- **`proofpoint_trap_summary` now runs by itself, and `proofpoint_trap_attachments` now processes every new incident's emails (2026-09-29).** Re-import `proofpoint_trap_detail`, `proofpoint_trap_triage` and `proofpoint_trap_summary`, then **activate `proofpoint_trap_summary`** — it is an automation playbook now, with no inputs; it no longer needs an analyst to run it. When `proofpoint_trap_detail` finishes a container, its `Enrichment Complete` artifact now starts the automation playbooks again. Before, `proofpoint_trap_attachments` ran only when the container was created, before any email had been downloaded, so it processed a new incident's emails only after `proofpoint_trap_recheck` saw the incident change. On that same trigger `proofpoint_trap_summary` writes or rewrites the `TRAP Summary` note (tables show at most 250 rows each), and `proofpoint_trap_triage` sets the container severity again: new artifacts arrive at SOAR's default severity `medium` and had raised every incident mapped to `low` back to `medium`. Its severity note is added only when the severity derived from TRAP changes. Attachments extracted on that pass may appear in the summary only at its next refresh.
 
 ## Install order
 
@@ -85,7 +87,7 @@ previous package. On a completely fresh target, skip to Install order.
    - **Playbooks** — every other `playbooks/*.tgz`: *Import Playbook* on the Playbooks page.
    (`playbooks/source/` is the same code extracted for reading — don't import from there,
    the GUI needs the `.tgz`.)
-5. **Activate automation playbooks** (`proofpoint_trap_detail`, `proofpoint_trap_triage`, `proofpoint_trap_attachments`, `proofpoint_trap_recheck`) and set their **Run As** user per the
+5. **Activate automation playbooks** (`proofpoint_trap_detail`, `proofpoint_trap_triage`, `proofpoint_trap_attachments`, `proofpoint_trap_recheck`, `proofpoint_trap_summary`) and set their **Run As** user per the
    implementation plan doc's Setup Guide (see `docs/`).
 
 ## Custom lists this use case owns

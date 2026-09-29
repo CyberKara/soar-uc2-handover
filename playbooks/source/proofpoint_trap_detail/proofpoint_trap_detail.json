@@ -546,6 +546,7 @@
                     },
                     "type": "action",
                     "errors": {},
+                    "userCode": "    ################################################################################\n\n    # Run automation on this artifact. The artifacts written before it do not,\n    # so without this trigger the other automation playbooks run only at\n    # ingest, before any MIME Body exists: proofpoint_trap_attachments would\n    # find no email and proofpoint_trap_summary nothing to summarise.\n    # check_reentry skips the run of this playbook that it causes.\n    for params in parameters:\n        params[\"run_automation\"] = True\n\n    ################################################################################\n",
                     "warnings": {}
                 },
                 "10": {
@@ -652,7 +653,7 @@
         "version": "8.6.0.530",
         "playbook_trigger": "artifact_created"
     },
-    "create_time": "2026-09-29T11:23:01.101088Z",
+    "create_time": "2026-09-29T14:13:18.276640Z",
     "draft_mode": false,
     "labels": [
         "proofpoint_trap"

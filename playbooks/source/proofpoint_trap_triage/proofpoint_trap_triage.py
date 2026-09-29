@@ -101,15 +101,39 @@ def read_incident_id(action=None, success=None, container=None, results=None, ha
             "TRAP Severity `{}` is not in the mapping (Critical, High, Informational), "
             "so the default `low` was applied.".format(trap_severity)
         )
-    phantom.add_note(
-        container=container,
-        note_type="general",
-        title="TRAP Triage - Severity",
-        content="**Severity: `{}` -> `{}`**\n\n{}\n\nTRAP incident ID: {}\n\nMapping: Critical -> high, High -> medium, Informational -> low, anything else -> low.".format(
-            previous_severity, mapped_severity, reason, read_incident_id__incident_id
-        ),
-        note_format="markdown"
-    )
+    # This playbook runs on every automation trigger of the container (ingest,
+    # each Enrichment Complete, each Event Info Update) and re-applies the
+    # severity each time: new artifacts arrive at SOAR's default severity
+    # (medium) and raise a lower container severity. The note records the
+    # severity derived from TRAP, so it is written the first time and then only
+    # when that value differs from the one in the latest note.
+    note_title = "TRAP Triage - Severity"
+    last_noted = None
+    try:
+        latest = phantom.requests.get(
+            uri=phantom.build_phantom_rest_url("note"),
+            params={"_filter_container": container.get("id"), "_filter_title": '"{}"'.format(note_title),
+                    "sort": "id", "order": "desc", "page_size": 1},
+            verify=False,
+        ).json().get("data") or []
+        first_line = ((latest[0].get("content") or "") if latest else "").split("\n", 1)[0]
+        if "-> `" in first_line:
+            last_noted = first_line.split("-> `", 1)[1].split("`", 1)[0]
+    except Exception as e:
+        phantom.debug("Could not read the latest severity note: {}".format(str(e)))
+    if last_noted != mapped_severity:
+        phantom.add_note(
+            container=container,
+            note_type="general",
+            title=note_title,
+            content="**Severity: `{}` -> `{}`**\n\n{}\n\nTRAP incident ID: {}\n\nMapping: Critical -> high, High -> medium, Informational -> low, anything else -> low.".format(
+                previous_severity, mapped_severity, reason, read_incident_id__incident_id
+            ),
+            note_format="markdown"
+        )
+    else:
+        phantom.debug("Severity {} already noted -- re-applied (container had {}), no new note".format(
+            mapped_severity, previous_severity))
 
     # Also saved as run data, so a consumer never depends on how the VPE names it.
     phantom.save_run_data(key="read_incident_id:incident_id", value=json.dumps(read_incident_id__incident_id))

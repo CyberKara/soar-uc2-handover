@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Paquet de transfert (déploiement air-gapped)
 
-Généré le 2026-09-29 13:17 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
+Généré le 2026-09-29 14:38 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
 
 Ce paquet est autonome — tout ce qu'il faut pour déployer ce cas d'usage manuellement
 dans un environnement sans accès réseau vers ce dépôt ni vers `soar8`.
@@ -35,6 +35,8 @@ d'installation.
 - **Réimportez à nouveau la fonction personnalisée et tous les playbooks (2026-09-29).** Importez `proofpoint_trap_extract_incident_id` avec *Import Custom Function* (étape 4), pas avec l'import de playbook : son en-tête correspond désormais à celui que génère l'éditeur de SOAR 8.6, l'éditeur ne la signale donc plus comme modifiée hors de l'éditeur et elle s'enregistre comme fonction publiée au lieu d'un brouillon. Réimportez ensuite chaque playbook et réactivez ceux d'automatisation. Ce qui change : `proofpoint_trap_triage` ajoute une note `TRAP Triage - Severity` qui indique la sévérité appliquée, la valeur TRAP d'origine, et quand une valeur inconnue a été ramenée à `low`. Les playbooks lancés à la main n'affichent plus leur bloc Start ou End comme « Unconfigured » dans le VPE : ils acceptent des entrées facultatives (`proofpoint_trap_acknowledge` et `proofpoint_trap_close` : `approver`, `respond_in_mins` ; `proofpoint_trap_summary` : `max_rows` ; laissées vides, le comportement reste inchangé) et renvoient une sortie `status` avec l'identifiant de l'incident et un résultat clé. Chaque playbook porte désormais les marqueurs de version qu'écrit l'éditeur de SOAR 8.6.
 
 - **Correctif (2026-09-29) : les paquets du 2026-09-28 et du 2026-09-29 livraient quatre playbooks sans leur Global Custom Code** — `proofpoint_trap_attachments`, `proofpoint_trap_acknowledge`, `proofpoint_trap_isolation_notify` et `proofpoint_trap_recheck`. Le code figurait dans le `.py` de chaque archive, donc les playbooks s'exécutaient, mais pas dans son `.json`, à partir duquel le VPE construit le playbook : *Validate Python* signalait ses fonctions utilitaires comme non définies (par exemple `_email_html_to_markdown`), et enregistrer l'un de ces playbooks les supprimait, après quoi il échoue à l'exécution. Ce paquet contient le code dans les deux fichiers. Réimportez les quatre — obligatoire si vous en avez enregistré un après l'import d'un paquet antérieur — et réactivez `proofpoint_trap_attachments` et `proofpoint_trap_recheck`.
+
+- **`proofpoint_trap_summary` s'exécute désormais seul, et `proofpoint_trap_attachments` traite désormais les e-mails de chaque nouvel incident (2026-09-29).** Réimportez `proofpoint_trap_detail`, `proofpoint_trap_triage` et `proofpoint_trap_summary`, puis **activez `proofpoint_trap_summary`** — c'est désormais un playbook d'automatisation, sans entrées ; un analyste n'a plus besoin de le lancer. Quand `proofpoint_trap_detail` termine un conteneur, son artefact `Enrichment Complete` relance maintenant les playbooks d'automatisation. Auparavant, `proofpoint_trap_attachments` ne s'exécutait qu'à la création du conteneur, avant tout téléchargement d'e-mail : il ne traitait les e-mails d'un nouvel incident qu'après que `proofpoint_trap_recheck` avait détecté une modification de l'incident. Sur ce même déclenchement, `proofpoint_trap_summary` écrit ou réécrit la note `TRAP Summary` (250 lignes au plus par tableau), et `proofpoint_trap_triage` réapplique la sévérité du conteneur : les nouveaux artefacts arrivent avec la sévérité par défaut de SOAR, `medium`, et remontaient à `medium` tout incident associé à `low`. Sa note de sévérité n'est ajoutée que lorsque la sévérité issue de TRAP change. Les pièces jointes extraites lors de ce passage peuvent n'apparaître dans le résumé qu'à sa mise à jour suivante.
 
 ## Ordre d'installation
 
@@ -93,7 +95,7 @@ d'installation.
    - **Playbooks** — tous les autres `playbooks/*.tgz` : *Import Playbook* sur la page Playbooks.
    (`playbooks/source/` est le même code extrait pour lecture — ne pas importer depuis
    ce dossier, l'interface a besoin du `.tgz`.)
-5. **Activer les playbooks d'automatisation** (`proofpoint_trap_detail`, `proofpoint_trap_triage`, `proofpoint_trap_attachments`, `proofpoint_trap_recheck`) et définir leur utilisateur
+5. **Activer les playbooks d'automatisation** (`proofpoint_trap_detail`, `proofpoint_trap_triage`, `proofpoint_trap_attachments`, `proofpoint_trap_recheck`, `proofpoint_trap_summary`) et définir leur utilisateur
    **Run As** selon le guide d'installation du document de plan d'implémentation
    (voir `docs/`).
 

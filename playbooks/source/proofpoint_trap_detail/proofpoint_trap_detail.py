@@ -946,7 +946,13 @@ def dispatch_enrichment_complete(action=None, success=None, container=None, resu
     ## Custom Code Start
     ################################################################################
 
-    # Write your custom code here...
+    # Run automation on this artifact. The artifacts written before it do not,
+    # so without this trigger the other automation playbooks run only at
+    # ingest, before any MIME Body exists: proofpoint_trap_attachments would
+    # find no email and proofpoint_trap_summary nothing to summarise.
+    # check_reentry skips the run of this playbook that it causes.
+    for params in parameters:
+        params["run_automation"] = True
 
     ################################################################################
     ## Custom Code End

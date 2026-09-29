@@ -15,6 +15,31 @@ failures` note and marks a failed enrichment `Enrichment Failed`, which the re-e
 not count, so it can be retried. PB7 was live-verified later that day (Timer asset, 15 min;
 see "PB7 live-verified 2026-09-22" below). Open: PB4 stays on hold. Details: `docs/next-steps.md`, "UC2 audit (2026-09-21)".
 
+**PB8 is an automation playbook; `Enrichment Complete` runs automation (2026-09-29, user
+decision).** Analysts cannot run PB8 by hand, so it became automation (label `proofpoint_trap`,
+activated). An automation playbook fires only on an artifact created with `run_automation=True`,
+and PB1 created all its artifacts with `False`, so PB2/PB3/PB8 ran only at ingest, together with
+PB1 and before it had written anything: PB3 found no `MIME Body` and never processed a new
+container's emails (container 1283: PB3 ended 09:46:04, its `MIME Body` was created 09:46:07,
+no later PB3 run); it caught up only when PB7 flagged a change. Now:
+- PB1's `dispatch_enrichment_complete` sets `run_automation=True` (in its Custom Code), so the
+  automation playbooks run again once the enrichment is on the container. PB1's `check_reentry`
+  skips the run this causes.
+- PB3 then processes the emails. No change to PB3.
+- PB8 skips until an `Enrichment Complete`/`Enrichment Failed` exists, then rewrites the "TRAP
+  Summary" note in place. No inputs or outputs any more; `max_rows` is fixed at 250.
+- PB2 re-applies the severity on every trigger and adds its "TRAP Triage - Severity" note only
+  when the severity derived from TRAP differs from the one in its latest note.
+- **Found on the way — PB2's severity was being undone.** Every UC2 artifact is created at SOAR's
+  default severity `medium` (the native "add artifact" action has no severity parameter), and
+  new artifacts raise a lower container severity to their own. PB2 ran at ingest, then PB1's
+  artifacts put a container mapped to `low` back to `medium` (1294, 1300: TRAP → `low`, container
+  `medium`). The `Enrichment Complete` re-run now restores it after PB1; artifacts created after
+  PB2's last run (PB3 attachments on the same pass, PB7's refetch) can still raise it until the
+  next trigger. Making the artifacts themselves `low` is not done (open item).
+- Known limit: PB3 and PB8 run side by side on the same trigger, so attachments PB3 extracts on
+  that pass appear in the summary at the next refresh (the next PB1 run).
+
 **Data playbooks declare inputs and outputs (2026-09-29).** The VPE showed PB4/PB5/PB8's Start
 block and PB4/PB5/PB6/PB8's End block "Unconfigured" (no `input_spec` / `output_spec`). All
 inputs are optional and a blank one keeps the old behaviour:
@@ -24,7 +49,7 @@ inputs are optional and a blank one keeps the old behaviour:
 | PB4 acknowledge | `approver` (default: owner, else soar_local_admin), `respond_in_mins` (default 30) | `status`, `incident_id`, `comment` |
 | PB5 close | `approver`, `respond_in_mins` (same defaults) | `status`, `incident_id`, `reason` |
 | PB6 isolation_notify | `isolation_browser_url` (unchanged) | `status`, `incident_id`, `recipient_email`, `link_count` |
-| PB8 summary | `max_rows` (default 250 rows per table) | `status`, `note_id`, `artifact_count` |
+| ~~PB8 summary~~ | ~~`max_rows`~~ — PB8 is automation since 2026-09-29 (above): no inputs or outputs | — |
 
 Blocks write a `playbook_output` run-data key; `on_finish` fills the VPE's generated `output`
 dict from it (`status` defaults to failed when a run stops early). PB8's two code blocks also
