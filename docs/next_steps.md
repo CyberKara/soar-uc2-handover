@@ -1,0 +1,260 @@
+# Next steps (queued, not started)
+
+Work queued for a later session. Nothing in this file has been executed. Each item is a
+self-contained prompt: paste the "Merged prompt" block into a fresh session, answer the
+"Decisions to confirm" first, then let it run.
+
+| ID | Item | Status | Queued |
+|----|------|--------|--------|
+| NS-1 | Connector README + build reproducibility, and the static-audit fixes (merged from two prompts) | queued | 2026-09-30 |
+
+---
+
+## NS-1: README drift, reproducible connector build, and audit fixes
+
+### How the two source prompts were merged
+
+Prompt 1 ("README + build") and prompt 2 ("audit fixes") overlap on the connector README,
+the tgz rebuild rules and the version bump, and they disagree in four places. Resolutions:
+
+| # | Conflict | Resolution in the merged prompt |
+|---|----------|---------------------------------|
+| 1 | Prompt 1: "new branch off main". Prompt 2: "commit on the branch you are given". | Use the branch the session gives you (at queue time: `claude/magical-hamilton-27thg2`). Create a new branch off `main` only if none is given. No PR either way. |
+| 2 | Prompt 2: "bump `app_version` from 1.0.36 to 1.0.37". Prompt 1: "`app_version` is 1.0.37; do not rebuild or replace the v1.0.37 tgz; ask before bumping". | **Checked 2026-09-30:** `app_version` is already `1.0.37` (`proofpoint_trap.json:13`) and the package is already `connectors/proofpoint_trap-v1.0.37.tgz`. Prompt 2's 1.0.36 to 1.0.37 step is stale and would be a same-version reinstall, which SOAR refuses. The next version is **1.0.38**, and prompt 1 says to ask before bumping, so this is the first decision to confirm. One bump covers every connector-side change from both prompts. Do not release a README-only 1.0.38 and then a second bump for code. |
+| 3 | Prompt 1: never replace the v1.0.37 tgz. Prompt 2: "rename the tgz". | Never overwrite v1.0.37 under its own name. If the bump is approved, add `proofpoint_trap-v1.0.38.tgz` and remove `proofpoint_trap-v1.0.37.tgz` from `connectors/` (git history keeps the original byte-for-byte), so HANDOVER's Contents table lists one package. Confirm this, or keep both. |
+| 4 | Prompt 1: add a build script or reword the README. Prompt 2: rebuild tarballs "in the same layout". | Do the build script first and use it for every rebuild. The README then points at this script instead of the missing `soar-connectors/tools/build.sh`. |
+
+Other merge notes:
+
+- **The audit predates the current snapshot.** Prompt 2's line numbers are about 10 lines off
+  (for example `event_id` validation is now at `proofpoint_trap_connector.py:1033`, not :1023), and
+  its "1.0.36" baseline is wrong. Re-validate every finding against current HEAD before fixing.
+  Report any that no longer reproduce as "already fixed / not reproducible", not as fixed.
+- **Scope of "don't touch".** `.github/` and `tools/release-connectors.sh` do not exist in this
+  repo snapshot (checked 2026-09-30; there is no `tools/` or `.github/` directory). They live
+  upstream. Nothing to do here except not creating files that would collide with them.
+  Put the new build script outside `tools/`, for example `connectors/build_connector.sh`.
+- **README is edited once**, covering the drift report (prompt 1) and finding A8 (prompt 2).
+  Prompt 2's list of README faults (v1.0.13, 6 of 11 actions, `cs1`/`cs2`/`cn1`, lab path) are
+  hypotheses to verify against `proofpoint_trap.json` and the connector `.py`, not facts.
+- **One report at the end**, combining prompt 1's "changed vs only flagged" with prompt 2's
+  per-finding status and upstream list.
+- **Ordering dependency.** Finding A7 has a connector half (omit empty query params) and a playbook
+  half (`proofpoint_trap_recheck`). The playbook half relies on the new connector being installed;
+  say so in the upgrade note.
+
+### Decisions to confirm before starting (ask in one `AskUserQuestion`)
+
+1. Bump `app_version` 1.0.37 to **1.0.38**, as a single release for all connector-side changes?
+2. Remove `proofpoint_trap-v1.0.37.tgz` from `connectors/` when 1.0.38 is added (default), or keep both?
+3. `proofpoint_trap_acknowledge` sends `assignee` without `team` (see B1 below): send the incident's
+   current team, drop the step, or document-only?
+4. An expired prompt in acknowledge still writes "Acknowledged by SOAR" and opens the incident, while
+   `proofpoint_trap_close` aborts. Which behaviour is wanted?
+5. Which user should the 4 automation playbooks "Run As"? Do not invent an answer.
+
+If the user is not available, finish everything that does not depend on these, leave B as
+documentation only, and do not bump the version or rebuild the connector tgz. The playbook tgz
+rebuilds do not depend on the connector version and can go ahead.
+
+---
+
+### Merged prompt (paste from here)
+
+Repo: `cyberkara/soar-uc2-handover`, the air-gapped Splunk SOAR handover package for "UC2,
+Proofpoint TRAP incident triage". It contains the connector in `connectors/source/proofpoint_trap/`,
+7 playbooks plus 1 custom function in `playbooks/source/`, asset templates in `assets/`, and
+`HANDOVER.md` / `HANDOVER_french.md`. Two jobs, done in one pass: (I) fix the connector README and
+make the connector package reproducible from this repo, and (II) fix the findings of a static code
+audit. No TRAP or SOAR instance is available, so nothing can be tested end to end. Say so in the
+report. Do not claim anything is verified that was not.
+
+#### Rules
+
+- Work on the branch the session gives you. If none is given, create one off `main`. Commit there.
+  Do not open a PR.
+- Do not touch `.github/` or `tools/release-connectors.sh` (release automation is handled
+  elsewhere; they are not in this snapshot). Do not touch unrelated files.
+- This repo is a generated snapshot (see the HANDOVER.md header). The plan refers to other repos,
+  `soar-connectors` and `soar-playbooks`. Fix things here, and finish with a list of changes that
+  must be carried upstream.
+- The `.tgz` files are what actually gets imported. Today `connectors/*.tgz` and `playbooks/*.tgz`
+  are byte-for-byte copies of `source/`. After any source change, rebuild the affected tarball(s)
+  and diff the extracted result against source. Check the layout with `tar tzvf` first.
+  - Connector tgz: a top-level `proofpoint_trap/` directory holding `README.md`, `__init__.py`,
+    `logo*.svg`, `proofpoint_trap.json`, the connector `.py` and the consts `.py`. That is 7 files.
+    No `__pycache__`.
+  - Playbook tgz: flat `<name>.py` and `<name>.json`, mtime 1970-01-01, uid 0.
+- The README ships inside the connector tgz. SOAR refuses a same-version reinstall, so never
+  rebuild or replace `proofpoint_trap-v1.0.37.tgz` under its own name. Any change to the README or
+  connector code means a new version. Ask before bumping `app_version`. The next version is 1.0.38
+  (current is 1.0.37, verified). Use one bump for everything below.
+- Playbook `.json` files embed the code in `coa.data.nodes.<n>.userCode`. Edit the `.py` and the
+  matching JSON node together and confirm they agree.
+- Keep edits inside the existing custom-code regions. HANDOVER.md warns that a VPE re-save
+  regenerates some blocks wrongly (`dispatch_mime_refetch`, `dispatch_artifact_list`). Do not
+  restructure those blocks.
+- Checks: `py_compile`, `pyflakes` and `bandit`. For connector logic, stub the `phantom.*` modules
+  in a scratch directory and test the changed helpers there. Do not commit scratch files. Delete
+  any `__pycache__` you create.
+- Audit line numbers may have shifted (they are already about 10 lines off). Re-validate each
+  finding against current HEAD first.
+
+#### Suggested order
+
+0. Confirm the decisions above. Re-validate the findings against HEAD.
+1. **Build script.** Add a small script here (suggested `connectors/build_connector.sh`) that
+   produces the connector layout above from `connectors/source/proofpoint_trap/`. Prefer one script
+   that can also build the flat playbook layout, so every rebuild is reproducible. Before editing any
+   source, run it on the unmodified source into a scratch directory and compare the extracted result
+   with the existing v1.0.37 tgz. Report honestly whether it is byte-identical or only
+   content-identical (tar ordering, gzip header, mtime and owner can differ). Optionally make it fail
+   if the README's `Version:` line differs from `app_version`.
+2. **Connector README** (one pass, `connectors/source/proofpoint_trap/README.md`):
+   - Line 7 says `Version: 1.0.13`. Set it to the release version.
+   - Drift-check the rest (Min SOAR version 6.4.1, the action list, the asset fields table) against
+     `proofpoint_trap.json` and `proofpoint_trap_connector.py`. Report every drift you find.
+     Suspected, to verify: lists 6 of 11 actions; describes the old `cs1`/`cs2`/`cn1` Event Info
+     fields where the real CEF names are `abuseDisposition`, `classification`, `subDisposition`,
+     `threatScore`, `incidentId`, `eventIds`, `trapSeverity` and `message`.
+   - Installation currently says to run `tools/build.sh proofpoint_trap` "from the soar-connectors
+     repo root" to get `dist/proofpoint_trap-v<version>.tgz`. Neither that repo nor that script is
+     here. Point it at the new script (and say where the upstream build lives). Remove the lab
+     filesystem path from the Installation section.
+3. **Connector code** (A1, A4, A5, A7 connector half). Stub-test each helper.
+4. **Playbooks** (A2, A6, A7 playbook half, C safe change, D).
+5. **Assets and documentation** (A3, A8, B minimum, C, D notes), both languages.
+6. **Release mechanics**, only after approval: bump `app_version` in `proofpoint_trap.json`, update
+   `utctime_updated`, build the connector tgz with the script, remove or keep the old tgz per the
+   decision, rebuild the changed playbook tgzs, extract and diff each against source, then update
+   HANDOVER.md **and** HANDOVER_french.md (Contents table and upgrade notes).
+7. Run `py_compile`, `pyflakes`, `bandit`. Delete `__pycache__`. Commit, push, report.
+
+#### A. Fix these (clear-cut)
+
+1. **`on_poll` loses incidents on a failed ingest** (`proofpoint_trap_connector.py`, about :528-545
+   and :583-599).
+   - `_ingest_incident` returns "failed" but `last_poll_time` still advances, so that incident is
+     never fetched again.
+   - The `save_artifacts` result is never checked. A container without its Event Info artifact is
+     never triaged, and later polls skip it as a duplicate.
+   - Fix: count failures and do not advance the checkpoint past them (or hold it at the earliest
+     failed incident), and check the `save_artifacts` result.
+   - Constraint: a retry hits the "duplicate container" path, so make artifact creation idempotent
+     there. Event Info uses a stable source data identifier (`trap-{id}-info`).
+2. **`proofpoint_trap_detail` writes "Enrichment Complete" after a failed email download**
+   (about :270-313 and :765-816).
+   - `mime_status_rows[0][0]` reads only the first action result, so partial failures look like
+     success.
+   - Fix: distinguish a real failure (network, auth, 5xx, or an event that failed) from a legitimate
+     "no stored message for this alert" (HTTP 404, which the connector README says is normal). Only
+     the real failure produces "Enrichment Failed" instead of "Enrichment Complete", so
+     `check_reentry` allows a retry.
+   - Nothing re-triggers detail for an unchanged incident. Either document that, or find a safe way
+     to make it retry. This relates to the existing v1.0.36 note in HANDOVER about incidents marked
+     complete although the download failed. Keep them consistent.
+3. **Asset templates ship lab values** (`assets/*.json`).
+   - `proofpoint_trap_mock.json`: `verify_ssl: false`, `poll_hours: 4000`, `abuse_disposition: ""`.
+     The empty disposition means no filter, so the first poll ingests about 166 days of every new
+     incident.
+   - `soar8.json`: `verify_certificate: false`, and it carries an auth token.
+   - `smtp.json`: `ssl_config: "None"`, which sends mail in cleartext.
+   - Set safe defaults: verification true, `poll_hours` 1, `abuse_disposition` "Unknown" (the
+     connector default). For SMTP, use a clearly marked placeholder or an explicit note. Do not guess
+     the valid values of another app's dropdown.
+   - Add a "values to review before the first poll" section to HANDOVER.md and
+     HANDOVER_french.md.
+4. **`event_id` is unvalidated** (connector, about :1033-1036 and used in the path at :372).
+   - `../../incidents/5/close.json?x=` was confirmed, using `requests`, to re-target the request to
+     another API path with the API key. Error snippets echo the first 150 characters of the
+     response body.
+   - Fix: validate it (integer, or a strict `[A-Za-z0-9_-]+` pattern) and `urllib.parse.quote` it
+     into the path.
+5. **Inconsistent parameter coercion** (connector, about :483, :663, :690-692, :743, :897; current
+   HEAD shows `container_count` at :484, `expand_events` at :664 and :752, `max_results` at
+   :691, `overwrite` at :907).
+   - `max_results` and `container_count` are not validated. A VPE literal arrives as a string, the
+     same bug class as the `hours_back` fix in 1.0.34.
+   - The booleans `expand_events` and `overwrite` are read by truthiness, so the string "false"
+     counts as true.
+   - Fix: use `_validate_integer` for the numbers and add a small boolean parser.
+6. **Untrusted email HTML goes into `phantom.add_note` unescaped**
+   (`proofpoint_trap_attachments.py`, about :313-320 and :355-356).
+   - Only an undocumented platform sanitizer protects it. The headers and plain-text body are
+     already escaped.
+   - Fix: escape the HTML body, or convert it to text, before building the note.
+7. **`proofpoint_trap_recheck` robustness.**
+   - `state=""` (about :59-62) is sent as an empty `state=`. The only evidence that it means "all
+     states" is the mock server. Fix in the connector: omit empty query params
+     (`_fetch_and_filter_incidents` is the place).
+   - Prune the state list to incidents in the current window (about :142, :160), and only after a
+     successful `get_list`.
+   - If `get_list` fails (about :135-145), abort the cycle. Do not treat it as a first run, because
+     that swallows changes.
+   - Commit a signature to state only when that incident's artifact POSTs succeeded (about
+     :331-377). Check the POST response, not just whether an exception was raised.
+8. **Documentation gaps.**
+   - Add the Timer asset (`assets/proofpoint_trap_recheck.json`) and the labels `proofpoint_trap`
+     and `proofpoint_trap_recheck` to the install steps.
+   - Document that the `isolation_browser_url` playbook input defaults to the placeholder
+     `https://my_isolated_browser/browser?url=`, which produces dead links.
+   - Refresh the connector README (done once, in step 2 above).
+   - Reword the code comments that cite `uc2_dev_notes.md` and `proofpoint_trap_api_reference.md`,
+     which are not shipped.
+   - Update `utctime_updated` in `proofpoint_trap.json` (currently `2026-08-20`).
+
+#### B. Ask the user before changing these (documentation is always allowed)
+
+1. **`proofpoint_trap_acknowledge` sends `assignee` without `team`** (about :207-212).
+   - The action requires both, so the step fails on every run. `docs/uc2_implementation_plan.md`
+     (about :997-1020) documents this, and adds that even a valid write may fail with a
+     `ConstraintViolationException` on their lab TRAP.
+   - At minimum, document it as a known failure in HANDOVER.md and HANDOVER_french.md.
+   - Code-fix options: send the incident's current team, or drop the step.
+   - An expired prompt still writes "Acknowledged by SOAR" and opens the incident, while
+     `proofpoint_trap_close` aborts. Ask which behaviour is wanted.
+2. **"Run As" user for the 4 automation playbooks.** HANDOVER.md step 5 points to a Setup Guide
+   that has no such guidance. The only documented requirement is that the `soar8` asset's user needs
+   a role that can edit containers (Automation). Do not invent the answer.
+
+#### C. Cannot verify offline: document as open verification items, or make only the safe change
+
+- `proofpoint_trap_attachments.py` (about :98) calls `collect2` without `scope="all"`. The plan
+  (about :117-123) documents this exact bug class. Adding `scope="all"` should be safe because the
+  `attachments_extracted` marker makes the playbook idempotent.
+- Recheck's `download mime body` runs in the Timer tick's container, so `get_container_id()`
+  (connector, about :1015) probably vaults the `.eml` in the tick container, not the incident's.
+  Do not change this blindly. Flag it for a live check.
+
+#### D. Low priority, only if cheap
+
+- Sanitize attachment filenames with `os.path.basename` before `vault_add` and in the source data
+  identifier (`proofpoint_trap_attachments.py`, about :190-223 and :248).
+- `datetime.utcfromtimestamp` (`proofpoint_trap_detail.py`, about :219) is deprecated from Python
+  3.12.
+- Remove the unused and duplicated imports in `attachments.py`, `detail.py` and `close.py`.
+- The 12 `verify=False` calls to SOAR's local REST API are acceptable on loopback. Note them.
+- `_process_response` (connector, about :196-201) stores full response bodies and headers in action
+  debug data, which may include email content. Note it.
+- The Timer asset creates a container every 15 minutes with no cleanup. Document it.
+
+#### Keep as they are
+
+HTTPS is enforced. `verify_ssl` defaults to true in the connector. POSTs are not retried. Secrets
+in the templates are redacted. The tgz contents match the source directories (re-confirm after the
+rebuild).
+
+#### Report back
+
+- **Changed vs only flagged** (prompt 1's split), listed separately.
+- **Per finding** (A1-A8, B1-B2, C, D): `fixed`, `skipped`, `needs-decision` or
+  `not reproducible at HEAD`, with one line on why.
+- **README drift**: every mismatch found against `proofpoint_trap.json` and the connector `.py`,
+  including any not fixed.
+- **Build script**: whether it reproduces the v1.0.37 layout, and whether byte-identical or
+  content-identical.
+- **Version handling**: what was done about the same-version reinstall problem, and what the user
+  approved.
+- **Unverified**: state plainly that there was no SOAR or TRAP instance, and list what that leaves
+  unverified.
+- **Upstream changes to carry over** to `soar-connectors` and `soar-playbooks`.
