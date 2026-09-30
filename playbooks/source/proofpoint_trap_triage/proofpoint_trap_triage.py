@@ -1,5 +1,5 @@
 """
-Automation playbook (PB2) for label proofpoint_trap, run on every automation trigger of the container (ingest, each Enrichment Complete, each Event Info Update). Reads the TRAP incident ID and raw TRAP Severity off the Event Info artifact and sets the container&#39;s severity from it each run, since new artifacts arrive at SOAR&#39;s default severity and raise a lower one. Adds a TRAP Triage - Severity note when that severity first applies or changes. No writes back to TRAP. Analyst-driven actions (acknowledge, close) live in separate manually-launched playbooks: proofpoint_trap_acknowledge, proofpoint_trap_close.
+Automation playbook (PB2) for label proofpoint_trap, left inactive: proofpoint_trap_orchestrator runs it after proofpoint_trap_attachments, at ingest and on each Event Info Update. Reads the TRAP incident ID and raw TRAP Severity off the Event Info artifact and sets the container&#39;s severity from it each run, since new artifacts arrive at SOAR&#39;s default severity and raise a lower one. Adds a TRAP Triage - Severity note when that severity first applies or changes. No writes back to TRAP. Analyst-driven actions (acknowledge, close) live in separate manually-launched playbooks: proofpoint_trap_acknowledge, proofpoint_trap_close.
 """
 
 
@@ -101,8 +101,9 @@ def read_incident_id(action=None, success=None, container=None, results=None, ha
             "TRAP Severity `{}` is not in the mapping (Critical, High, Informational), "
             "so the default `low` was applied.".format(trap_severity)
         )
-    # This playbook runs on every automation trigger of the container (ingest,
-    # each Enrichment Complete, each Event Info Update) and re-applies the
+    # proofpoint_trap_orchestrator runs this playbook on every automation trigger
+    # of the container (ingest, each Event Info Update), after detail and
+    # attachments have written their artifacts, and it re-applies the
     # severity each time: new artifacts arrive at SOAR's default severity
     # (medium) and raise a lower container severity. The note records the
     # severity derived from TRAP, so it is written the first time and then only

@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Paquet de transfert (déploiement air-gapped)
 
-Généré le 2026-09-30 01:49 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
+Généré le 2026-09-30 18:56 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
 
 Ce paquet est autonome — tout ce qu'il faut pour déployer ce cas d'usage manuellement
 dans un environnement sans accès réseau vers ce dépôt ni vers `soar8`.
@@ -14,7 +14,7 @@ dans un environnement sans accès réseau vers ce dépôt ni vers `soar8`.
 | `connectors/` | Paquet(s) applicatif(s) connecteur : proofpoint_trap-v1.0.37.tgz |
 | `connectors/source/` | Même(s) connecteur(s), extrait(s) — pour lecture, pas pour import |
 | `playbooks/*.tgz` (CF) | proofpoint_trap_extract_incident_id |
-| `playbooks/*.tgz` (PB) | proofpoint_trap_detail, proofpoint_trap_triage, proofpoint_trap_attachments, proofpoint_trap_acknowledge, proofpoint_trap_close, proofpoint_trap_isolation_notify, proofpoint_trap_recheck, proofpoint_trap_summary |
+| `playbooks/*.tgz` (PB) | proofpoint_trap_detail, proofpoint_trap_triage, proofpoint_trap_attachments, proofpoint_trap_acknowledge, proofpoint_trap_close, proofpoint_trap_isolation_notify, proofpoint_trap_recheck, proofpoint_trap_summary, proofpoint_trap_orchestrator |
 | `playbooks/source/` | Mêmes CF/playbooks, extraits — pour lecture, pas pour import |
 | `assets/*.json` | Modèles de configuration d'assets (identifiants masqués — voir ci-dessous) |
 | `custom_lists/*.json` | Schéma de la/les liste(s) personnalisée(s) (en-têtes uniquement — voir la section dédiée ci-dessous) |
@@ -45,6 +45,8 @@ d'installation.
 - **`proofpoint_trap_isolation_notify` liste ses liens dans la note du conteneur, et chaque description de playbook commence par son type et son numéro (2026-09-29).** La note `TRAP Isolation Notify` affiche chaque lien du navigateur d'isolation envoyé par e-mail (la cible en texte, seul le lien du navigateur d'isolation est cliquable). Les descriptions indiquent `Automation playbook (PBn)` / `Data playbook (PBn)`. Réimportez `proofpoint_trap_isolation_notify` ; les autres playbooks prennent les nouvelles descriptions à leur prochaine réimportation.
 
 - **Un conteneur associé à `low` reste désormais `low` (2026-09-30).** `proofpoint_trap_triage` fixe la sévérité du conteneur d'après celle de TRAP, mais un artefact créé ou mis à jour sans sévérité est `medium` et relève un conteneur plus bas : `proofpoint_trap_attachments`, en marquant chaque `MIME Body` comme traité, remettait chaque conteneur `low` à `medium`. Les playbooks écrivent désormais leurs artefacts en `low`, ce qui n'abaisse jamais un conteneur `high` ou `medium`. Par ailleurs, `proofpoint_trap_acknowledge`, `proofpoint_trap_close` et `proofpoint_trap_isolation_notify` ne signalent plus comme `not run` une étape que SOAR a refusé de lancer : la note indique `failed - not dispatched`, et la raison figure dans les actions de l'exécution du playbook. Réimportez ces cinq playbooks — `proofpoint_trap_attachments`, `proofpoint_trap_recheck`, `proofpoint_trap_acknowledge`, `proofpoint_trap_close`, `proofpoint_trap_isolation_notify` — et réactivez les deux premiers. Un conteneur déjà relevé à `medium` revient à sa sévérité associée la prochaine fois que `proofpoint_trap_recheck` voit son incident changer.
+
+- **Un orchestrateur lance les playbooks dans l'ordre (2026-09-30).** Les playbooks d'automatisation démarraient ensemble sur le même déclencheur et entraient en concurrence : les pièces jointes cherchaient des e-mails que `proofpoint_trap_detail` n'avait pas encore téléchargés, le résumé manquait ce que les autres écrivaient encore. Le nouveau playbook d'automatisation `proofpoint_trap_orchestrator` (label `proofpoint_trap`) lance désormais `proofpoint_trap_detail`, `proofpoint_trap_attachments`, `proofpoint_trap_triage` et `proofpoint_trap_summary` l'un après l'autre, chacun attendant la fin du précédent. Importez-le et activez-le ; réimportez ces quatre playbooks et **désactivez-les** — cela remplace toute étape « réactivez » les concernant dans les notes ci-dessus. `proofpoint_trap_recheck` reste actif. L'artefact `Enrichment Complete` ne lance plus l'automatisation. Si vous avez créé vous-même un `proofpoint_trap_orchestrator`, l'import le remplace. Également dans `proofpoint_trap_detail` : une adresse d'expéditeur de la liste personnalisée `proofpoint_trap_excluded_senders` n'a plus d'artefact `Sender Email`, ni son domaine d'artefact `Sender Domain` (sauf si un autre expéditeur le partage) ; les artefacts déjà présents sur un conteneur restent.
 
 ## Ordre d'installation
 
@@ -103,9 +105,12 @@ d'installation.
    - **Playbooks** — tous les autres `playbooks/*.tgz` : *Import Playbook* sur la page Playbooks.
    (`playbooks/source/` est le même code extrait pour lecture — ne pas importer depuis
    ce dossier, l'interface a besoin du `.tgz`.)
-5. **Activer les playbooks d'automatisation** (`proofpoint_trap_detail`, `proofpoint_trap_triage`, `proofpoint_trap_attachments`, `proofpoint_trap_recheck`, `proofpoint_trap_summary`) et définir leur utilisateur
+5. **Activer les playbooks d'automatisation** (`proofpoint_trap_recheck`, `proofpoint_trap_orchestrator`) et définir leur utilisateur
    **Run As** selon le guide d'installation du document de plan d'implémentation
    (voir `docs/`).
+   **Laissez-les inactifs :** `proofpoint_trap_detail`, `proofpoint_trap_triage`, `proofpoint_trap_attachments`, `proofpoint_trap_summary` — un playbook orchestrateur ci-dessus les appelle l'un
+   après l'autre ; actifs, ils se lanceraient aussi d'eux-mêmes, en même temps que lui.
+   Désactivez-les si un paquet précédent les avait activés.
 
 ## Listes personnalisées appartenant à ce cas d'usage
 
@@ -124,7 +129,7 @@ playbook y stocke et à quel moment.
 Réglages lus par les playbooks. Créez-les (étape ci-dessus), puis ajoutez vos propres
 lignes sous la ligne d'en-tête si besoin ; le cas d'usage fonctionne avec des listes vides.
 
-- `proofpoint_trap_excluded_senders` : adresses d'expéditeur que `proofpoint_trap_detail` n'utilise jamais pour nommer un conteneur, une par ligne (sans tenir compte de la casse) — typiquement une adresse présente sur chaque incident. Quand TRAP ne donne pas de résumé à un incident, le conteneur est nommé `TRAP-<id>: <premier expéditeur absent de cette liste>` au lieu de `TRAP-<id>: No summary`. Laissée vide, le premier expéditeur est utilisé ; la ligne d'en-tête est ignorée.
+- `proofpoint_trap_excluded_senders` : adresses d'expéditeur que `proofpoint_trap_detail` écarte, une par ligne (sans tenir compte de la casse) — typiquement une adresse présente sur chaque incident. Une telle adresse n'a pas d'artefact `Sender Email`, son domaine pas d'artefact `Sender Domain` (sauf si un autre expéditeur le partage), et elle ne nomme jamais un conteneur : quand TRAP ne donne pas de résumé à un incident, le conteneur est nommé `TRAP-<id>: <premier expéditeur absent de cette liste>` au lieu de `TRAP-<id>: No summary`. Laissée vide, rien n'est écarté ; la ligne d'en-tête est ignorée.
 
 ## Vérification
 

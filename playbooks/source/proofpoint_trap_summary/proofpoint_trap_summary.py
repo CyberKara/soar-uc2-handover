@@ -1,5 +1,5 @@
 """
-Automation playbook (PB8) for label &#39;proofpoint_trap&#39;. Once proofpoint_trap_detail has enriched the container (its &#39;Enrichment Complete&#39; artifact runs automation), reads every artifact on the container and writes one &#39;TRAP Summary&#39; note with a markdown table per artifact type (incident, senders, recipients, domains, URLs, click IPs, MIME bodies, attachments, enrichment runs, then any other type). Every later run rewrites the same note in place.
+Automation playbook (PB8) for label &#39;proofpoint_trap&#39;, left inactive: proofpoint_trap_orchestrator runs it last. Once proofpoint_trap_detail has enriched the container (an &#39;Enrichment Complete&#39; or &#39;Enrichment Failed&#39; artifact exists), reads every artifact on the container and writes one &#39;TRAP Summary&#39; note with a markdown table per artifact type (incident, senders, recipients, domains, URLs, click IPs, MIME bodies, attachments, enrichment runs, then any other type). Every later run rewrites the same note in place.
 """
 
 
@@ -52,8 +52,8 @@ def build_summary(action=None, success=None, container=None, results=None, handl
         phantom.error("Could not read the artifacts of container {}: {}".format(container_id, str(e)))
         return
 
-    # This playbook runs on every automation trigger of the container. Until
-    # proofpoint_trap_detail has finished (no Enrichment Complete or Enrichment
+    # proofpoint_trap_orchestrator runs this playbook last, on every automation
+    # trigger of the container. Until proofpoint_trap_detail has finished (no Enrichment Complete or Enrichment
     # Failed artifact yet) there is nothing to summarise, so stop here.
     names = {artifact.get("name") for artifact in artifacts}
     if not names & {"Enrichment Complete", "Enrichment Failed"}:

@@ -1,5 +1,5 @@
 """
-Automation playbook (PB1) for label proofpoint_trap. Fetches the TRAP incident with its events, downloads each event&#39;s original email, and creates the derived artifacts (sender/recipient emails, domains, threat URLs, click IPs, MIME bodies), a detail note linking to the incident in TRAP, and a final Enrichment Complete artifact that runs automation again once the enrichment is on the container. Renames a container TRAP gave no summary after its first sender not in the custom list proofpoint_trap_excluded_senders, and on the incident&#39;s first enrichment comments on the TRAP incident with a link to the SOAR case. A failed fetch or platform write adds an error note and an Enrichment Failed artifact instead, so a later run can retry. Assets are selected in each action block, never in code, so an importer can point them at their own asset names.
+Automation playbook (PB1) for label proofpoint_trap, left inactive: proofpoint_trap_orchestrator runs it first. Fetches the TRAP incident with its events, downloads each event&#39;s original email, and creates the derived artifacts (sender/recipient emails, domains, threat URLs, click IPs, MIME bodies), a detail note linking to the incident in TRAP, and a final Enrichment Complete artifact. Creates no sender artifact for an address in the custom list proofpoint_trap_excluded_senders, renames a container TRAP gave no summary after its first remaining sender, and on the incident&#39;s first enrichment comments on the TRAP incident with a link to the SOAR case. A failed fetch or platform write adds an error note and an Enrichment Failed artifact instead, so a later run can retry. Assets are selected in each action block, never in code, so an importer can point them at their own asset names.
 """
 
 
@@ -223,6 +223,22 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
     events = incident.get("events", [])
     phantom.debug("Processing {} events from incident {}".format(len(events), incident.get("id", "?")))
 
+    # Sender addresses the operator wants left out: the custom list
+    # proofpoint_trap_excluded_senders, one address per row, compared without
+    # case (e.g. a mailbox present on every incident). An address in it gets
+    # no Sender Email artifact, gives no Sender Domain, and never names the
+    # container. A missing or empty list excludes nothing.
+    excluded_senders = set()
+    list_ok, list_message, list_rows = phantom.get_list(list_name="proofpoint_trap_excluded_senders")
+    if list_ok:
+        for row in list_rows or []:
+            for value in row or []:
+                if value and "@" in str(value):
+                    excluded_senders.add(str(value).strip().lower())
+    else:
+        phantom.debug("No proofpoint_trap_excluded_senders list ({}): every sender counts".format(list_message))
+    skipped_senders = set()
+
     # Separate dedup sets per role so an address playing both sender and
     # recipient across different alerts gets an artifact for each role,
     # not just whichever one was seen first.
@@ -325,7 +341,9 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
             # Sender email
             sender = email.get("sender") or {}
             from_addr = sender.get("email", "")
-            if from_addr and from_addr not in seen_sender_emails:
+            if from_addr and from_addr.strip().lower() in excluded_senders:
+                skipped_senders.add(from_addr.strip().lower())
+            elif from_addr and from_addr not in seen_sender_emails:
                 seen_sender_emails.add(from_addr)
                 body_type = email.get("bodyType", "")
                 abuse_copy = email.get("abuseCopy")
@@ -462,26 +480,20 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
                 "run_automation": False,
             })
 
+    if skipped_senders:
+        phantom.debug("{} sender address(es) in proofpoint_trap_excluded_senders: no artifact for them".format(
+            len(skipped_senders)))
+
     # Real TRAP incidents often have no summary or description, and the
     # connector then names the container "TRAP-<id>: No summary" (it lists
     # incidents without their events, so it has no sender yet). Name it after
-    # the sender instead: the first sender address, in alert order, that is not
-    # in the custom list proofpoint_trap_excluded_senders (one address per row,
-    # e.g. a mailbox present on every incident). Only that fallback name is
-    # replaced, so a real summary or an earlier rename is never overwritten.
+    # the sender instead: the first sender address, in alert order, that has a
+    # Sender Email artifact (so never one in proofpoint_trap_excluded_senders).
+    # Only that fallback name is replaced, so a real summary or an earlier
+    # rename is never overwritten.
     fallback_name = "TRAP-{}: No summary".format(incident_id)
     if (container.get("name") or "") == fallback_name:
-        excluded = set()
-        list_ok, list_message, list_rows = phantom.get_list(list_name="proofpoint_trap_excluded_senders")
-        if list_ok:
-            for row in list_rows or []:
-                for value in row or []:
-                    if value and "@" in str(value):
-                        excluded.add(str(value).strip().lower())
-        else:
-            phantom.debug("No proofpoint_trap_excluded_senders list ({}): every sender counts".format(list_message))
-        senders = [a["cef"]["emailAddress"] for a in artifacts if a["name"] == "Sender Email"]
-        candidates = [s for s in senders if s.strip().lower() not in excluded]
+        candidates = [a["cef"]["emailAddress"] for a in artifacts if a["name"] == "Sender Email"]
         if candidates:
             new_name = "TRAP-{}: {}".format(incident_id, candidates[0])
             if len(candidates) > 1:
@@ -497,7 +509,7 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
                 phantom.error("Could not rename the container to {!r} (HTTP {}): {}".format(
                     new_name, rename.status_code, rename.text[:200]))
         else:
-            phantom.debug("Every sender is in proofpoint_trap_excluded_senders: name stays {!r}".format(fallback_name))
+            phantom.debug("No sender outside proofpoint_trap_excluded_senders: name stays {!r}".format(fallback_name))
 
     # Post only what is not on the container yet. A re-run (proofpoint_trap_recheck
     # flags a changed incident, usually one that gained alerts) rebuilds the list
@@ -989,13 +1001,13 @@ def dispatch_enrichment_complete(action=None, success=None, container=None, resu
     ## Custom Code Start
     ################################################################################
 
-    # Run automation on this artifact. The artifacts written before it do not,
-    # so without this trigger the other automation playbooks run only at
-    # ingest, before any MIME Body exists: proofpoint_trap_attachments would
-    # find no email and proofpoint_trap_summary nothing to summarise.
-    # check_reentry skips the run of this playbook that it causes.
+    # No automation on this artifact. proofpoint_trap_orchestrator calls this
+    # playbook and then, once it has finished, proofpoint_trap_attachments,
+    # proofpoint_trap_triage and proofpoint_trap_summary; an artifact running
+    # automation here would start a second orchestrator run alongside the
+    # first, and those playbooks would again run side by side.
     for params in parameters:
-        params["run_automation"] = True
+        params["run_automation"] = False
 
     ################################################################################
     ## Custom Code End
@@ -1058,8 +1070,9 @@ def check_reentry(action=None, success=None, container=None, results=None, handl
     ################################################################################
     ################################################################################
 
-    # This playbook fires on every artifact_created event on the container, so
-    # this block decides whether this trigger needs an enrichment run. It is a
+    # proofpoint_trap_orchestrator runs this playbook on every automation
+    # trigger of the container (ingest, each Event Info Update), so this block
+    # decides whether this trigger needs an enrichment run. It is a
     # code block rather than code in on_start because the VPE regenerates
     # on_start on every save and would drop it.
     #

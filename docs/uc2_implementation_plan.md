@@ -15,6 +15,41 @@ failures` note and marks a failed enrichment `Enrichment Failed`, which the re-e
 not count, so it can be retried. PB7 was live-verified later that day (Timer asset, 15 min;
 see "PB7 live-verified 2026-09-22" below). Open: PB4 stays on hold. Details: `docs/next-steps.md`, "UC2 audit (2026-09-21)".
 
+**One orchestrator runs the automation playbooks in order (2026-09-30, the user's appliance design).**
+The automation playbooks on label `proofpoint_trap` started together on each trigger and raced: PB3
+and PB8 ran side by side while PB1 was still finishing (container 1452), so PB3 could look for emails
+PB1 had not downloaded and PB8 missed what the others were still writing. The `Enrichment Complete`
+re-trigger of 2026-09-29 (below) narrowed this but kept PB2/PB3/PB8 in parallel. Now:
+
+| Playbook | Type | Active | Started by |
+|---|---|---|---|
+| `proofpoint_trap_orchestrator` | automation | **yes** | ingest (`Event Info`), each `Event Info Update` (PB7) |
+| PB1 `proofpoint_trap_detail` | automation | no | orchestrator, 1st |
+| PB3 `proofpoint_trap_attachments` | automation | no | orchestrator, 2nd |
+| PB2 `proofpoint_trap_triage` | automation | no | orchestrator, 3rd |
+| PB8 `proofpoint_trap_summary` | automation | no | orchestrator, 4th |
+| PB7 `proofpoint_trap_recheck` | automation | yes | Timer asset (label `proofpoint_trap_recheck`) |
+
+- Each orchestrator block is a **synchronous** playbook block: the next child starts only once the
+  previous one has finished. A child that fails does not stop the chain (PB8 still reports it).
+- The children stay **inactive**: an active one would also fire on its own trigger, beside the
+  orchestrator. They keep their type, so they can be re-activated for a one-off test.
+- `Enrichment Complete` no longer runs automation (it would start a second orchestrator run); PB1's
+  `check_reentry` is unchanged — it still decides whether a run re-enriches (first run, or an
+  unconsumed `Event Info Update`).
+- PB3 reads `MIME Body` artifacts with `scope="all"` (it re-scans them all and skips processed ones).
+- Handover: `export_handover.py` lists the four as "leave inactive", and the r13 upgrade note tells
+  the operator to deactivate them and activate the orchestrator.
+- **Live-tested on soar8 2026-09-30** (orchestrator id 262, children 254/256/255/261 inactive):
+  container 1527 got ONE orchestrator run (3021) and its four children as sub-runs strictly in
+  sequence — detail 18:52:44.4-52.8, attachments 52.8-53.5, triage 53.5-54.0, summary 54.0-54.3;
+  PB3 processed the email on that first pass, the container ended `low` as mapped, and the excluded
+  sender got no `Sender Email`/`Sender Domain` (container 1448, the same mock template before, had both).
+
+Also that day, PB1 gives no `Sender Email` artifact to an address in the custom list
+`proofpoint_trap_excluded_senders`, and no `Sender Domain` to its domain unless another sender shares
+it (the list previously only kept the address out of the container name). Recipients are not filtered.
+
 **Notes over ~22,000 characters are cut on the appliance (user, 2026-09-29).** soar8 stores at least
 1,000,000 characters (REST, `phantom.add_note()`, native "add note" — measured on test container 1321), so
 the lab never showed it. Every UC2 note now stays at or under 20,000: PB3's `Email Content` and `Attachment

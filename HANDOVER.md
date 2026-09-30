@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Air-Gapped Handover Package
 
-Generated 2026-09-30 01:49 UTC from `proofpoint_trap` (source env: `soar8`).
+Generated 2026-09-30 18:56 UTC from `proofpoint_trap` (source env: `soar8`).
 
 This package is self-contained — everything needed to deploy this use case by hand
 in an environment with no network access back to this repo or to `soar8`.
@@ -14,7 +14,7 @@ in an environment with no network access back to this repo or to `soar8`.
 | `connectors/` | Connector app package(s): proofpoint_trap-v1.0.37.tgz |
 | `connectors/source/` | Same connector(s), extracted — for reading, not for import |
 | `playbooks/*.tgz` (CFs) | proofpoint_trap_extract_incident_id |
-| `playbooks/*.tgz` (PBs) | proofpoint_trap_detail, proofpoint_trap_triage, proofpoint_trap_attachments, proofpoint_trap_acknowledge, proofpoint_trap_close, proofpoint_trap_isolation_notify, proofpoint_trap_recheck, proofpoint_trap_summary |
+| `playbooks/*.tgz` (PBs) | proofpoint_trap_detail, proofpoint_trap_triage, proofpoint_trap_attachments, proofpoint_trap_acknowledge, proofpoint_trap_close, proofpoint_trap_isolation_notify, proofpoint_trap_recheck, proofpoint_trap_summary, proofpoint_trap_orchestrator |
 | `playbooks/source/` | Same CFs/playbooks, extracted — for reading, not for import |
 | `assets/*.json` | Asset config templates (credentials redacted — see below) |
 | `custom_lists/*.json` | Custom list schema (header row only — see the custom-list section below) |
@@ -44,6 +44,8 @@ previous package. On a completely fresh target, skip to Install order.
 - **`proofpoint_trap_isolation_notify` lists its links in the container note, and every playbook description now starts with its type and number (2026-09-29).** The `TRAP Isolation Notify` note shows each isolation-browser link it emailed (the target as text, only the isolation-browser link clickable). The descriptions read `Automation playbook (PBn)` / `Data playbook (PBn)`. Re-import `proofpoint_trap_isolation_notify`; the other playbooks carry the new descriptions the next time you re-import them.
 
 - **A container mapped to `low` now stays `low` (2026-09-30).** `proofpoint_trap_triage` sets the container severity from TRAP's, but an artifact created or updated without a severity is `medium` and raises a lower container: `proofpoint_trap_attachments` marking each `MIME Body` as processed put every `low` container back to `medium`. The playbooks now write their artifacts at `low`, which never lowers a `high` or `medium` container. Also, `proofpoint_trap_acknowledge`, `proofpoint_trap_close` and `proofpoint_trap_isolation_notify` no longer report a step that SOAR refused to start as `not run`: the note says `failed - not dispatched`, and the reason is in the playbook run's actions. Re-import these five playbooks — `proofpoint_trap_attachments`, `proofpoint_trap_recheck`, `proofpoint_trap_acknowledge`, `proofpoint_trap_close`, `proofpoint_trap_isolation_notify` — and re-activate the first two. A container already raised to `medium` returns to its mapped severity the next time `proofpoint_trap_recheck` sees its incident change.
+
+- **One orchestrator runs the playbooks in order (2026-09-30).** The automation playbooks used to start together on the same trigger and race: attachments looked for emails `proofpoint_trap_detail` had not downloaded yet, the summary missed what the others were still writing. New automation playbook `proofpoint_trap_orchestrator` (label `proofpoint_trap`) now runs `proofpoint_trap_detail`, `proofpoint_trap_attachments`, `proofpoint_trap_triage` and `proofpoint_trap_summary` one after another, each waiting for the previous one to finish. Import it and activate it; re-import those four and **deactivate** them — this replaces every "re-activate" step for them in the notes above. `proofpoint_trap_recheck` stays active. The `Enrichment Complete` artifact no longer runs automation. If you built a `proofpoint_trap_orchestrator` yourself, the import replaces it. Also in `proofpoint_trap_detail`: a sender address in the custom list `proofpoint_trap_excluded_senders` no longer gets a `Sender Email` artifact, nor its domain a `Sender Domain` one (unless another sender shares it); artifacts already on a container stay.
 
 ## Install order
 
@@ -95,8 +97,11 @@ previous package. On a completely fresh target, skip to Install order.
    - **Playbooks** — every other `playbooks/*.tgz`: *Import Playbook* on the Playbooks page.
    (`playbooks/source/` is the same code extracted for reading — don't import from there,
    the GUI needs the `.tgz`.)
-5. **Activate automation playbooks** (`proofpoint_trap_detail`, `proofpoint_trap_triage`, `proofpoint_trap_attachments`, `proofpoint_trap_recheck`, `proofpoint_trap_summary`) and set their **Run As** user per the
+5. **Activate automation playbooks** (`proofpoint_trap_recheck`, `proofpoint_trap_orchestrator`) and set their **Run As** user per the
    implementation plan doc's Setup Guide (see `docs/`).
+   **Leave these inactive:** `proofpoint_trap_detail`, `proofpoint_trap_triage`, `proofpoint_trap_attachments`, `proofpoint_trap_summary` — an orchestrator playbook above calls them one after
+   another; active, they would also start on their own, alongside it. Deactivate them if an
+   earlier package had them active.
 
 ## Custom lists this use case owns
 
@@ -113,7 +118,7 @@ See the copied implementation plan doc in `docs/` for what the playbook stores a
 Settings the playbooks read. Create them (step above), then add your own rows below the
 header row when you need them; the use case works with them empty.
 
-- `proofpoint_trap_excluded_senders`: sender addresses `proofpoint_trap_detail` never uses to name a container, one per row (case does not matter) — typically an address present on every incident. When TRAP gives an incident no summary, the container is named `TRAP-<id>: <first sender not in this list>` instead of `TRAP-<id>: No summary`. Leave it empty to use the first sender; the header row is ignored.
+- `proofpoint_trap_excluded_senders`: sender addresses `proofpoint_trap_detail` leaves out, one per row (case does not matter) — typically an address present on every incident. Such an address gets no `Sender Email` artifact, its domain no `Sender Domain` one (unless another sender shares it), and it never names a container: when TRAP gives an incident no summary, the container is named `TRAP-<id>: <first sender not in this list>` instead of `TRAP-<id>: No summary`. Leave it empty to leave nothing out; the header row is ignored.
 
 ## Verification
 

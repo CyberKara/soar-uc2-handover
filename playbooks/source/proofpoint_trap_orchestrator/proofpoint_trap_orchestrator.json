@@ -1,0 +1,206 @@
+{
+    "blockly": false,
+    "blockly_xml": "<xml></xml>",
+    "category": "Email Abuse",
+    "coa": {
+        "data": {
+            "hash": "c86830a6f3931f08a3e93c67b54ef9fa7c5a9c0e",
+            "edges": [
+                {
+                    "id": "port_0_to_port_2",
+                    "sourceNode": "0",
+                    "sourcePort": "0_out",
+                    "targetNode": "2",
+                    "targetPort": "2_in"
+                },
+                {
+                    "id": "port_2_to_port_3",
+                    "sourceNode": "2",
+                    "sourcePort": "2_out",
+                    "targetNode": "3",
+                    "targetPort": "3_in"
+                },
+                {
+                    "id": "port_3_to_port_4",
+                    "sourceNode": "3",
+                    "sourcePort": "3_out",
+                    "targetNode": "4",
+                    "targetPort": "4_in"
+                },
+                {
+                    "id": "port_4_to_port_5",
+                    "sourceNode": "4",
+                    "sourcePort": "4_out",
+                    "targetNode": "5",
+                    "targetPort": "5_in"
+                },
+                {
+                    "id": "port_5_to_port_1",
+                    "sourceNode": "5",
+                    "sourcePort": "5_out",
+                    "targetNode": "1",
+                    "targetPort": "1_in"
+                }
+            ],
+            "nodes": {
+                "0": {
+                    "x": 190,
+                    "y": 0,
+                    "id": "0",
+                    "data": {
+                        "id": "0",
+                        "type": "start",
+                        "advanced": {
+                            "join": []
+                        },
+                        "functionName": "on_start"
+                    },
+                    "type": "start",
+                    "errors": {},
+                    "warnings": {}
+                },
+                "1": {
+                    "x": 190,
+                    "y": 750,
+                    "id": "1",
+                    "data": {
+                        "id": "1",
+                        "type": "end",
+                        "advanced": {
+                            "join": []
+                        },
+                        "functionId": 1,
+                        "functionName": "on_finish"
+                    },
+                    "type": "end",
+                    "errors": {},
+                    "userCode": "    ################################################################################\n    ################################################################################\n\n    # This function is called after all actions are completed.\n    # summary of all the action and/or all details of actions\n    # can be collected here.\n\n    # summary_json = phantom.get_summary()\n    # if 'result' in summary_json:\n        # for action_result in summary_json['result']:\n            # if 'action_run_id' in action_result:\n                # action_results = phantom.get_action_results(action_run_id=action_result['action_run_id'], result_data=False, flatten=False)\n                # phantom.debug(action_results)\n\n    ################################################################################\n    ################################################################################\n",
+                    "warnings": {}
+                },
+                "2": {
+                    "x": 170,
+                    "y": 150,
+                    "id": "2",
+                    "data": {
+                        "id": "2",
+                        "type": "playbook",
+                        "inputs": {},
+                        "advanced": {
+                            "join": [],
+                            "customName": "run detail",
+                            "description": "Fetch the TRAP incident, download its emails and create the event artifacts, the detail note and Enrichment Complete.",
+                            "customNameId": 0
+                        },
+                        "functionId": 1,
+                        "synchronous": true,
+                        "functionName": "run_detail",
+                        "playbookName": "proofpoint_trap_detail",
+                        "playbookRepo": 1,
+                        "playbookType": "automation",
+                        "playbookRepoName": "local"
+                    },
+                    "type": "playbook",
+                    "errors": {},
+                    "warnings": {}
+                },
+                "3": {
+                    "x": 170,
+                    "y": 300,
+                    "id": "3",
+                    "data": {
+                        "id": "3",
+                        "type": "playbook",
+                        "inputs": {},
+                        "advanced": {
+                            "join": [],
+                            "customName": "run attachments",
+                            "description": "Extract attachments, Cc recipients and the Email Content note from each email detail downloaded.",
+                            "customNameId": 0
+                        },
+                        "functionId": 1,
+                        "synchronous": true,
+                        "functionName": "run_attachments",
+                        "playbookName": "proofpoint_trap_attachments",
+                        "playbookRepo": 1,
+                        "playbookType": "automation",
+                        "playbookRepoName": "local"
+                    },
+                    "type": "playbook",
+                    "errors": {},
+                    "warnings": {}
+                },
+                "4": {
+                    "x": 170,
+                    "y": 450,
+                    "id": "4",
+                    "data": {
+                        "id": "4",
+                        "type": "playbook",
+                        "inputs": {},
+                        "advanced": {
+                            "join": [],
+                            "customName": "run triage",
+                            "description": "Set the container severity from TRAP, after every artifact has been written.",
+                            "customNameId": 0
+                        },
+                        "functionId": 1,
+                        "synchronous": true,
+                        "functionName": "run_triage",
+                        "playbookName": "proofpoint_trap_triage",
+                        "playbookRepo": 1,
+                        "playbookType": "automation",
+                        "playbookRepoName": "local"
+                    },
+                    "type": "playbook",
+                    "errors": {},
+                    "warnings": {}
+                },
+                "5": {
+                    "x": 170,
+                    "y": 600,
+                    "id": "5",
+                    "data": {
+                        "id": "5",
+                        "type": "playbook",
+                        "inputs": {},
+                        "advanced": {
+                            "join": [],
+                            "customName": "run summary",
+                            "description": "Write or rewrite the TRAP Summary note from every artifact on the container.",
+                            "customNameId": 0
+                        },
+                        "functionId": 1,
+                        "synchronous": true,
+                        "functionName": "run_summary",
+                        "playbookName": "proofpoint_trap_summary",
+                        "playbookRepo": 1,
+                        "playbookType": "automation",
+                        "playbookRepoName": "local"
+                    },
+                    "type": "playbook",
+                    "errors": {},
+                    "warnings": {}
+                }
+            },
+            "notes": "",
+            "description": "Automation playbook for label proofpoint_trap, the only UC2 playbook started at ingest and on each Event Info Update from proofpoint_trap_recheck. Runs proofpoint_trap_detail, proofpoint_trap_attachments, proofpoint_trap_triage and proofpoint_trap_summary one after another, each waiting for the previous one to finish, so the attachments are extracted from the emails detail has just downloaded, the severity is applied after the last artifact is written, and the summary sees everything. Those four playbooks stay inactive: this playbook calls them."
+        },
+        "input_spec": [],
+        "output_spec": [],
+        "playbook_type": "automation",
+        "python_version": "3.13",
+        "schema": "5.0.24",
+        "version": "8.6.0.530",
+        "playbook_trigger": "artifact_created"
+    },
+    "create_time": "2026-09-30T18:42:47.006854Z",
+    "draft_mode": false,
+    "labels": [
+        "proofpoint_trap"
+    ],
+    "tags": [
+        "proofpoint_trap",
+        "email-abuse",
+        "orchestrator"
+    ]
+}

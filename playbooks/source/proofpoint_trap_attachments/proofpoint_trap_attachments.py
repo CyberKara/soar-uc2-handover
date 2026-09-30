@@ -1,5 +1,5 @@
 """
-Automation playbook (PB3) for label &#39;proofpoint_trap&#39;, run on every automation trigger of the container. Processes each &#39;MIME Body&#39; artifact not yet processed (vaulted raw .eml from proofpoint_trap_detail or proofpoint_trap_recheck): an &#39;Email Content&#39; note showing the email safely, each file attachment vaulted as its own &#39;Email Attachment&#39; artifact (vaultId, fileName, fileHashSha256), and an &#39;Attachment Extraction&#39; note. A note longer than 20,000 characters is split into parts.
+Automation playbook (PB3) for label &#39;proofpoint_trap&#39;, left inactive: proofpoint_trap_orchestrator runs it after proofpoint_trap_detail. Processes each &#39;MIME Body&#39; artifact not yet processed (vaulted raw .eml from proofpoint_trap_detail or proofpoint_trap_recheck): an &#39;Email Content&#39; note showing the email safely, each file attachment vaulted as its own &#39;Email Attachment&#39; artifact (vaultId, fileName, fileHashSha256), and an &#39;Attachment Extraction&#39; note. A note longer than 20,000 characters is split into parts.
 """
 
 
@@ -405,7 +405,7 @@ def extract_attachments(action=None, success=None, container=None, results=None,
     # Design notes (kept here because a VPE save replaces the module docstring):
     # Proofpoint TRAP Attachment Extraction
     #
-    # Automation playbook triggered on artifact creation for label 'proofpoint_trap'.
+    # Run by proofpoint_trap_orchestrator after proofpoint_trap_detail (label 'proofpoint_trap').
     # Scans the container for 'MIME Body' artifacts (vaulted raw .eml, created by the
     # proofpoint_trap connector's on_poll — see FR-21), parses each one for:
     # - file attachments — vaulted as their own artifact (name 'Email Attachment',
@@ -443,12 +443,11 @@ def extract_attachments(action=None, success=None, container=None, results=None,
     # target (URL Defense links decoded), hidden text and forms flagged, all
     # email text escaped. Nothing from the email loads or is clickable.
     #
-    # Re-scans all MIME Body artifacts on every run (same pattern as ip_enrich) and
-    # skips any already marked processed via a data.attachments_extracted marker —
-    # tolerates the "artifact_created fires on container AND artifact creation"
-    # platform behavior (constraints.md) without needing to distinguish trigger type.
+    # Re-scans all MIME Body artifacts on every run (scope "all": they may have been
+    # created before the trigger that started this run, by proofpoint_trap_recheck)
+    # and skips any already marked processed via a data.attachments_extracted marker.
     #
-    # Trigger: Artifact created, label 'proofpoint_trap'
+    # Trigger: none of its own -- proofpoint_trap_orchestrator calls it; leave it inactive.
 
 
     # Local re-imports — GUI edits recompile/lint each code block in isolation
@@ -467,6 +466,7 @@ def extract_attachments(action=None, success=None, container=None, results=None,
     mime_rows = phantom.collect2(
         container=container,
         datapath=["artifact:*.name", "artifact:*.id", "artifact:*.cef.vaultId", "artifact:*.cef.fileName"],
+        scope="all",
     )
 
     mime_artifacts = [
