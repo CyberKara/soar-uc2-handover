@@ -25,6 +25,28 @@ parts left over from a longer earlier summary as "TRAP Summary (unused)" (reused
 playbook may not delete notes: `DELETE /rest/note` answers 403 for the `automation` user. Other UC2 notes
 are fixed-size.
 
+**Artifacts are created at `low`, and a note never calls a refused action "not run" (2026-09-29,
+night).** Two fixes, playbooks only — no connector change:
+1. **`"severity": "low"` on every REST-created artifact** — PB3's `Email Attachment` and Cc
+   `Recipient Email`, PB7's `MIME Body` and `Event Info Update`. Raw `POST /rest/artifact` does take
+   `severity` (measured on container 1321: a `low` artifact leaves a `low` container alone, the same
+   POST without the field raises it to `medium`), and only creation counts — `POST
+   /rest/artifact/<id> {"severity": "low"}` afterwards succeeds while the container stays raised, so
+   a post-hoc sweep would fix nothing. This closes the gap left above: PB3 runs beside PB2 on the
+   same trigger, so its attachments landed after PB2's re-apply and left a container mapped to `low`
+   at `medium`. PB1's own artifacts go through the native "add artifact" action, which has **no**
+   severity parameter, so they still arrive `medium`; they are all written before `Enrichment
+   Complete`, whose trigger re-runs PB2, so the container ends correct.
+2. **A missing action result is reported as a failure, not as "not run"** (PB4 `add_ack_note`, PB5
+   `add_close_note`, PB6 `add_isolation_note`). SOAR rejects a `phantom.act()` whose
+   manifest-required parameters are incomplete *before* any app_run exists, so
+   `collect2("<block>:action_result.status")` comes back empty exactly as if the block had not run,
+   while the playbook run records the attempt as failed with the reason. PB4's note had been reading
+   `update_incident_assignee: not run` on every run (notes 328/332/349/369) for the known
+   assignee+team defect — playbook_run 2032's own result says `missing the following required
+   fields: team`. The label is now `failed - not dispatched (reason in the playbook run's actions)`.
+   PB4's underlying assignee+team fix stays **on hold** (the user's TRAP web-UI test).
+
 **Appliance feedback, 2026-09-29 (user).** Three changes, connector v1.0.37 + PB1:
 1. **Container name when TRAP gives no summary.** Real incidents have an empty summary and
    description, so the connector names the container `TRAP-<id>: No summary`; it polls with
@@ -62,9 +84,8 @@ no later PB3 run); it caught up only when PB7 flagged a change. Now:
   default severity `medium` (the native "add artifact" action has no severity parameter), and
   new artifacts raise a lower container severity to their own. PB2 ran at ingest, then PB1's
   artifacts put a container mapped to `low` back to `medium` (1294, 1300: TRAP → `low`, container
-  `medium`). The `Enrichment Complete` re-run now restores it after PB1; artifacts created after
-  PB2's last run (PB3 attachments on the same pass, PB7's refetch) can still raise it until the
-  next trigger. Making the artifacts themselves `low` is not done (open item).
+  `medium`). The `Enrichment Complete` re-run now restores it after PB1. The artifacts written
+  after PB2's run were **fixed later the same day** — see "Artifacts are created at `low`" below.
 - Known limit: PB3 and PB8 run side by side on the same trigger, so attachments PB3 extracts on
   that pass appear in the summary at the next refresh (the next PB1 run).
 

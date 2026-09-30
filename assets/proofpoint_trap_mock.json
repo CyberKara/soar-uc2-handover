@@ -17,7 +17,7 @@
     "verify_ssl": false,
     "sensitivity": "amber",
     "sub_disposition": "",
-    "abuse_disposition": ""
+    "abuse_disposition": "Unknown,Suspicious,Malicious,Spam,Bulk,Low Risk"
   },
   "redacted_fields": [
     "api_key",

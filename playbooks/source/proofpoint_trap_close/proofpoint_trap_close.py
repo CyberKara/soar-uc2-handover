@@ -338,11 +338,18 @@ def add_close_note(action=None, success=None, container=None, results=None, hand
     ]
 
     if prompt_status == "success":
+        # Both actions were dispatched on this branch, so a missing
+        # action_result is a failure, not a skipped step: when SOAR refuses to
+        # dispatch an action (a manifest-required parameter missing) no app_run
+        # is created and collect2 finds nothing, while the playbook run records
+        # the attempt as failed.
+        NO_RESULT = "failed - not dispatched (reason in the playbook run's actions)"
+
         close_data = phantom.collect2(container=container, datapath=["close_trap_incident:action_result.status"])
-        close_status = close_data[0][0] if close_data and close_data[0][0] else "not run"
+        close_status = close_data[0][0] if close_data and close_data[0][0] else NO_RESULT
 
         comment_data = phantom.collect2(container=container, datapath=["add_trap_comment:action_result.status"])
-        comment_status = comment_data[0][0] if comment_data and comment_data[0][0] else "not run"
+        comment_status = comment_data[0][0] if comment_data and comment_data[0][0] else NO_RESULT
 
         note_lines.append("")
         note_lines.append("## TRAP Actions")

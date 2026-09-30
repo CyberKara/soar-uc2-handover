@@ -605,6 +605,13 @@ def extract_attachments(action=None, success=None, container=None, results=None,
                 "cef_types": {"vaultId": ["vault id"], "fileHashSha256": ["sha256"]},
                 "container_id": container_id,
                 "run_automation": False,
+                # UC2 artifacts are enrichment data, not severity signals: an
+                # artifact created without a severity gets SOAR's default
+                # (medium) and RAISES a lower container severity, undoing the
+                # mapping proofpoint_trap_triage applies. These are created
+                # after that playbook's run on the same trigger, so nothing
+                # would put the container back until the next one.
+                "severity": "low",
             }
             try:
                 resp2 = phantom.requests.post(
@@ -639,6 +646,7 @@ def extract_attachments(action=None, success=None, container=None, results=None,
                 "cef_types": {"emailAddress": ["email"]},
                 "container_id": container_id,
                 "run_automation": False,
+                "severity": "low",  # never raise the container severity, see above
             }
             try:
                 phantom.requests.post(
@@ -738,13 +746,18 @@ def extract_attachments(action=None, success=None, container=None, results=None,
         # Mark this MIME Body artifact processed regardless of whether it had
         # attachments, so future artifact-created triggers on this container
         # don't re-parse it.
+        # Updating an artifact re-applies ITS severity to the container, just
+        # as creating one does: PB1 creates MIME Body at the default (medium),
+        # so this update alone would undo proofpoint_trap_triage's mapping.
+        # Setting the artifact to low in the same update leaves the container
+        # as it is, and later updates of a low artifact cannot raise it.
         merged_data = dict(current_data)
         merged_data["attachments_extracted"] = True
         merged_data["attachments_extracted_count"] = extracted_this_email
         try:
             phantom.requests.post(
                 uri=phantom.build_phantom_rest_url("artifact", artifact_id),
-                data=json.dumps({"data": merged_data}),
+                data=json.dumps({"data": merged_data, "severity": "low"}),
                 verify=False,
             )
         except Exception as e:

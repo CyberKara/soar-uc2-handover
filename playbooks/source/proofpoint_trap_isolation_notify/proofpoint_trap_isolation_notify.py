@@ -386,8 +386,12 @@ def add_isolation_note(action=None, success=None, container=None, results=None, 
     recipient_email = json.loads(phantom.get_run_data(key="resolve_recipient_and_build_links:recipient_email") or 'null')
     link_count = phantom.get_run_data(key="resolve_recipient_and_build_links:link_count") or "0"
 
+    # The send is dispatched unconditionally, so a missing action_result is a
+    # failure, not a skipped step: when SOAR refuses to dispatch an action (a
+    # manifest-required parameter missing) no app_run is created and collect2
+    # finds nothing, while the playbook run records the attempt as failed.
     send_data = phantom.collect2(container=container, datapath=["send_isolation_email:action_result.status", "send_isolation_email:action_result.message"])
-    send_status = send_data[0][0] if send_data and send_data[0][0] else "not run"
+    send_status = send_data[0][0] if send_data and send_data[0][0] else "failed - not dispatched (reason in the playbook run's actions)"
     send_message = send_data[0][1] if send_data and len(send_data[0]) > 1 and send_data[0][1] else ""
 
     playbook_output = json.loads(phantom.get_run_data(key="playbook_output") or "{}")

@@ -414,6 +414,11 @@ def dispatch_updates(action=None, success=None, container=None, results=None, ha
                 "cef_types": {"vaultId": ["vault id"]},
                 "container_id": container_id,
                 "run_automation": False,
+                # An artifact created without a severity gets SOAR's default
+                # (medium) and RAISES a lower container severity, undoing the
+                # mapping proofpoint_trap_triage applies. UC2 artifacts carry
+                # enrichment data, never a severity of their own.
+                "severity": "low",
             }
             try:
                 resp = phantom.requests.post(
@@ -437,6 +442,7 @@ def dispatch_updates(action=None, success=None, container=None, results=None, ha
             "cef": update_cef,
             "container_id": container_id,
             "run_automation": True,
+            "severity": "low",  # never raise the container severity, see above
         }
         try:
             resp = phantom.requests.post(

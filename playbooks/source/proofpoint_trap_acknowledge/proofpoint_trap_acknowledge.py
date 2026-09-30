@@ -369,14 +369,23 @@ def add_ack_note(action=None, success=None, container=None, results=None, handle
     comment = json.loads(phantom.get_run_data(key="process_comment:comment") or '""')
     prompt_status = json.loads(phantom.get_run_data(key="process_comment:prompt_status") or '""')
 
+    # All three actions are dispatched unconditionally above, so a missing
+    # action_result does NOT mean the step was skipped: when SOAR refuses to
+    # dispatch (a manifest-required parameter missing, the case of this
+    # playbook's own assignee+team bug) no app_run is created at all and
+    # collect2 finds nothing, while the playbook run records the attempt as
+    # failed. Report that as a failure with where to read the reason, never as
+    # "not run".
+    NO_RESULT = "failed - not dispatched (reason in the playbook run's actions)"
+
     assignee_data = phantom.collect2(container=container, datapath=["update_incident_assignee:action_result.status"])
-    assignee_status = assignee_data[0][0] if assignee_data and assignee_data[0][0] else "not run"
+    assignee_status = assignee_data[0][0] if assignee_data and assignee_data[0][0] else NO_RESULT
 
     status_data = phantom.collect2(container=container, datapath=["set_incident_open:action_result.status"])
-    status_status = status_data[0][0] if status_data and status_data[0][0] else "not run"
+    status_status = status_data[0][0] if status_data and status_data[0][0] else NO_RESULT
 
     comment_data = phantom.collect2(container=container, datapath=["add_trap_comment:action_result.status"])
-    comment_status = comment_data[0][0] if comment_data and comment_data[0][0] else "not run"
+    comment_status = comment_data[0][0] if comment_data and comment_data[0][0] else NO_RESULT
 
     note_lines = [
         "# TRAP Acknowledgement",

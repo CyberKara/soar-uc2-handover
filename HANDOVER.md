@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Air-Gapped Handover Package
 
-Generated 2026-09-29 18:41 UTC from `proofpoint_trap` (source env: `soar8`).
+Generated 2026-09-30 01:49 UTC from `proofpoint_trap` (source env: `soar8`).
 
 This package is self-contained — everything needed to deploy this use case by hand
 in an environment with no network access back to this repo or to `soar8`.
@@ -42,6 +42,8 @@ previous package. On a completely fresh target, skip to Install order.
 - **Long notes are split instead of cut (2026-09-29).** A SOAR note shows at most about 22,000 characters here, so no note is longer than 20,000: a longer `Email Content` or `Attachment Extraction` note from `proofpoint_trap_attachments` becomes parts `... (1/N)`, `... (2/N)`, and the `TRAP Summary` from `proofpoint_trap_summary` becomes `TRAP Summary (1/N)`... (a table that continues repeats its header; the parts are rewritten on each update). Re-import both playbooks and re-activate them. An email body is still shortened after 20,000 characters; the full message is the `.eml` in the container's files.
 
 - **`proofpoint_trap_isolation_notify` lists its links in the container note, and every playbook description now starts with its type and number (2026-09-29).** The `TRAP Isolation Notify` note shows each isolation-browser link it emailed (the target as text, only the isolation-browser link clickable). The descriptions read `Automation playbook (PBn)` / `Data playbook (PBn)`. Re-import `proofpoint_trap_isolation_notify`; the other playbooks carry the new descriptions the next time you re-import them.
+
+- **A container mapped to `low` now stays `low` (2026-09-30).** `proofpoint_trap_triage` sets the container severity from TRAP's, but an artifact created or updated without a severity is `medium` and raises a lower container: `proofpoint_trap_attachments` marking each `MIME Body` as processed put every `low` container back to `medium`. The playbooks now write their artifacts at `low`, which never lowers a `high` or `medium` container. Also, `proofpoint_trap_acknowledge`, `proofpoint_trap_close` and `proofpoint_trap_isolation_notify` no longer report a step that SOAR refused to start as `not run`: the note says `failed - not dispatched`, and the reason is in the playbook run's actions. Re-import these five playbooks — `proofpoint_trap_attachments`, `proofpoint_trap_recheck`, `proofpoint_trap_acknowledge`, `proofpoint_trap_close`, `proofpoint_trap_isolation_notify` — and re-activate the first two. A container already raised to `medium` returns to its mapped severity the next time `proofpoint_trap_recheck` sees its incident change.
 
 ## Install order
 

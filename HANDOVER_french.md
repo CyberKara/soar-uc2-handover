@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Paquet de transfert (déploiement air-gapped)
 
-Généré le 2026-09-29 18:41 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
+Généré le 2026-09-30 01:49 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
 
 Ce paquet est autonome — tout ce qu'il faut pour déployer ce cas d'usage manuellement
 dans un environnement sans accès réseau vers ce dépôt ni vers `soar8`.
@@ -43,6 +43,8 @@ d'installation.
 - **Les notes longues sont découpées au lieu d'être tronquées (2026-09-29).** Une note SOAR n'affiche ici qu'environ 22 000 caractères au plus, donc aucune note ne dépasse 20 000 : une note `Email Content` ou `Attachment Extraction` plus longue de `proofpoint_trap_attachments` devient des parties `... (1/N)`, `... (2/N)`, et le `TRAP Summary` de `proofpoint_trap_summary` devient `TRAP Summary (1/N)`... (un tableau qui continue répète son en-tête ; les parties sont réécrites à chaque mise à jour). Réimportez ces deux playbooks et réactivez-les. Le corps d'un e-mail reste raccourci après 20 000 caractères ; le message complet est le `.eml` dans les fichiers du conteneur.
 
 - **`proofpoint_trap_isolation_notify` liste ses liens dans la note du conteneur, et chaque description de playbook commence par son type et son numéro (2026-09-29).** La note `TRAP Isolation Notify` affiche chaque lien du navigateur d'isolation envoyé par e-mail (la cible en texte, seul le lien du navigateur d'isolation est cliquable). Les descriptions indiquent `Automation playbook (PBn)` / `Data playbook (PBn)`. Réimportez `proofpoint_trap_isolation_notify` ; les autres playbooks prennent les nouvelles descriptions à leur prochaine réimportation.
+
+- **Un conteneur associé à `low` reste désormais `low` (2026-09-30).** `proofpoint_trap_triage` fixe la sévérité du conteneur d'après celle de TRAP, mais un artefact créé ou mis à jour sans sévérité est `medium` et relève un conteneur plus bas : `proofpoint_trap_attachments`, en marquant chaque `MIME Body` comme traité, remettait chaque conteneur `low` à `medium`. Les playbooks écrivent désormais leurs artefacts en `low`, ce qui n'abaisse jamais un conteneur `high` ou `medium`. Par ailleurs, `proofpoint_trap_acknowledge`, `proofpoint_trap_close` et `proofpoint_trap_isolation_notify` ne signalent plus comme `not run` une étape que SOAR a refusé de lancer : la note indique `failed - not dispatched`, et la raison figure dans les actions de l'exécution du playbook. Réimportez ces cinq playbooks — `proofpoint_trap_attachments`, `proofpoint_trap_recheck`, `proofpoint_trap_acknowledge`, `proofpoint_trap_close`, `proofpoint_trap_isolation_notify` — et réactivez les deux premiers. Un conteneur déjà relevé à `medium` revient à sa sévérité associée la prochaine fois que `proofpoint_trap_recheck` voit son incident changer.
 
 ## Ordre d'installation
 
