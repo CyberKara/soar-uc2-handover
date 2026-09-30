@@ -7,6 +7,7 @@ self-contained prompt: paste the "Merged prompt" block into a fresh session, ans
 | ID | Item | Status | Queued |
 |----|------|--------|--------|
 | NS-1 | Connector README + build reproducibility, and the static-audit fixes (merged from two prompts) | queued | 2026-09-30 |
+| NS-2 | In-code cleanup backlog: what is still in the connector and playbook code, to trim once edits are allowed | queued, blocked on edit rights | 2026-09-30 |
 
 ---
 
@@ -284,3 +285,132 @@ rebuild).
 - **Unverified**: state plainly that there was no SOAR or TRAP instance, and list what that leaves
   unverified.
 - **Upstream changes to carry over** to `soar-connectors` and `soar-playbooks`.
+
+
+---
+
+## NS-2: In-code cleanup backlog
+
+**Constraint.** The connector, the playbook `.py`/`.json` files and the `.tgz` packages are treated as
+read-only from now on: no further edits until the owner says otherwise. Everything below is for a
+session or person who has that go-ahead. The markdown side is finished: `docs/design_notes.md` holds all
+the rationale, including the notes for the comments that are still in the code, so trimming them later
+loses nothing.
+
+**Already done (pass 1, commit `3b39a78`).** Before this constraint, comments were moved out of the
+connector, consts and five playbooks (37 edits, 284 comment lines to 82). It was checked to change no
+behaviour, but it does touch code. If the owner does not want it, revert only the connector part with
+`git checkout e0fef59 -- connectors/source/proofpoint_trap/` (the source then matches
+`proofpoint_trap-v1.0.37.tgz` again), and the playbooks with `git checkout e0fef59 -- playbooks/`.
+
+### Backlog
+
+| ID | What to clean | Where | Note / decision needed |
+|----|---------------|-------|------------------------|
+| T1 | Shorten the 27 remaining comment blocks of 5+ lines to one or two lines. Their content is in `design_notes.md`. | `detail` (excluded senders, container name, post-only-new, parallel lists, failed writes, fan-out, no-automation, `check_reentry`), `recheck` (first cycle, only ingested, fan-out, tie-back, POST dedupe), `acknowledge` and `close` (prompt from code, dispatch failure), `attachments` (severity, marker update), `summary` (note parts), `triage`, `extract_incident_id` | Optional, about 150 lines of comments. They sit next to tricky code, so keep one line of "why" each. |
+| T2 | "Bridge block" banners citing another project's playbook (`cyberark_rotation_orchestrator`) | `acknowledge`, `close`, `isolation_notify` (`.py` only; not stored in the JSON) | VPE-generated. Fix by a VPE re-save, or accept. Editing the `.py` alone makes it differ from what the VPE emits. |
+| T3 | VPE leftovers: the `on_finish` template (45 lines), commented `phantom.debug('Action: ...` lines (14), block markers (60), banner triples (446 lines) | all playbooks | Regenerated on every save. Do not hand-edit; not worth removing. |
+| T4 | Connector cosmetics: section banners (34 lines of `# ------`) and "Returns: tuple ... RetVal pattern" docstring boilerplate | `proofpoint_trap_connector.py` | Optional. Ships only with the next connector version (NS-1, 1.0.38). |
+| T5 | Hard-coded fallback approver `soar_local_admin` (prompt comment and `container.get('owner_name') or 'soar_local_admin'`) | `acknowledge` (2 places), `close` (2 places) | A behaviour change, not a comment. Tie it to the "Run As user" question (NS-1, decision 5): keep, make it a required input, or drop the fallback. |
+| T6 | Internal jargon: PB1 to PB8 and "UC2" in the playbook descriptions (JSON `description` and module docstring) and in some runtime text, for example the failure message "a later PB1 run can redo the enrichment" in `detail` | all playbooks | User-visible text, so it needs a naming decision first. The PB-to-name mapping is in `design_notes.md`. |
+| T7 | Unused and duplicated imports, datetime deprecation, filename sanitising, and the other NS-1 section D items | `attachments`, `detail`, `close` | Already in NS-1; do them in the same pass. |
+| T8 | Lab specifics in markdown (editable now, but it is the owner's design record, so ask before generalising). Matching lines at this commit: `soar_local_admin` 11, "lab" 13, long numeric ids 52, references to sibling repos and unshipped files 45 | `docs/uc2_implementation_plan.md`; also `HANDOVER.md` (one `soar_local_admin`, one "lab") and `HANDOVER_french.md` (one `soar_local_admin`) | Find them with the `git grep` under this table. |
+| T9 | Lab values in the asset templates and the lab path in the connector README | `assets/*.json`, `connectors/source/proofpoint_trap/README.md` | Already in NS-1 (A3, A8). |
+| T10 | Connector source versus `proofpoint_trap-v1.0.37.tgz` | connector | Differs in comments and one docstring only. Resolved by the 1.0.38 bump in NS-1; until then the shipped tgz is the older, more verbose one, which is harmless. |
+
+To find the T8 lines:
+
+```bash
+git grep -n -i -E 'soar_local_admin|\blab\b|[0-9]{9,}|container [0-9]{3,}' -- docs 'HANDOVER*.md'
+```
+
+### How to apply an edit safely, when allowed
+
+1. Change the `.py` and the playbook `.json` together, by **literal string replacement** (for the JSON,
+   replace `json.dumps(old_block)[1:-1]` with the same for the new block, and require exactly one
+   match). Never load and re-save the JSON: that reformats it, and `.gitleaksignore` is keyed to JSON
+   line numbers, so the line count of each JSON file must not change.
+2. Do not restructure `dispatch_mime_refetch` or `dispatch_artifact_list`, and do not re-save in the
+   VPE just to tidy comments (it regenerates some blocks wrongly, per `HANDOVER.md`).
+3. Rebuild only the tgz of playbooks that changed. Never rebuild the connector tgz under its current
+   version (SOAR refuses a same-version reinstall).
+
+Checks to run afterwards (all were run for pass 1):
+
+```python
+# 1. Behaviour unchanged: the syntax trees must match, docstrings aside.
+#    python3 check_ast.py old.py new.py     (old.py = `git show <commit>:<path>`)
+import ast, sys
+
+def norm(path):
+    tree = ast.parse(open(path, encoding="utf-8").read())
+    for n in ast.walk(tree):
+        if isinstance(n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            b = n.body
+            if (b and isinstance(b[0], ast.Expr) and isinstance(getattr(b[0], "value", None), ast.Constant)
+                    and isinstance(b[0].value.value, str)):
+                n.body = b[1:] or [ast.Pass()]
+    return ast.dump(tree)
+
+print(norm(sys.argv[1]) == norm(sys.argv[2]))
+```
+
+```python
+# 2. JSON still in step with its .py: same keys, and every code string that changed is still
+#    verbatim inside the .py (the Global Custom Code is at coa/data/globalCustomCode).
+import json, sys
+old, new, py = (json.load(open(sys.argv[1])), json.load(open(sys.argv[2])), open(sys.argv[3]).read())
+
+def walk(o, p=""):
+    if isinstance(o, dict):
+        for k, v in o.items():
+            yield from walk(v, p + "/" + k)
+    elif isinstance(o, list):
+        for i, v in enumerate(o):
+            yield from walk(v, p + "[%d]" % i)
+    else:
+        yield p, o
+
+a, b = dict(walk(new)), dict(walk(old))
+assert set(a) == set(b), "key set differs"
+print([p for p in a if a[p] != b[p] and not (isinstance(a[p], str) and a[p].strip() in py)] or "ok")
+```
+
+```bash
+# 3. JSON line counts unchanged (protects .gitleaksignore):
+for f in playbooks/source/*/*.json; do
+  [ "$(git show HEAD:$f | wc -l)" = "$(wc -l < $f)" ] || echo "line count changed: $f"
+done
+# 4. Static checks: py_compile-style parse, then compare against the baselines below.
+python3 -m pyflakes <file>; python3 -m bandit -q <file>
+```
+
+```python
+# 5. Rebuild a playbook tgz (same layout as the shipped ones: PAX tar, mode 0644, uid/gid 0,
+#    empty user/group names, mtime 0, .py then .json; gzip mtime 0 so it is repeatable).
+import gzip, io, tarfile
+
+def build(name, srcdir, out):
+    raw = io.BytesIO()
+    with tarfile.open(fileobj=raw, mode="w", format=tarfile.PAX_FORMAT) as tf:
+        for ext in (".py", ".json"):
+            data = open("%s/%s%s" % (srcdir, name, ext), "rb").read()
+            ti = tarfile.TarInfo(name + ext)
+            ti.size, ti.mtime, ti.mode, ti.uid, ti.gid, ti.uname, ti.gname = len(data), 0, 0o644, 0, 0, "", ""
+            tf.addfile(ti, io.BytesIO(data))
+    with open(out, "wb") as f, gzip.GzipFile(filename="", mode="wb", fileobj=f, mtime=0, compresslevel=9) as gz:
+        gz.write(raw.getvalue())
+```
+
+Then extract each rebuilt tgz and `diff` it against its source directory. This builder reproduces the tar
+layer of all 10 shipped playbook tgz exactly.
+
+**Baselines** (pyflakes findings and bandit issues at commit `3b39a78`; compare against these, not zero):
+connector 44 and 1, consts 0 and 0, `acknowledge` 1 and 0, `attachments` 3 and 0, `detail` 3 and 0,
+`isolation_notify` 2 and 0, `recheck` 2 and 0. The other playbooks were not changed and not measured.
+
+### What stays unverified
+
+No SOAR or TRAP instance was available, so none of this was run end to end. The checks above prove that
+the code and the JSON did not change in behaviour or in step with each other. They do not prove that
+SOAR imports the rebuilt playbooks.

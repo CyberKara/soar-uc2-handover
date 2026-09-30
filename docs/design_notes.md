@@ -153,6 +153,60 @@ platform write adds an error note and an "Enrichment Failed" artifact instead.
   under `events[].attackers[].location`; unexplored. Both stay as no-ops since a TAP-sourced incident
   could arrive in principle.
 
+Rules `detail` applies that are not obvious from the artifact list:
+
+- **Excluded senders.** The custom list `proofpoint_trap_excluded_senders` (one address per row,
+  compared without case) names senders to leave out, for example a mailbox present on every incident.
+  An address in it gets no Sender Email artifact, gives no Sender Domain, and never names the
+  container. A missing or empty list excludes nothing.
+- **Container name.** Real incidents often have no summary or description, and the connector then names
+  the container `TRAP-<id>: No summary` (it lists incidents without their events, so it has no sender
+  yet). `detail` renames it after the first sender address, in alert order, that has a Sender Email
+  artifact, so never an excluded one. Only that fallback name is replaced; a real summary or an earlier
+  rename is never overwritten.
+- **Post only what is new.** A re-run (`proofpoint_trap_recheck` flags a changed incident, usually one
+  that gained alerts) rebuilds the list from the whole incident. Without a filter it re-posted every
+  artifact, hundreds on a large incident, each an "add artifact" action that SOAR rejected as a
+  duplicate, or kept twice when the content differed slightly (a MIME Body built by both `detail` and
+  `recheck`). An artifact counts as already there when one with the same name and the same identifying
+  value exists; the same set also drops a repeat within the run (a URL listed twice in `hosts.url`).
+- **Fan-out of "add artifact".** The artifact data is kept as parallel lists, one entry per artifact.
+  Every artifact uses the container's `source_data_identifier` except MIME Body, which carries its own
+  per-event one. The VPE builds ONE parameter set whose every field is a whole list, but "add artifact"
+  has to run once per artifact, so the custom code of `dispatch_artifact_list` replaces it with one set
+  per list item and `phantom.act()` runs one `app_run` per set. The fan-out lives in custom code because
+  that is the part a VPE save keeps verbatim; the generated code around it is rebuilt from the bindings
+  on every save. It reads the run data rather than the generated variables, so it does not depend on how
+  the VPE names them. With nothing to create (an incident with no events) it goes straight to the note.
+- **Failed writes must not read as success.** If the event artifacts or the detail note fail, `detail`
+  records an error note and an "Enrichment Failed" artifact through the synchronous API (which runs as
+  the playbook, not through the asset whose write just failed) and stops before "Enrichment Complete" is
+  written, so a later run can retry. A rejection with "already exists" is expected, not a failure: a
+  concurrent run (or `proofpoint_trap_recheck`) can post the same artifact between the filter above and
+  this run's write. `dispatch_enrichment_complete` has no callback, so its result is only visible in the
+  last block, which surfaces a failure there.
+- **Re-entry and the run index.** The orchestrator starts `detail` on every automation trigger of the
+  container (ingest, each "Event Info Update"). `check_reentry` is a code block rather than code in
+  `on_start`, because the VPE regenerates `on_start` on every save. It lets a run proceed when no
+  "Enrichment Complete" exists yet, or when there are at least as many "Event Info Update" artifacts as
+  "Enrichment Complete" ones; "Enrichment Failed" is not counted. It uses `scope="all"` because the
+  artifacts that decide this were created by earlier triggers. The run index is 0 on the first run, then
+  the number of "Event Info Update" artifacts seen so far. It goes into that run's "Enrichment Complete"
+  artifact (`runIndex`), so each run's signal is new content and is not rejected as a duplicate of the
+  previous one; the count above depends on that. That artifact also records `alertCount` (alerts the
+  run processed, which drives the artifact count), `eventCount` (the incident's `event_count` as TRAP
+  reports it; the two can differ), `artifactsCreated` (attempted, not confirmed) and
+  `artifactsAlreadyPresent`. "add artifact" has no description parameter, so the summary goes into
+  `cef.message`.
+- **Comment in TRAP.** On an incident's first enrichment only (run index 0), `detail` posts a comment on
+  the TRAP incident saying SOAR has taken it, with a link to the case: SOAR's configured base URL
+  (Administration > Company Settings) plus `/mission/<container id>`. A re-run after `recheck` flags a
+  change posts nothing. The `TRAP Detail` note has an `Open in TRAP` link, using the incident page that
+  `get incident` returns from connector 1.0.37 on.
+- **No automation on the artifacts `detail` creates.** The orchestrator calls `detail` and then, once it
+  has finished, `attachments`, `triage` and `summary`. An artifact that ran automation would start a
+  second orchestrator run alongside the first, and those playbooks would again run side by side.
+
 ### proofpoint_trap_attachments
 
 Runs after `detail`; it has no trigger of its own. For each "MIME Body" artifact (a vaulted raw
@@ -203,6 +257,25 @@ change new -> open. Independent of `triage` and `close`. The prompt is raised fr
 save regenerates native prompt blocks whole and would drop the approver fallback (TRAP containers never
 get an owner). See also `docs/uc2_implementation_plan.md` on the assignee / team requirement.
 
+- **Inputs** (optional): `approver` replaces the owner fallback, `respond_in_mins` the 30-minute prompt
+  timeout. The callback continues the flow; the `return` after raising the prompt stops the generated
+  call to the next block from also running immediately.
+- **Dispatch failures.** The TRAP actions are dispatched unconditionally, so a missing action result is
+  not a skipped step: when SOAR refuses to dispatch an action (a manifest-required parameter missing,
+  as in acknowledge's own assignee-without-team bug) no `app_run` is created and `collect2` finds
+  nothing, while the playbook run records the attempt as failed. It is reported as a failure, with
+  where to read the reason, never as "not run".
+- **Outputs**, read by `on_finish`: `success` when all TRAP actions succeeded, `partial` when some did,
+  `failed` when none did, or when no block recorded an outcome (for example the run stopped early).
+
+### proofpoint_trap_extract_incident_id (custom function)
+
+Returns the incident id and the raw TRAP severity for the container. Both sit on the "Event Info"
+artifact (created by `on_poll`) and on any later "Event Info Update" (written by `recheck`); the highest
+artifact id wins, so an update overrides the original. A custom function gets no container object for
+`phantom.collect2()`, so it reads every artifact on the container over REST, which is the same view as
+`collect2(scope="all")`. Used by `triage`, `acknowledge` and `close`.
+
 ### proofpoint_trap_isolation_notify
 
 Emails the container owner a set of isolation-browser links: the case's own SOAR URL plus every threat
@@ -241,6 +314,26 @@ checkpoint never revisits those once a container exists.
   per incident.
 - **State list.** Row 0 is the header. It follows the read-modify-write state-list pattern used in an
   earlier, unrelated orchestrator playbook.
+- **All states.** `state=""` means every state: this pass must see open and closed incidents too, the
+  ones `on_poll`'s main pass no longer looks at. It is built in the block's code as well as in its
+  bindings, so an empty value can never be dropped and fall back to the action's own default (`new`).
+  The only evidence that an empty `state` means "all states" so far is the mock server (an open audit
+  item, see `docs/next_steps.md`).
+- **First cycle.** An incident this playbook has not seen before is recorded, not rechecked. On the
+  first cycle that is the whole window; without this a fresh deployment would re-run `detail` over the
+  entire backlog on tick one. Afterwards it is an incident `on_poll` has just ingested, which `detail`
+  has already enriched on its own trigger. Rechecks start when a known incident comes back with a
+  different signature.
+- **Only ingested incidents.** Only incidents that already have a container are this playbook's job;
+  first-time ingestion stays on `on_poll`. An incident with no container yet is either brand new
+  (`on_poll` picks it up on its own schedule) or outside `on_poll`'s filters entirely. A known incident
+  that changed but has no container keeps its recorded signature, so the change stays pending until
+  `on_poll` has ingested it.
+- **Fan-out of "download mime body".** Same pattern as `detail`'s "add artifact": the VPE builds one
+  parameter set whose `incident_id` is the whole list, the custom code replaces it with one set per
+  changed incident, and a VPE save keeps that section. With nothing changed it goes straight to the
+  state update. Results are tied back to their incident through `action_result.parameter.incident_id`,
+  since `app_run`s are not guaranteed to complete in dispatch order.
 - **Copy of the connector.** `_build_event_info_cef` is duplicated from the connector (the cost of
   moving it). Keep both in sync.
 - **Cross-container write.** `phantom.add_artifact()` writes to the current run's container, which here
