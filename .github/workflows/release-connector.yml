@@ -1,9 +1,10 @@
 # Publishes a GitHub release for every connector package (connectors/<name>-v<x.y.z>.tgz)
 # that has none yet, with the .tgz attached. See tools/release-connectors.sh for the rules.
 #
-# Runs on its own when a push to main adds or changes a connector package. Run it by hand
-# (Actions > Release connector > Run workflow) to backfill old versions or to retry after a
-# failure: it only creates what is missing.
+# Runs on its own when a push to main adds or changes a connector package, and when this
+# workflow or the script changes (merging them publishes every version that has no release
+# yet, so the first merge backfills the old ones). Run it by hand (Actions > Release
+# connector > Run workflow) to retry after a failure. It only creates what is missing.
 name: Release connector
 
 on:
@@ -11,6 +12,8 @@ on:
     branches: [main]
     paths:
       - 'connectors/*.tgz'
+      - '.github/workflows/release-connector.yml'
+      - 'tools/release-connectors.sh'
   workflow_dispatch:
 
 permissions:
