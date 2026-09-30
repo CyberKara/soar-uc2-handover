@@ -118,12 +118,9 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
     ################################################################################
 
     def _create_enrichment_failure_signal(msg):
-        # Uses the documented "Signal artifact pattern" (playbook-patterns.md)
-        # instead of a raw REST POST -- synchronous, no asset. No explicit
-        # identifier -- SOAR auto-generates one (user decision 2026-08-15,
-        # accepted tradeoff: duplicate artifacts possible on re-run).
-        # Named "Enrichment Failed", not "Enrichment Complete": on_start's
-        # re-entry guard only counts the latter, so a later run can retry.
+        # Synchronous signal artifact, no asset; SOAR generates the identifier, so a re-run can add a duplicate.
+        # Named "Enrichment Failed", not "Enrichment Complete": check_reentry only counts the latter, so a
+        # later run can retry.
         success, message, artifact_id = phantom.add_artifact(
             container=container,
             raw_data={},
@@ -181,14 +178,10 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
         _create_enrichment_failure_signal(msg)
         return
 
-    import urllib.parse  # local import — GUI edits recompile/lint each code block in
-                          # isolation, a shared module-level import isn't visible to it
-                          # (see uc2_dev_notes.md)
+    import urllib.parse  # local: each VPE code block is compiled on its own, so a module-level import is not visible
 
-    # Headers is a free-form dict per email (no fixed schema, contents vary
-    # by mail client) -- pull only these specific ones when present, doing a
-    # case-insensitive match since real-world casing varies (vendor sample
-    # shows "MIME-Version", not "Mime-Version").
+    # Headers is a free-form dict per email: pick the wanted ones case-insensitively, since real casing
+    # varies ("MIME-Version", not "Mime-Version").
     _WANTED_HEADERS = [
         "To", "Date", "From", "Subject", "Return-Path", "Content-Type",
         "MIME-Version", "Received-SPF", "DKIM-Signature",
@@ -206,12 +199,8 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
         return result
 
     def _stringify_delivery_time(value):
-        # messageDeliveryTime isn't always a plain string — a real captured
-        # response (XSOAR ProofpointThreatResponse test fixture, 2026-08-06)
-        # showed it as a full Joda-time-style object instead:
-        # {"millis": 1617103759000, "zone": {...}, "chronology": {...}, ...}.
-        # Stringifying defensively here avoids putting a raw dict into a CEF
-        # field value.
+        # messageDeliveryTime can arrive as a Joda-time-style object ({"millis": ..., "zone": ...}) instead of
+        # a string; stringify it so no raw dict ends up in a CEF field.
         if isinstance(value, dict):
             millis = value.get("millis")
             if isinstance(millis, (int, float)):
@@ -256,15 +245,7 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
     sdi_rows = phantom.collect2(container=container, datapath=["container:source_data_identifier"])
     incident_id_val = sdi_rows[0][0] if sdi_rows and sdi_rows[0] and sdi_rows[0][0] else incident.get("id")
 
-    # Incident-level (not per-event) threat URLs. Moved here 2026-08-18 from
-    # the connector's on_poll, which used to create one "URL Artifact" per
-    # entry in hosts.url directly at ingestion -- this fetch (get_trap_incident,
-    # expand_events=true) also carries hosts, and this is where the rest of
-    # the incident's derived per-item artifacts already get built, so it
-    # joins them here instead of staying connector-side. hosts.attacker /
-    # hosts.forensics were the original (mock/Swimlane-derived) guess for
-    # this object's shape -- CONFIRMED ABSENT 2026-08-06 against real
-    # incident data -- hosts only ever has `url`.
+    # Incident-level (not per-event) threat URLs. hosts only ever carries `url`.
     hosts = incident.get("hosts") or {}
     for url_val in hosts.get("url") or []:
         artifacts.append({
@@ -276,13 +257,7 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
             "run_automation": False,
         })
 
-    # MIME Body artifacts -- moved here 2026-08-20 from the connector's
-    # on_poll (removed, user decision: connector stays a thin generic API
-    # wrapper, MIME-fetch belongs with the rest of PB1's derived per-item
-    # artifacts, same reasoning as the URL Artifact move above). A failed
-    # or empty download just means fewer MIME Body artifacts, not a hard
-    # failure of this whole extraction -- mirrors how the hosts.url
-    # handling above tolerates a missing/empty field.
+    # MIME Body artifacts. A failed or empty download means fewer artifacts, not a failed extraction.
     mime_status_rows = phantom.collect2(
         container=container,
         datapath=["dispatch_mime_download:action_result.status"],
@@ -312,14 +287,8 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
                 "cef": {"vaultId": vault_id, "fileName": file_name},
                 "cef_types": {"vaultId": ["vault id"]},
                 "run_automation": False,
-                # Per-event SDI, NOT the shared incident_id_val every other
-                # artifact in this batch uses -- proofpoint_trap_attachments
-                # (PB3) parses "trap-{incident}-mime-{event}" back out of
-                # this exact field to recover event_id (see its own
-                # comment); a shared SDI would degrade every MIME Body's
-                # event_id to "?" there. Format matches the connector's old
-                # (now-removed) _build_mime_artifact() exactly, just built
-                # here now.
+                # Per-event SDI, not the shared incident_id_val: proofpoint_trap_attachments parses
+                # "trap-{incident}-mime-{event}" back out of it to recover the event id.
                 "source_data_identifier": "trap-{}-mime-{}".format(incident_id_val, mime_event_id),
             })
     else:
@@ -396,14 +365,8 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
                     "run_automation": False,
                 })
 
-            # Cc — best-effort from raw headers. A full field-by-field walk of a
-            # real incident payload (2026-08-06) confirmed no structured `cc`
-            # field exists anywhere in the get-incident response -- if a real
-            # tenant ever has cc data, it would only be inside the raw MIME
-            # body (a separate data path: the `download mime body` action /
-            # vault attachment, not this structured response), which is out
-            # of scope for this function. Left as a harmless no-op rather than
-            # removed, in case `headers` ever does carry one on some tenant.
+            # Cc: best-effort from the raw headers. The get-incident response has no structured cc field; real cc
+            # data is only in the raw MIME, which proofpoint_trap_attachments parses.
             cc_raw = headers.get("Cc") or headers.get("CC") or headers.get("cc") or ""
             for cc_addr in [a.strip() for a in cc_raw.split(",") if a.strip()]:
                 if cc_addr not in seen_cc_emails:
@@ -420,11 +383,7 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
                         "run_automation": False,
                     })
 
-            # Threat URL domains — CONFIRMED (2026-08-06) via the real
-            # ProofpointThreatResponse integration's own source
-            # (get_emails_context: email.get("urls")), not just docs/guesses.
-            # Per-email list, not the flat event-level field this originally
-            # guessed at.
+            # Threat URL domains: the per-email `urls` list.
             for url_val in email.get("urls") or []:
                 url_domain = urllib.parse.urlparse(url_val).hostname
                 if url_domain and url_domain not in seen_domains:
@@ -441,16 +400,8 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
                         "run_automation": False,
                     })
 
-        # Click IP / event-level threatURL — a full field-by-field walk of a
-        # real "reported by user" incident (2026-08-06) confirmed neither
-        # exists on that source type; `events[]` there is just {id, emails}.
-        # Real TRAP events also come from a richer "email flow" (Proofpoint
-        # TAP) source with additional fields (category/severity/attackers/
-        # etc., per a captured XSOAR integration fixture) that this lab
-        # doesn't ingest -- click/threat data may live there instead, under
-        # `events[].attackers[].location`, unexplored. Both left as harmless
-        # no-ops rather than removed, since a TAP-sourced incident could
-        # arrive here in principle even though none has yet.
+        # Click IP / event-level threatURL: absent on "reported by user" incidents; kept as harmless no-ops
+        # for other incident sources.
         threat_url = event.get("threatURL", "")
         if threat_url:
             url_domain = urllib.parse.urlparse(threat_url).hostname

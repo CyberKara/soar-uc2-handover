@@ -402,57 +402,15 @@ def extract_attachments(action=None, success=None, container=None, results=None,
     ## Custom Code Start
     ################################################################################
 
-    # Design notes (kept here because a VPE save replaces the module docstring):
-    # Proofpoint TRAP Attachment Extraction
-    #
-    # Run by proofpoint_trap_orchestrator after proofpoint_trap_detail (label 'proofpoint_trap').
-    # Scans the container for 'MIME Body' artifacts (vaulted raw .eml, created by the
-    # proofpoint_trap connector's on_poll — see FR-21), parses each one for:
-    # - file attachments — vaulted as their own artifact (name 'Email Attachment',
-    # cef.vaultId + cef.fileName + cef.fileHashSha256 + cef.fileType) for
-    # downstream analyst review / future reputation enrichment (UC8). Includes
-    # forwarded emails attached as message/rfc822 (the raw embedded message is
-    # serialized and vaulted like any other attachment — these were silently
-    # skipped before 2026-08-12 because message/rfc822 parts report
-    # is_multipart()=True, tripping the "skip container parts" check meant for
-    # genuine multipart/* wrappers). Flags a MIME-type/filename mismatch
-    # (mimetypes.guess_type vs the part's declared Content-Type) as a possible
-    # disguised-executable signal.
-    # - Cc recipients — parsed directly from the raw MIME headers (getaddresses),
-    # as 'Recipient Email' artifacts (emailRole='cc'), matching PB1's existing
-    # artifact shape. PB1 attempts this too but only from the structured API's
-    # headers dict, which real payloads never populate (see its own comment) —
-    # this is the reliable path.
-    # - Return-Path vs From mismatch — envelope sender vs displayed sender is a
-    # classic spoofing signal, surfaced in the Email Content note.
-    # - the rendered email body (HTML preferred, falls back to plain text) and
-    # auth/routing headers (Authentication-Results, Reply-To, X-Originating-IP,
-    # Received chain) — none of this exists in TRAP's structured "get incident"
-    # API, only in the raw MIME — added as an "Email Content" note per event so
-    # an analyst can read the actual message without downloading the .eml.
-    #
-    # phantom.add_note() sanitizes content through a real (undocumented) tag
-    # allowlist, confirmed live 2026-08-12 by probing it directly: h1/h2/p/b/
-    # ul/li/hr/span/br survive; pre/details/summary/code/div/i are silently
-    # stripped (text kept, tag dropped); <a href=...> keeps the <a> tag but
-    # strips the href attribute, so links never work. So the Email Content
-    # note is not written with add_note() any more: it is a markdown note
-    # posted over REST, and the body is converted to SAFE markdown first
-    # (_email_html_to_markdown in the Global Custom Code) -- scripts/styles
-    # dropped, images as placeholders, links shown as text plus the defanged
-    # target (URL Defense links decoded), hidden text and forms flagged, all
-    # email text escaped. Nothing from the email loads or is clickable.
-    #
-    # Re-scans all MIME Body artifacts on every run (scope "all": they may have been
-    # created before the trigger that started this run, by proofpoint_trap_recheck)
-    # and skips any already marked processed via a data.attachments_extracted marker.
-    #
-    # Trigger: none of its own -- proofpoint_trap_orchestrator calls it; leave it inactive.
+    # Extracts file attachments, Cc recipients and the readable email body from each "MIME Body" artifact.
+    # Run by proofpoint_trap_orchestrator after proofpoint_trap_detail; it has no trigger of its own, so leave it inactive.
+    # Re-scans every MIME Body artifact on each run (scope="all": proofpoint_trap_recheck may have created them before
+    # this trigger) and skips the ones already marked with data.attachments_extracted.
+    # The Email Content note is a markdown note posted over REST: phantom.add_note() strips or mangles the body's
+    # HTML, so the body is converted to escaped markdown first (_email_html_to_markdown).
 
 
-    # Local re-imports — GUI edits recompile/lint each code block in isolation
-    # and don't see module-level imports (same gap already documented for
-    # urllib.parse/uuid elsewhere in this UC's playbooks).
+    # Local imports: each VPE code block is compiled on its own, so module-level imports are not visible.
     import base64
     import hashlib
     import html
@@ -497,8 +455,8 @@ def extract_attachments(action=None, success=None, container=None, results=None,
             continue
 
         source_file_name = mime["file_name"] or "trap-{}.eml".format(artifact_id)
-        # source_data_identifier on the MIME Body artifact is "trap-{incident_id}-mime-{event_id}"
-        # (see proofpoint_trap_connector.py _build_mime_artifact) — recover both IDs from it.
+        # The MIME Body artifact's source_data_identifier is "trap-{incident_id}-mime-{event_id}" (set by
+        # proofpoint_trap_detail): recover both ids from it.
         sdi = resp.get("source_data_identifier") or ""
         sdi_parts = sdi.split("-mime-")
         incident_id = sdi_parts[0].replace("trap-", "", 1) if sdi_parts else "?"
@@ -627,11 +585,8 @@ def extract_attachments(action=None, success=None, container=None, results=None,
             except Exception as e:
                 phantom.debug("Error creating attachment artifact: {}".format(str(e)))
 
-        # Cc recipients — from the raw MIME headers, not TRAP's structured API
-        # (PB1 also tries this from the structured response's headers dict but
-        # real payloads never populate it there, per its own comment; same
-        # artifact shape/SDI pattern here so a duplicate from PB1 would just
-        # dedupe cleanly if that ever changes).
+        # Cc recipients, parsed from the raw MIME headers (TRAP's structured response carries none). Same
+        # artifact shape and identifier as proofpoint_trap_detail, so a duplicate would dedupe cleanly.
         cc_addrs = sorted({addr for _, addr in getaddresses(parsed.get_all("Cc") or []) if addr})
         for cc_addr in cc_addrs:
             cc_artifact = {
@@ -747,7 +702,7 @@ def extract_attachments(action=None, success=None, container=None, results=None,
         # attachments, so future artifact-created triggers on this container
         # don't re-parse it.
         # Updating an artifact re-applies ITS severity to the container, just
-        # as creating one does: PB1 creates MIME Body at the default (medium),
+        # as creating one does: proofpoint_trap_detail creates MIME Body at the default (medium),
         # so this update alone would undo proofpoint_trap_triage's mapping.
         # Setting the artifact to low in the same update leaves the container
         # as it is, and later updates of a low artifact cannot raise it.

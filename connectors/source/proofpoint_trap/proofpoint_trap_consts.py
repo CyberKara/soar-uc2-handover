@@ -36,15 +36,12 @@ DEFAULT_POLL_HOURS = 1
 MAX_RETRIES = 3
 RETRYABLE_STATUS_CODES = [500, 502, 503, 504]
 
-# On-prem date-range cap for created_after/created_before — see uc2_dev_notes.md
+# TRAP's on-prem cap on the created_after/created_before date range
 MAX_POLL_WINDOW_HOURS = 24 * 30
 
-# Initial container severity/sensitivity at ingestion -- asset-configurable
-# (fields "severity"/"sensitivity", same pattern as the stock Timer app),
-# these are only the fallback when the asset config omits them.
-# proofpoint_trap_triage (PB2) later reads the raw TRAP Severity field (cs6
-# on the Event Info artifact) and promotes severity via phantom.set_severity();
-# the Critical/High/Informational -> SOAR mapping lives there, not here.
+# Initial container severity/sensitivity at ingestion; only the fallback when the asset config omits
+# "severity"/"sensitivity". proofpoint_trap_triage later promotes severity from the raw TRAP severity
+# (trapSeverity on the Event Info artifact); the mapping lives there, not here.
 DEFAULT_SEVERITY = "low"
 DEFAULT_SENSITIVITY = "amber"
 

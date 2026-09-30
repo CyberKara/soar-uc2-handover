@@ -14,38 +14,13 @@ from datetime import datetime, timedelta
 
 
 
-# Design notes (kept here because a VPE save replaces the module docstring):
-# Proofpoint TRAP Isolation Notify (PB6)
-#
-# Data playbook manually launched by an analyst from the container, once
-# they've reviewed PB1's enrichment. Emails the container owner a set of
-# isolation-browser links -- the container's own SOAR URL plus every threat
-# URL PB1 found in the incident (from "Threat Domain" artifacts' cef.url) --
-# each wrapped behind a configurable remote-browser-isolation prefix so the
-# analyst can preview them without direct exposure. Independent entry point,
-# same convention as PB4/PB5 -- no chaining, no writes back to TRAP.
-#
-# Recipient resolution (design decision, see uc2_implementation_plan.md's
-# PB6 section): TRAP containers never get an owner assigned automatically --
-# the same gap PB4/PB5 work around with a prompt-approval fallback. Email
-# delivery can't use that fallback (a real address is required, not just a
-# SOAR username), so this playbook requires the analyst to have already
-# self-assigned the *container itself* as owner AND moved the *container's
-# own* status to "open" in the SOAR UI (distinct from PB4's TRAP-side
-# assignee/status calls, which touch the remote TRAP incident, not the
-# container's own owner/status fields) -- fails fast with no silent fallback
-# if either is missing, since an isolation link must reach a real person.
-# Owner id -> email via GET /rest/ph_user/<id>.
-#
-# Delivery: new "smtp" asset (phsmtp reference connector,
-# soar-connectors/reference_connectors/phantom-apps/Apps/phsmtp/), mock-first
-# against migration/mock-backend/mock_smtp.py -- see that file's docstring.
-#
-# Trigger: Manual run by analyst
-# Playbook input: isolation_browser_url (default:
-# https://my_isolated_browser/browser?url=) -- deliberately not hardcoded,
-# per constraints.md's no-hardcoded-config rule; this is a per-deployment
-# value, not project-fixed.
+# Manual playbook: emails the container owner isolation-browser links (the case's own SOAR URL plus every threat
+# URL found in the incident), each behind the isolation_browser_url prefix. Nothing is written back to TRAP.
+# The analyst must first make themself the container's owner and set its status to "open": TRAP containers get
+# no owner automatically and the email needs a real address (owner -> email via /rest/ph_user/<id>), so the
+# playbook fails fast instead of falling back. Delivery goes through the smtp asset.
+# isolation_browser_url defaults to a placeholder (https://my_isolated_browser/browser?url=): set it per
+# deployment, or the links are dead.
 
 import urllib.parse
 
@@ -221,12 +196,8 @@ def resolve_recipient_and_build_links(action=None, success=None, container=None,
         )
         return
 
-    # container['owner'] is the username string inside playbook execution
-    # context, NOT the numeric REST-API id the raw GET /rest/container
-    # response shows (confirmed live 2026-08-17, container 1661: REST showed
-    # owner=1/owner_name="soar_local_admin", but this block saw
-    # owner="soar_local_admin") -- filter by username instead of assuming a
-    # path-friendly numeric id.
+    # container['owner'] is the owner's username inside playbook execution (the REST API shows a numeric id),
+    # so filter ph_user by username.
     try:
         resp = phantom.requests.get(
             uri=phantom.build_phantom_rest_url("ph_user") + '?_filter_username="{}"&page_size=1'.format(owner_id),
@@ -249,16 +220,12 @@ def resolve_recipient_and_build_links(action=None, success=None, container=None,
         )
         return
 
-    # playbook_input: must be its own collect2 call -- mixing playbook_input:
-    # datapaths with other datapaths in one collect2 call throws TypeError
-    # (constraints.md).
+    # playbook_input must be its own collect2 call: mixing it with other datapaths raises TypeError.
     input_rows = phantom.collect2(container=container, datapath=["playbook_input:isolation_browser_url"])
     isolation_browser_url = (input_rows[0][0] if input_rows and input_rows[0][0] else None) or DEFAULT_ISOLATION_BROWSER_URL
 
-    # Threat Domain artifacts are the only ones with cef.url set -- collect
-    # across the whole container (scope="all", required when re-running on
-    # an existing container per constraints.md) and drop the Nones instead
-    # of also fetching artifact:*.name to filter by.
+    # Threat Domain artifacts are the only ones with cef.url set: collect across the whole container
+    # (scope="all", needed on re-runs) and drop the Nones.
     url_rows = phantom.collect2(container=container, datapath=["artifact:*.cef.url"], scope="all")
     threat_urls = sorted({row[0] for row in url_rows if row and row[0]}) if url_rows else []
 

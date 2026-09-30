@@ -14,17 +14,9 @@ from datetime import datetime, timedelta
 
 
 
-# Design notes (kept here because a VPE save replaces the module docstring):
-# Proofpoint TRAP Acknowledge (PB4)
-#
-# Data playbook manually launched by an analyst from the container, once
-# they've reviewed the artifacts/enrichment notes PB1-PB3 produced. Prompts
-# for a comment, then writes three things to the real TRAP incident: the
-# comment, an assignee marking it claimed by SOAR, and a status change from
-# new to open. Independent of proofpoint_trap_triage/proofpoint_trap_close —
-# no chaining.
-#
-# Trigger: Manual run by analyst
+# Manual playbook: once the analyst has reviewed the enrichment, prompts for a comment, then writes it to the
+# TRAP incident together with an assignee marking it claimed by SOAR and the status change new -> open.
+# Independent of proofpoint_trap_triage and proofpoint_trap_close: no chaining.
 
 ACK_ASSIGNEE = "SOAR"
 ACK_FALLBACK_COMMENT = "Acknowledged by SOAR"

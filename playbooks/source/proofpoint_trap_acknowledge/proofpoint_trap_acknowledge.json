@@ -499,7 +499,7 @@
             },
             "notes": "",
             "description": "Data playbook (PB4) manually launched by an analyst from the container once they've reviewed the artifacts/notes PB1-PB3 produced. Prompts for a comment, then assigns the TRAP incident to SOAR, moves its status from new to open, and posts the comment. Independent of proofpoint_trap_triage/proofpoint_trap_close.",
-            "globalCustomCode": "\n\n\n# Design notes (kept here because a VPE save replaces the module docstring):\n# Proofpoint TRAP Acknowledge (PB4)\n#\n# Data playbook manually launched by an analyst from the container, once\n# they've reviewed the artifacts/enrichment notes PB1-PB3 produced. Prompts\n# for a comment, then writes three things to the real TRAP incident: the\n# comment, an assignee marking it claimed by SOAR, and a status change from\n# new to open. Independent of proofpoint_trap_triage/proofpoint_trap_close \u2014\n# no chaining.\n#\n# Trigger: Manual run by analyst\n\nACK_ASSIGNEE = \"SOAR\"\nACK_FALLBACK_COMMENT = \"Acknowledged by SOAR\""
+            "globalCustomCode": "\n\n\n# Manual playbook: once the analyst has reviewed the enrichment, prompts for a comment, then writes it to the\n# TRAP incident together with an assignee marking it claimed by SOAR and the status change new -> open.\n# Independent of proofpoint_trap_triage and proofpoint_trap_close: no chaining.\n\nACK_ASSIGNEE = \"SOAR\"\nACK_FALLBACK_COMMENT = \"Acknowledged by SOAR\""
         },
         "input_spec": [
             {

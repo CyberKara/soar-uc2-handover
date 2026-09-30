@@ -14,30 +14,12 @@ from datetime import datetime, timedelta
 
 
 
-# Design notes (kept here because a VPE save replaces the module docstring):
-# Proofpoint TRAP Recheck
-#
-# Automation playbook triggered on container creation for label
-# 'proofpoint_trap_recheck' (a Timer asset tick, not a real TRAP incident
-# container). Periodically re-scans the whole in-window TRAP incident
-# backlog (all states, not just poll_state="new") for incidents that have
-# already been ingested into SOAR but changed since -- a field edit,
-# disposition change, or newly-linked event that on_poll's own checkpoint-
-# based main pass would never see again once an incident has a container.
-#
-# Moved out of the connector's on_poll 2026-08-18 (previously
-# _run_recheck_pass/_incident_signature) -- see uc2_implementation_plan.md's
-# "fold into pb" entry for the reasoning. Custom list
-# `proofpoint_trap_recheck_state` (columns: incident_id, signature) replaces
-# the connector's self._state["incident_hashes"]/["incident_event_ids"]
-# persistent state -- durable across playbook runs the same way, just
-# playbook-owned instead of connector-owned. Dropped the connector's
-# newly-linked-event diffing in favor of a simpler design: any detected
-# change re-fetches/re-vaults ALL of that incident's MIME bodies, relying on
-# the already-proven SDI-based artifact dedup (native "add artifact" 400s
-# harmlessly on a duplicate SDI) instead of tracking per-incident event_ids.
-#
-# Trigger: Container created on label 'proofpoint_trap_recheck' (Timer asset)
+# Timer-driven: re-scans the whole in-window TRAP backlog (all states) for incidents that were already ingested
+# but changed since (field edit, disposition change, newly linked event), which on_poll's checkpoint never revisits.
+# Durable state is the custom list proofpoint_trap_recheck_state (incident_id, signature). Any detected change
+# re-fetches and re-vaults all of the incident's MIME bodies; artifacts the container already carries are skipped,
+# so no per-incident event tracking is needed.
+# Trigger: container created on label 'proofpoint_trap_recheck' (the Timer asset).
 
 import hashlib
 
@@ -53,9 +35,7 @@ def _get_field_value(incident, field_name):
 
 
 def _build_event_info_cef(incident):
-    # Duplicated from proofpoint_trap_connector.py's _build_event_info_cef
-    # -- the cost of moving this off the connector (see this playbook's
-    # module docstring). Keep both in sync if either changes.
+    # Copy of proofpoint_trap_connector.py's _build_event_info_cef: keep both in sync.
     inc_id = incident.get("id", "")
     disposition = _get_field_value(incident, "Abuse Disposition")
     sub_disposition = _get_field_value(incident, "Sub Disposition")
@@ -173,9 +153,7 @@ def process_incidents(action=None, success=None, container=None, results=None, h
     incidents = result_data[0][1] or []
     phantom.debug("Recheck cycle: {} incident(s) in window".format(len(incidents)))
 
-    # Read prior state. Row 0 is the header ("incident_id") -- skip it,
-    # same convention as cyberark_rotation_orchestrator's STATE_LIST_NAME
-    # read-modify-write pattern.
+    # Read prior state. Row 0 is the header ("incident_id"); skip it.
     known_signatures = {}
     read_success, _read_msg, rows = phantom.get_list(list_name=STATE_LIST_NAME)
     if read_success and rows:
@@ -367,13 +345,8 @@ def dispatch_updates(action=None, success=None, container=None, results=None, ha
             continue
         mime_by_incident.setdefault(str(inc_id), []).append((event_id, vault_id, file_name))
 
-    # phantom.add_artifact() targets the CURRENT run's own container in
-    # every existing usage in this repo -- this playbook's own `container`
-    # is the Timer tick's container, not the target TRAP incident's, so
-    # this is a genuine cross-container write. Raw REST POST instead, same
-    # idiom PB3 (proofpoint_trap_attachments) already uses for exactly this
-    # reason -- container_id goes explicitly in the body, no ambiguity
-    # about execution context.
+    # phantom.add_artifact() writes to the current run's container, which here is the Timer tick's, not the
+    # incident's. Use a REST POST with an explicit container_id instead (as proofpoint_trap_attachments does).
     total_artifacts = 0
     for row in to_recheck:
         inc_id = row["incident_id"]
@@ -458,10 +431,7 @@ def dispatch_updates(action=None, success=None, container=None, results=None, ha
 
     phantom.debug("Created {} artifact(s) across {} rechecked incident(s)".format(total_artifacts, len(to_recheck)))
 
-    # Update state only after the artifact dispatch attempt above -- best
-    # effort, matching this UC's existing "attempted work, not
-    # platform-verified landed" convention (see PB1's finalize_event_artifacts
-    # removal, uc2_implementation_plan.md 2026-08-13).
+    # Update state only after the artifact dispatch attempt above. Best effort: the writes are attempted, not confirmed.
     try:
         new_state = json.loads(phantom.get_run_data(key="process_incidents:new_state") or "{}")
         content = [["incident_id", "signature"]] + [[k, v] for k, v in sorted(new_state.items())]

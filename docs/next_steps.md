@@ -43,6 +43,32 @@ Other merge notes:
   half (`proofpoint_trap_recheck`). The playbook half relies on the new connector being installed;
   say so in the upgrade note.
 
+### Status update 2026-09-30: code-comment cleanup already done
+
+A separate cleanup pass moved long comments out of the connector and playbook code into
+`docs/design_notes.md`. It changes how NS-1 should start:
+
+- **Line numbers in the merged prompt are stale again** (about 200 comment lines are gone). Re-locate
+  every finding by the code it names, not by number.
+- **A8 comment rewording is done**: the comments citing `uc2_dev_notes.md` and
+  `proofpoint_trap_api_reference.md` are gone from the connector and consts, and the stale `cs6`
+  comment now says `trapSeverity`. Only the VPE-generated "Bridge block" banners in acknowledge, close
+  and isolation_notify still mention another project's playbook; they are not stored in the JSON, so
+  they were left as generated.
+- **Connector source no longer matches `proofpoint_trap-v1.0.37.tgz`.** The difference is comments and
+  one docstring only (the ASTs are identical), and the tgz and `app_version` were deliberately not
+  touched. Build step 1 ("prove the script on unmodified source") must therefore use the pre-cleanup
+  source (`git show e0fef59:connectors/source/proofpoint_trap/...`), which still matches the tgz. The
+  cleanup then ships with the 1.0.38 bump.
+- **Five playbook tgz were already rebuilt** (acknowledge, attachments, detail, isolation_notify,
+  recheck). A scratch builder reproduced the tar layer of all 10 shipped playbook tgz exactly: PAX
+  format, mode 0644, uid/gid 0, empty user and group names, mtime 0, `.py` then `.json`. The gzip
+  header carries a build-time stamp, so bytes can never match; set gzip mtime to 0 for repeatable
+  builds. The same approach can seed the build script.
+- **Baselines for the checks**: at this point pyflakes reports 44 findings in the connector (3 in
+  attachments and detail, 2 in isolation_notify and recheck, 1 in acknowledge) and bandit reports 1
+  issue in the connector. Compare against these instead of expecting zero.
+
 ### Decisions to confirm before starting (ask in one `AskUserQuestion`)
 
 1. Bump `app_version` 1.0.37 to **1.0.38**, as a single release for all connector-side changes?

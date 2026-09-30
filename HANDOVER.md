@@ -18,7 +18,7 @@ in an environment with no network access back to this repo or to `soar8`.
 | `playbooks/source/` | Same CFs/playbooks, extracted — for reading, not for import |
 | `assets/*.json` | Asset config templates (credentials redacted — see below) |
 | `custom_lists/*.json` | Custom list schema (header row only — see the custom-list section below) |
-| `docs/` | Implementation plan doc, for full design context |
+| `docs/` | Implementation plan doc, for full design context; `design_notes.md` holds the design rationale, observed TRAP/SOAR behaviours and change history that used to be code comments |
 
 ## [!] Upgrading over an earlier install — read this first
 

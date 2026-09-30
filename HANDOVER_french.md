@@ -18,7 +18,7 @@ dans un environnement sans accès réseau vers ce dépôt ni vers `soar8`.
 | `playbooks/source/` | Mêmes CF/playbooks, extraits — pour lecture, pas pour import |
 | `assets/*.json` | Modèles de configuration d'assets (identifiants masqués — voir ci-dessous) |
 | `custom_lists/*.json` | Schéma de la/les liste(s) personnalisée(s) (en-têtes uniquement — voir la section dédiée ci-dessous) |
-| `docs/` | Document de plan d'implémentation, pour le contexte de conception complet |
+| `docs/` | Document de plan d'implémentation, pour le contexte de conception complet ; `design_notes.md` (en anglais) regroupe la justification de conception, les comportements observés de TRAP/SOAR et l'historique des changements qui figuraient auparavant en commentaires dans le code |
 
 ## [!] Mise à niveau d'une installation existante — à lire en premier
 
