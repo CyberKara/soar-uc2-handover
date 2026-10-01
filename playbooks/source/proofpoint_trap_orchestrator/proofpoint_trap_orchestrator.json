@@ -193,7 +193,7 @@
         "version": "8.6.0.530",
         "playbook_trigger": "artifact_created"
     },
-    "create_time": "2026-10-01T11:01:33.154526Z",
+    "create_time": "2026-10-01T14:18:34.570940Z",
     "draft_mode": false,
     "labels": [
         "proofpoint_trap"

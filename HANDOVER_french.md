@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Paquet de transfert (déploiement air-gapped)
 
-Généré le 2026-10-01 11:02 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
+Généré le 2026-10-01 15:08 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
 
 Ce paquet est autonome — tout ce qu'il faut pour déployer ce cas d'usage manuellement
 dans un environnement sans accès réseau vers ce dépôt ni vers `soar8`.
@@ -49,6 +49,8 @@ d'installation.
 - **Un orchestrateur lance les playbooks dans l'ordre (2026-09-30).** Les playbooks d'automatisation démarraient ensemble sur le même déclencheur et entraient en concurrence : les pièces jointes cherchaient des e-mails que `proofpoint_trap_detail` n'avait pas encore téléchargés, le résumé manquait ce que les autres écrivaient encore. Le nouveau playbook d'automatisation `proofpoint_trap_orchestrator` (label `proofpoint_trap`) lance désormais `proofpoint_trap_detail`, `proofpoint_trap_attachments`, `proofpoint_trap_triage` et `proofpoint_trap_summary` l'un après l'autre, chacun attendant la fin du précédent. Importez-le et activez-le ; réimportez ces quatre playbooks et **désactivez-les** — cela remplace toute étape « réactivez » les concernant dans les notes ci-dessus. `proofpoint_trap_recheck` reste actif. L'artefact `Enrichment Complete` ne lance plus l'automatisation. Si vous avez créé vous-même un `proofpoint_trap_orchestrator`, l'import le remplace. Également dans `proofpoint_trap_detail` : une adresse d'expéditeur de la liste personnalisée `proofpoint_trap_excluded_senders` n'a plus d'artefact `Sender Email`, ni son domaine d'artefact `Sender Domain` (sauf si un autre expéditeur le partage) ; les artefacts déjà présents sur un conteneur restent.
 
 - **`status` résiste à un enregistrement dans l'éditeur de playbooks (2026-10-01).** Après un enregistrement dans l'éditeur de SOAR 8.6, `proofpoint_trap_acknowledge`, `proofpoint_trap_close` et `proofpoint_trap_isolation_notify` renvoyaient une liste vide au lieu de `failed` quand une exécution s'arrêtait tôt, et chaque sortie non renseignée revenait sous forme de liste vide au lieu d'être vide. Faire pointer leurs blocs d'action vers les noms de vos actifs est un tel enregistrement. Réimportez ces trois playbooks (playbooks de données : rien à activer) ; refaites pointer les noms d'actifs si vous les aviez modifiés.
+
+- **`proofpoint_trap_close` garde sa note quand l'invite n'est pas approuvée (2026-10-01).** Après un enregistrement dans l'éditeur de SOAR 8.6, une fermeture dont l'invite avait expiré ou été refusée se terminait sans note et avec le statut `failed` : l'éditeur faisait attendre la note de fermeture après le commentaire TRAP, qui ne s'exécute que pour une fermeture approuvée. Ce chemin a désormais son propre bloc, **add expired note**. Réimportez `proofpoint_trap_close` (playbook de données : rien à activer) et refaites pointer ses noms d'actifs si vous les aviez modifiés ; l'enregistrer est sans risque.
 
 ## Ordre d'installation
 

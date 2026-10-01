@@ -2,11 +2,11 @@ playbooks/source/proofpoint_trap_acknowledge/proofpoint_trap_acknowledge.json:ge
 playbooks/source/proofpoint_trap_acknowledge/proofpoint_trap_acknowledge.json:generic-api-key:243
 playbooks/source/proofpoint_trap_acknowledge/proofpoint_trap_acknowledge.json:generic-api-key:310
 playbooks/source/proofpoint_trap_acknowledge/proofpoint_trap_acknowledge.json:generic-api-key:388
-playbooks/source/proofpoint_trap_close/proofpoint_trap_close.json:generic-api-key:145
-playbooks/source/proofpoint_trap_close/proofpoint_trap_close.json:generic-api-key:263
-playbooks/source/proofpoint_trap_close/proofpoint_trap_close.json:generic-api-key:341
-playbooks/source/proofpoint_trap_close/proofpoint_trap_close.json:generic-api-key:480
-playbooks/source/proofpoint_trap_close/proofpoint_trap_close.json:generic-api-key:497
+playbooks/source/proofpoint_trap_close/proofpoint_trap_close.json:generic-api-key:152
+playbooks/source/proofpoint_trap_close/proofpoint_trap_close.json:generic-api-key:270
+playbooks/source/proofpoint_trap_close/proofpoint_trap_close.json:generic-api-key:348
+playbooks/source/proofpoint_trap_close/proofpoint_trap_close.json:generic-api-key:483
+playbooks/source/proofpoint_trap_close/proofpoint_trap_close.json:generic-api-key:500
 playbooks/source/proofpoint_trap_detail/proofpoint_trap_detail.json:generic-api-key:161
 playbooks/source/proofpoint_trap_detail/proofpoint_trap_detail.json:generic-api-key:195
 playbooks/source/proofpoint_trap_detail/proofpoint_trap_detail.json:generic-api-key:336

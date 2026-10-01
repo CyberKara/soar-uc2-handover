@@ -61,6 +61,7 @@ def prompt_close_reason(action=None, success=None, container=None, results=None,
     ## Custom Code Start
     ################################################################################
     ################################################################################
+    ################################################################################
 
     # The prompt is raised from code, not from a native prompt block: a VPE save
     # regenerates prompt blocks whole (they have no Custom Code), which would drop
@@ -107,8 +108,12 @@ closure reason as a comment. Provide a closure reason."""
 
     ################################################################################
     ################################################################################
+    ################################################################################
     ## Custom Code End
     ################################################################################
+
+    phantom.save_block_result(key="prompt_close_reason__inputs:0:playbook_input:approver", value=json.dumps(playbook_input_approver_values))
+    phantom.save_block_result(key="prompt_close_reason__inputs:1:playbook_input:respond_in_mins", value=json.dumps(playbook_input_respond_in_mins_values))
 
     phantom.save_block_result(key="prompt_close_reason_called", value="True")
 
@@ -283,24 +288,7 @@ def add_trap_comment(action=None, success=None, container=None, results=None, ha
     ## Custom Code End
     ################################################################################
 
-    phantom.act("add comment", parameters=parameters, name="add_trap_comment", assets=["proofpoint_trap_mock"], callback=join_add_close_note)
-
-    return
-
-
-@phantom.playbook_block()
-def join_add_close_note(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
-    phantom.debug("join_add_close_note() called")
-
-    # if the joined function has already been called, do nothing
-    if phantom.get_run_data(key="join_add_close_note_called"):
-        return
-
-    # save the state that the joined function has now been called
-    phantom.save_run_data(key="join_add_close_note_called", value="add_close_note")
-
-    # call connected block "add_close_note"
-    add_close_note(container=container, handle=handle)
+    phantom.act("add comment", parameters=parameters, name="add_trap_comment", assets=["proofpoint_trap_mock"], callback=add_close_note)
 
     return
 
@@ -322,6 +310,7 @@ def add_close_note(action=None, success=None, container=None, results=None, hand
 
     ################################################################################
     ## Custom Code Start
+    ################################################################################
     ################################################################################
     ################################################################################
 
@@ -384,6 +373,7 @@ def add_close_note(action=None, success=None, container=None, results=None, hand
     playbook_output = {"status": outcome, "incident_id": incident_id, "reason": reason}
     phantom.save_run_data(key="playbook_output", value=json.dumps(playbook_output))
 
+    ################################################################################
     ################################################################################
     ################################################################################
     ## Custom Code End
@@ -479,7 +469,65 @@ def check_prompt_status(action=None, success=None, container=None, results=None,
         return
 
     # check for 'else' condition 2
-    join_add_close_note(action=action, success=success, container=container, results=results, handle=handle)
+    add_expired_note(action=action, success=success, container=container, results=results, handle=handle)
+
+    return
+
+
+@phantom.playbook_block()
+def add_expired_note(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
+    phantom.debug("add_expired_note() called")
+
+    ################################################################################
+    # Add a closure note when the prompt got no approval: no TRAP action taken.
+    ################################################################################
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+    ################################################################################
+    ################################################################################
+
+
+    # The prompt got no approval (expired or rejected): no TRAP action ran.
+    # Its own block, not a second input into add_close_note: the 8.6 VPE
+    # regenerates a join over two inputs that waits for BOTH paths, ignoring
+    # notRequiredJoins, so this path would end without a note after a save.
+    incident_id = json.loads(phantom.get_run_data(key="read_incident_id:incident_id"))
+    reason = json.loads(phantom.get_run_data(key="process_close_reason:reason") or '""')
+    prompt_status = json.loads(phantom.get_run_data(key="process_close_reason:prompt_status") or '""')
+
+    note_lines = [
+        "# TRAP Closure",
+        "**Incident ID:** {}".format(incident_id),
+        "**Reason:** {}".format(reason),
+        "**Prompt status:** {}".format(prompt_status),
+        "**Time:** {}".format(datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+        "",
+        "Analyst prompt expired without response. No TRAP action taken.",
+    ]
+
+    phantom.add_note(
+        container=container,
+        note_type="general",
+        title="TRAP Close - {}".format(datetime.now().strftime("%Y-%m-%d %H:%M")),
+        content="\n".join(note_lines),
+        note_format="markdown",  # the content is markdown; add_note() defaults to html
+    )
+
+    phantom.debug("Expired-prompt note added")
+
+    # Playbook outputs, read by on_finish.
+    playbook_output = {"status": "expired", "incident_id": incident_id, "reason": reason}
+    phantom.save_run_data(key="playbook_output", value=json.dumps(playbook_output))
+
+    ################################################################################
+    ################################################################################
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
+    phantom.save_block_result(key="add_expired_note_called", value="True")
 
     return
 
@@ -489,13 +537,14 @@ def on_finish(container, summary):
     phantom.debug("on_finish() called")
 
     output = {
-        "status": None,
-        "incident_id": None,
-        "reason": None,
+        "status": [],
+        "incident_id": [],
+        "reason": [],
     }
 
     ################################################################################
     ## Custom Code Start
+    ################################################################################
     ################################################################################
     ################################################################################
 
@@ -514,10 +563,10 @@ def on_finish(container, summary):
 
     ################################################################################
     ################################################################################
+    ################################################################################
     ## Custom Code End
     ################################################################################
 
     phantom.save_playbook_output_data(output=output)
 
     return
-

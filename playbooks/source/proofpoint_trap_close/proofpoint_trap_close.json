@@ -4,7 +4,7 @@
     "category": "Email Abuse",
     "coa": {
         "data": {
-            "hash": "",
+            "hash": "7052eb2b5fc8294b8623cd4fc53b0516241344e9",
             "edges": [
                 {
                     "id": "port_0_to_port_2",
@@ -76,7 +76,7 @@
                     "targetPort": "5_in"
                 },
                 {
-                    "id": "port_9_to_port_7",
+                    "id": "port_9_to_port_10",
                     "conditions": [
                         {
                             "index": 1,
@@ -85,14 +85,21 @@
                     ],
                     "sourceNode": "9",
                     "sourcePort": "9_out",
-                    "targetNode": "7",
-                    "targetPort": "7_in"
+                    "targetNode": "10",
+                    "targetPort": "10_in"
+                },
+                {
+                    "id": "port_10_to_port_1",
+                    "sourceNode": "10",
+                    "sourcePort": "10_out",
+                    "targetNode": "1",
+                    "targetPort": "1_in"
                 }
             ],
             "nodes": {
                 "0": {
-                    "x": 190,
-                    "y": -6.394884621840902e-14,
+                    "x": 1090,
+                    "y": 200,
                     "id": "0",
                     "data": {
                         "id": "0",
@@ -107,8 +114,8 @@
                     "warnings": {}
                 },
                 "1": {
-                    "x": 190,
-                    "y": 1400,
+                    "x": 1090,
+                    "y": 1738,
                     "id": "1",
                     "data": {
                         "id": "1",
@@ -125,8 +132,8 @@
                     "warnings": {}
                 },
                 "2": {
-                    "x": 190,
-                    "y": 100,
+                    "x": 1070,
+                    "y": 348,
                     "id": "2",
                     "data": {
                         "id": "2",
@@ -188,8 +195,8 @@
                     "warnings": {}
                 },
                 "3": {
-                    "x": 190,
-                    "y": 300,
+                    "x": 1070,
+                    "y": 673,
                     "id": "3",
                     "data": {
                         "id": "3",
@@ -215,8 +222,8 @@
                     "warnings": {}
                 },
                 "4": {
-                    "x": 190,
-                    "y": 500,
+                    "x": 1070,
+                    "y": 850,
                     "id": "4",
                     "data": {
                         "id": "4",
@@ -242,8 +249,8 @@
                     "warnings": {}
                 },
                 "5": {
-                    "x": 190,
-                    "y": 700,
+                    "x": 900,
+                    "y": 1207,
                     "id": "5",
                     "data": {
                         "id": "5",
@@ -320,8 +327,8 @@
                     "warnings": {}
                 },
                 "6": {
-                    "x": 190,
-                    "y": 900,
+                    "x": 900,
+                    "y": 1384,
                     "id": "6",
                     "data": {
                         "id": "6",
@@ -393,8 +400,8 @@
                     "warnings": {}
                 },
                 "7": {
-                    "x": 190,
-                    "y": 1150,
+                    "x": 900,
+                    "y": 1561,
                     "id": "7",
                     "data": {
                         "id": "7",
@@ -404,11 +411,7 @@
                             "note": "Summary note with reason and action results. Sets container status=closed on a successful TRAP close.",
                             "customName": "add close note",
                             "description": "Add closure summary note to container.",
-                            "customNameId": 0,
-                            "notRequiredJoins": [
-                                "add_trap_comment",
-                                "process_close_reason"
-                            ]
+                            "customNameId": 0
                         },
                         "functionId": 6,
                         "functionName": "add_close_note",
@@ -425,8 +428,8 @@
                     "warnings": {}
                 },
                 "8": {
-                    "x": 190,
-                    "y": 199.99999999999997,
+                    "x": 1070,
+                    "y": 496,
                     "id": "8",
                     "data": {
                         "id": "8",
@@ -453,8 +456,8 @@
                     "warnings": {}
                 },
                 "9": {
-                    "x": 190,
-                    "y": 600,
+                    "x": 1150,
+                    "y": 1027,
                     "id": "9",
                     "data": {
                         "id": "9",
@@ -508,6 +511,30 @@
                     "type": "decision",
                     "errors": {},
                     "warnings": {}
+                },
+                "10": {
+                    "x": 1240,
+                    "y": 1561,
+                    "id": "10",
+                    "data": {
+                        "id": "10",
+                        "type": "code",
+                        "advanced": {
+                            "join": [],
+                            "note": "Expired or rejected prompt: closure note only, no TRAP action. Own block so add_close_note keeps a single input (no generated join).",
+                            "customName": "add expired note",
+                            "description": "Add a closure note when the prompt got no approval: no TRAP action taken.",
+                            "customNameId": 0
+                        },
+                        "functionId": 9,
+                        "functionName": "add_expired_note",
+                        "inputParameters": [],
+                        "outputVariables": []
+                    },
+                    "type": "code",
+                    "errors": {},
+                    "userCode": "    ################################################################################\n    ################################################################################\n\n\n    # The prompt got no approval (expired or rejected): no TRAP action ran.\n    # Its own block, not a second input into add_close_note: the 8.6 VPE\n    # regenerates a join over two inputs that waits for BOTH paths, ignoring\n    # notRequiredJoins, so this path would end without a note after a save.\n    incident_id = json.loads(phantom.get_run_data(key=\"read_incident_id:incident_id\"))\n    reason = json.loads(phantom.get_run_data(key=\"process_close_reason:reason\") or '\"\"')\n    prompt_status = json.loads(phantom.get_run_data(key=\"process_close_reason:prompt_status\") or '\"\"')\n\n    note_lines = [\n        \"# TRAP Closure\",\n        \"**Incident ID:** {}\".format(incident_id),\n        \"**Reason:** {}\".format(reason),\n        \"**Prompt status:** {}\".format(prompt_status),\n        \"**Time:** {}\".format(datetime.now().strftime(\"%Y-%m-%d %H:%M:%S\")),\n        \"\",\n        \"Analyst prompt expired without response. No TRAP action taken.\",\n    ]\n\n    phantom.add_note(\n        container=container,\n        note_type=\"general\",\n        title=\"TRAP Close - {}\".format(datetime.now().strftime(\"%Y-%m-%d %H:%M\")),\n        content=\"\\n\".join(note_lines),\n        note_format=\"markdown\",  # the content is markdown; add_note() defaults to html\n    )\n\n    phantom.debug(\"Expired-prompt note added\")\n\n    # Playbook outputs, read by on_finish.\n    playbook_output = {\"status\": \"expired\", \"incident_id\": incident_id, \"reason\": reason}\n    phantom.save_run_data(key=\"playbook_output\", value=json.dumps(playbook_output))\n\n    ################################################################################\n    ################################################################################\n",
+                    "warnings": {}
                 }
             },
             "notes": "",
@@ -557,10 +584,10 @@
         "version": "8.6.0.530",
         "playbook_trigger": "artifact_created"
     },
-    "create_time": "2026-10-01T11:01:21.624402Z",
+    "create_time": "2026-10-01T14:21:35.527363Z",
     "draft_mode": false,
     "labels": [
-        "proofpoint_trap"
+        "*"
     ],
     "tags": [
         "proofpoint_trap",
