@@ -517,6 +517,11 @@ def on_finish(container, summary):
     raw_output = phantom.get_run_data(key="playbook_output")
     if raw_output:
         output.update(json.loads(raw_output))
+    # The 8.6 VPE initialises every output above to [] (8.5 wrote None), so an
+    # output no block set is normalised to null here, whichever form a save wrote.
+    for key, value in output.items():
+        if value == []:
+            output[key] = None
     if output["status"] is None:
         output["status"] = "failed"
 

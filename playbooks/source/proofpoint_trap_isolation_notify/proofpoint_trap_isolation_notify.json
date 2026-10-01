@@ -81,7 +81,7 @@
                     },
                     "type": "end",
                     "errors": {},
-                    "userCode": "    ################################################################################\n    ################################################################################\n\n    # Populate the generated `output` dict; the save after Custom Code End emits it.\n    # No block recorded an outcome (e.g. the run stopped early): report failed.\n    raw_output = phantom.get_run_data(key=\"playbook_output\")\n    if raw_output:\n        output.update(json.loads(raw_output))\n    if output[\"status\"] is None:\n        output[\"status\"] = \"failed\"\n\n    ################################################################################\n    ################################################################################\n",
+                    "userCode": "    ################################################################################\n    ################################################################################\n\n    # Populate the generated `output` dict; the save after Custom Code End emits it.\n    # No block recorded an outcome (e.g. the run stopped early): report failed.\n    raw_output = phantom.get_run_data(key=\"playbook_output\")\n    if raw_output:\n        output.update(json.loads(raw_output))\n    # The 8.6 VPE initialises every output above to [] (8.5 wrote None), so an\n    # output no block set is normalised to null here, whichever form a save wrote.\n    for key, value in output.items():\n        if value == []:\n            output[key] = None\n    if output[\"status\"] is None:\n        output[\"status\"] = \"failed\"\n\n    ################################################################################\n    ################################################################################\n",
                     "warnings": {}
                 },
                 "2": {
@@ -357,7 +357,7 @@
         "version": "8.6.0.530",
         "playbook_trigger": "artifact_created"
     },
-    "create_time": "2026-09-30T18:42:38.349420Z",
+    "create_time": "2026-10-01T11:01:24.575087Z",
     "draft_mode": false,
     "labels": [
         "proofpoint_trap"
