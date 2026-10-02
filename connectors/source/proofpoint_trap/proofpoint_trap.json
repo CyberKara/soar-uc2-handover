@@ -10,7 +10,7 @@
     "logo_dark": "logo_dark.svg",
     "publisher": "Ted",
     "license": "Copyright (c) 2026",
-    "app_version": "1.0.37",
+    "app_version": "1.0.38",
     "utctime_updated": "2026-08-20T00:00:00.000000Z",
     "package_name": "phantom_proofpoint_trap",
     "main_module": "proofpoint_trap_connector.py",
@@ -587,7 +587,7 @@
                     "order": 1
                 },
                 "detail": {
-                    "description": "Comment body (optional)",
+                    "description": "Comment body (optional; sent empty when blank)",
                     "data_type": "string",
                     "required": false,
                     "order": 2

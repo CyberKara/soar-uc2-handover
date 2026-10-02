@@ -463,6 +463,22 @@ def extract_attachments(action=None, success=None, container=None, results=None,
 
     container_id = container.get("id")
 
+    # Addresses the operator wants left out (custom list
+    # proofpoint_trap_excluded_email, same rule as proofpoint_trap_detail): a
+    # row counts when its email column holds an address and enabled is "yes".
+    # Such an address gets no Cc Recipient Email artifact.
+    excluded_addresses = set()
+    list_ok, list_message, list_rows = phantom.get_list(list_name="proofpoint_trap_excluded_email")
+    if list_ok:
+        for row in list_rows or []:
+            row = list(row or []) + [None] * 4
+            address = str(row[0] or "").strip().lower()
+            enabled = str(row[3] or "").strip().lower()
+            if "@" in address and enabled == "yes":
+                excluded_addresses.add(address)
+    else:
+        phantom.debug("No proofpoint_trap_excluded_email list ({}): every address counts".format(list_message))
+
     mime_rows = phantom.collect2(
         container=container,
         datapath=["artifact:*.name", "artifact:*.id", "artifact:*.cef.vaultId", "artifact:*.cef.fileName"],
@@ -632,7 +648,8 @@ def extract_attachments(action=None, success=None, container=None, results=None,
         # real payloads never populate it there, per its own comment; same
         # artifact shape/SDI pattern here so a duplicate from PB1 would just
         # dedupe cleanly if that ever changes).
-        cc_addrs = sorted({addr for _, addr in getaddresses(parsed.get_all("Cc") or []) if addr})
+        cc_addrs = sorted({addr for _, addr in getaddresses(parsed.get_all("Cc") or [])
+                           if addr and addr.strip().lower() not in excluded_addresses})
         for cc_addr in cc_addrs:
             cc_artifact = {
                 "name": "Recipient Email",

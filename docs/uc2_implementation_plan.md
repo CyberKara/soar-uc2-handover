@@ -4,6 +4,70 @@
 
 # Proofpoint TRAP Incident Triage (UC2) — Playbook Implementation Plan
 
+**2026-10-02 — Close the container when TRAP closes the incident (user request). Live-tested: container 1896 closed
+by a mock close (14:19Z). PB7 fixed on the way: it had only ever rechecked incidents in state `new`.** Live as ids
+334-342 (deployed 14:10Z), active = orchestrator 342 + recheck 340 only.
+- **Before:** only PB5 closed a container, for a close made from SOAR. The `Event Info`/`Event Info Update` CEF
+  carries **no state field** (connector `_build_event_info_cef`), so the container held no record of the TRAP
+  state. And PB7 never saw a TRAP close at all — see the PB7 bullet below.
+- **PB7 listed `new` incidents only, since it was built.** It sent `list incidents` with `state: ""` to mean
+  every state; SOAR drops an empty parameter at dispatch (app_run 5030's parameters: `hours_back` only), so the
+  connector applied its default `new`. Any incident moved to `open` or `closed` in TRAP left PB7's list and was
+  never rechecked — first test (incident 1790910093 closed in the mock 13:36:57Z): two ticks, no update. PB7 now
+  sends three parameter sets (`new`, `open`, `closed` — one app_run, one result each) and reads every result,
+  skipping the cycle if any failed. Rule in `constraints.md`. Its first tick after the fix recorded the newly
+  listed open/closed incidents as first sightings (no update for them); on the appliance, incidents PB7 last saw
+  as `new` that moved since will each get an update on that first tick (handover note says so).
+- **Now:** PB1 records the state it just fetched (`incident.state`) as `incidentState` on `Enrichment Complete`;
+  PB8 (last in the orchestrator), after writing the summary, reads the newest `Enrichment Complete` and, when it
+  says `closed`, closes the container (`phantom.set_status`) and adds a note "Closed in TRAP" — **once**: the note
+  is the marker, so a container an analyst reopens is not closed again (nor after a TRAP reopen + re-close).
+  Skipped when the container is already closed. PB8's "Enrichment runs" table gains a "TRAP state" column.
+- **Limits:** only incidents inside PB7's 168 h window; a close older than that is never seen.
+- **Live test (2026-10-02):** PB1/PB8 were already live at 12:36Z (ids 322-330, = repo but a trailing newline).
+  Container 1747's incident was gone (synthetic incidents live in the mock's memory; it had restarted), so the
+  test used container 1896 / incident 1790910093 (enriched 13:04Z, `incidentState` `new`). After the PB7 fix:
+  tick 14:19:18Z → `Event Info Update` → PB1 `Enrichment Complete` `incidentState: closed` (14:19:28Z) → PB8
+  closed the container (14:19:29Z) + note "Closed in TRAP". No other container got an update or was closed.
+  **Not exercised:** the once-only path (an analyst reopens, a later run must not close again).
+
+**2026-10-01 (later) — TRAP comment fixed; exclusion list renamed and widened; abuse-mailbox report copies skipped. Deployed (ids 300-308) + connector v1.0.38 installed 19:2xZ.**
+- **`comment_on_trap_incident` failed on the appliance** with `API Error: HTTP 500 -- java.lang.NullPointerException:
+  Null detail` (user report): TRAP needs a comment's `detail` although its API doc marks it optional (same class
+  as `team`+`assignee`). PB1 now sends `summary` "Extracted by SOAR automation" and the SOAR case link as `detail`
+  — works on connector v1.0.37 as installed. Connector **v1.0.38** always sends `detail` (empty when blank —
+  whether the appliance accepts an EMPTY `detail` is unconfirmed). The mock now answers a comment without `detail`
+  with the same 500 (takes effect when the mock is restarted).
+- **Custom list `proofpoint_trap_excluded_senders` → `proofpoint_trap_excluded_email`** (user decision), columns
+  `email, date, reason, enabled`; a row applies when `email` holds an address and `enabled` is `yes` (any case);
+  `date` (DD/MM/YYYY) and `reason` are for the operator. The handover ships the header plus two example rows
+  `sender1@example.com`/`sender2@example.com, 01/10/2026, default, yes` (the user's "email1/email2" stood for real
+  addresses; real ones never ship — public mirror — and example.com matches no real sender), from the registry,
+  never the live list.
+- **The list now applies to every email-address artifact** (user decision): no `Sender Email`, no `Recipient
+  Email` (recipient or Cc) for a listed address — PB1 (sender, recipient, Cc from TRAP headers) and PB3 (Cc from
+  the MIME). Sender Domain and container-name rules unchanged.
+- **Abuse-mailbox report copies (user, 2026-10-01).** TRAP lists a reported email twice: `abuseCopy: true` = the
+  analyzer forwarding the user's report to the abuse mailbox (same sender/recipient on every incident — the
+  user's two addresses to exclude were exactly these), `abuseCopy: false` = the reported email itself (vendor
+  API reference example). PB1 now gives no Sender/Recipient/Cc artifact to an `abuseCopy: true` email **only
+  when the same event also carries an `abuseCopy: false` one** (a report-only event keeps its artifacts), and
+  turns header `X-PhishAlarm-Reporter` into a `Recipient Email` with `emailRole: reporter` (PB8's Recipient table
+  shows the role). Whether the REAL appliance sends both copies is unconfirmed — check one `get incident`.
+  Mock template 1011 reproduces the pair. **Live-tested container 1747 (19:51Z):** no artifact for the analyzer or
+  the abuse mailbox; `Sender Email` = the real sender (abuseCopy false); `Recipient Email` user3 as `recipient` AND
+  as `reporter`; Threat Domain + URL kept; comment succeeded. (No `Sender Domain` there: the report copy's URL had
+  already added that domain as a Threat Domain, and PB1 dedups domains across both kinds — pre-existing.)
+- **Live state:** connector v1.0.38 on app 198 (11 actions); UC2 deployed ids 300-308, all `validation=True`,
+  active = orchestrator 308 + recheck 306 only. soar8 list `proofpoint_trap_excluded_email` id 7 (header, the
+  2 example.com rows, the mock sender). **Live test, container 1744** (Bulk spam template): `add comment`
+  succeeded with `summary` "Extracted by SOAR automation" + `detail` = the case link; no `Sender Email` for the
+  listed mock sender; severity `low`.
+- New mock installed + restarted by the user 19:47Z (`splunk-lab` `3057f31`): a comment without `detail` now
+  500s as on the appliance. **Left for the user:** delete the old list `proofpoint_trap_excluded_senders` (id 5,
+  the session's permission check refused it); confirm on the appliance that real incidents carry both abuseCopy
+  copies (`get incident`).
+
 **Status:** [x] planned | [x] built | [x] validated ✓ (on SOAR 8.5, before the 2026-09-05 rebuild)
 
 **State as of 2026-09-22 (post-8.6-rebuild audit):** all 7 playbooks, the CF and connector v1.0.34
@@ -47,8 +111,9 @@ re-trigger of 2026-09-29 (below) narrowed this but kept PB2/PB3/PB8 in parallel.
   sender got no `Sender Email`/`Sender Domain` (container 1448, the same mock template before, had both).
 
 Also that day, PB1 gives no `Sender Email` artifact to an address in the custom list
-`proofpoint_trap_excluded_senders`, and no `Sender Domain` to its domain unless another sender shares
-it (the list previously only kept the address out of the container name). Recipients are not filtered.
+`proofpoint_trap_excluded_senders` (renamed `proofpoint_trap_excluded_email` 2026-10-01, see top), and no
+`Sender Domain` to its domain unless another sender shares it (the list previously only kept the address out
+of the container name). Recipients were not filtered then; since 2026-10-01 they are.
 
 **Notes over ~22,000 characters are cut on the appliance (user, 2026-09-29).** soar8 stores at least
 1,000,000 characters (REST, `phantom.add_note()`, native "add note" — measured on test container 1321), so
@@ -87,8 +152,8 @@ night).** Two fixes, playbooks only — no connector change:
    description, so the connector names the container `TRAP-<id>: No summary`; it polls with
    `expand_events=false`, so it has no sender at that point. PB1's `build_artifact_list` renames
    that fallback name (only that one) to `TRAP-<id>: <first sender not excluded>` (+ "(+N more)"),
-   senders in alert order, over REST. Exclusions: custom list `proofpoint_trap_excluded_senders`,
-   one address per row, case-insensitive, filled by the operator (every incident carries one known
+   senders in alert order, over REST. Exclusions: custom list `proofpoint_trap_excluded_email`
+   (until 2026-10-01 `proofpoint_trap_excluded_senders`, one address per row), enabled rows, case-insensitive, filled by the operator (every incident carries one known
    address that must not be used). Never in code: the handover mirror is public. All excluded =>
    the name stays.
 2. **Comment on the TRAP incident** — new PB1 action block `comment_on_trap_incident` (connector
@@ -174,8 +239,10 @@ Code (PB4, PB6, PB7); PB7's MIME fan-out moved into `dispatch_mime_refetch`'s Cu
 prompts are code blocks calling `phantom.prompt2()` (approver: container owner, else soar_local_admin --
 user decision; a native prompt block cannot keep that fallback); PB4/PB5 action bindings fixed (they
 pointed at `extract_incident_id:custom_function:incident_id`, a code-block path on a utility block);
-PB5's `add_close_note` has `notRequiredJoins` (a save had generated a join that waited for
-`add_trap_comment`, so an unanswered prompt left no note); PB3 reads and writes the Vault over REST
+PB5's `add_close_note` got `notRequiredJoins` (a save had generated a join that waited for
+`add_trap_comment`, so an unanswered prompt left no note) -- **superseded 2026-10-01**: an 8.6 save
+ignores `notRequiredJoins`, so the not-approved path now has its own block `add_expired_note` and
+`add_close_note` has a single input (`6966fc7` + `0bf6296`, mirror r15 `caa5eae`); PB3 reads and writes the Vault over REST
 (`download_attachment`, `container_attachment`) instead of the filesystem -- SOAR's validator flagged
 4 x `no-filesystem-access`. The repo versions are the user's VPE-saved ones plus those fixes.
 Live-verified on soar8: PB2/PB3/PB7 on a real trigger; PB3 with a test email carrying an attachment

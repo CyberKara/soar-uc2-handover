@@ -836,9 +836,9 @@ class ProofpointTrapConnector(BaseConnector):
         detail = param.get("detail", "")
 
         url = "{}{}".format(self._base_url, INCIDENT_COMMENT_PATH.format(incident_id))
-        body = {"summary": summary}
-        if detail:
-            body["detail"] = detail
+        # The API doc marks detail optional, but the appliance answers a body
+        # without it with HTTP 500 "java.lang.NullPointerException: Null detail".
+        body = {"summary": summary, "detail": detail}
 
         ret_val, _ = self._make_rest_call("POST", url, action_result, json=body)
         if phantom.is_fail(ret_val):

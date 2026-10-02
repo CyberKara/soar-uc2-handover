@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Air-Gapped Handover Package
 
-Generated 2026-10-01 15:08 UTC from `proofpoint_trap` (source env: `soar8`).
+Generated 2026-10-02 14:22 UTC from `proofpoint_trap` (source env: `soar8`).
 
 This package is self-contained — everything needed to deploy this use case by hand
 in an environment with no network access back to this repo or to `soar8`.
@@ -11,7 +11,7 @@ in an environment with no network access back to this repo or to `soar8`.
 
 | Path | What |
 |------|------|
-| `connectors/` | Connector app package(s): proofpoint_trap-v1.0.37.tgz |
+| `connectors/` | Connector app package(s): proofpoint_trap-v1.0.38.tgz |
 | `connectors/source/` | Same connector(s), extracted — for reading, not for import |
 | `playbooks/*.tgz` (CFs) | proofpoint_trap_extract_incident_id |
 | `playbooks/*.tgz` (PBs) | proofpoint_trap_detail, proofpoint_trap_triage, proofpoint_trap_attachments, proofpoint_trap_acknowledge, proofpoint_trap_close, proofpoint_trap_isolation_notify, proofpoint_trap_recheck, proofpoint_trap_summary, proofpoint_trap_orchestrator |
@@ -50,6 +50,10 @@ previous package. On a completely fresh target, skip to Install order.
 - **`status` survives a save in the playbook editor (2026-10-01).** After a save in SOAR 8.6's editor, `proofpoint_trap_acknowledge`, `proofpoint_trap_close` and `proofpoint_trap_isolation_notify` returned an empty list instead of `failed` when a run stopped early, and every output they had not set came back as an empty list instead of empty. Re-pointing their action blocks to your asset names is such a save. Re-import those three (data playbooks: nothing to activate); re-point the asset names again if you had changed them.
 
 - **`proofpoint_trap_close` keeps its note when the prompt is not approved (2026-10-01).** After a save in SOAR 8.6's editor, a close whose prompt expired or was rejected ended with no note and status `failed`: the editor made the closing note wait for the TRAP comment, which only runs on an approved close. That path now has its own block, **add expired note**. Re-import `proofpoint_trap_close` (data playbook: nothing to activate) and re-point its asset names again if you had changed them; saving it is safe.
+
+- **The TRAP comment works on the appliance; the excluded-senders list is renamed and gains columns (2026-10-01).** On the appliance the comment step of `proofpoint_trap_detail` (**comment on trap incident**) failed with `HTTP 500 -- java.lang.NullPointerException: Null detail`: TRAP needs a comment's `detail` although its API documentation marks it optional. The playbook now sends the SOAR link as the comment's `detail`, and connector v1.0.38 always sends `detail`. Install connector v1.0.38 over the existing Proofpoint TRAP app (a normal in-place upgrade), re-import `proofpoint_trap_detail` (it stays inactive — the orchestrator runs it) and re-point its asset names if you had changed them. **The custom list `proofpoint_trap_excluded_senders` is replaced by `proofpoint_trap_excluded_email`** with the columns `email`, `date`, `reason`, `enabled` (see "Custom lists you fill in"): create it from `custom_lists/proofpoint_trap_excluded_email.json`, copy each address from the old list into a row with `enabled` = `yes`, then delete `proofpoint_trap_excluded_senders` — the playbook no longer reads it. Until the new list has your addresses, those senders are treated like any other. The list now also covers recipients and Cc. **Abuse-mailbox reports:** TRAP lists a reported email twice, the report (`abuseCopy` true: the analyzer forwarding it to the abuse mailbox) and the reported email itself (`abuseCopy` false). When an alert carries both, the report's sender, recipient and Cc get no artifact, so the artifacts show the real sender and target; the user who reported it (`X-PhishAlarm-Reporter`) appears as a `Recipient Email` with the role `reporter`.
+
+- **A container closes when its incident is closed in TRAP (2026-10-02).** Until now only a close made from SOAR (`proofpoint_trap_close`) closed the container; a close made in TRAP was seen by `proofpoint_trap_recheck` but left the container open. `proofpoint_trap_detail` now records the incident's TRAP state on `Enrichment Complete` (field `incidentState`), and `proofpoint_trap_summary`, which the orchestrator runs last, closes the container when that state is `closed` and adds a note **Closed in TRAP**. It does so once: if an analyst reopens the container, it stays open. The summary's "Enrichment runs" table shows the TRAP state. Only incidents inside `proofpoint_trap_recheck`'s look-back window are seen. **`proofpoint_trap_recheck` only ever looked at incidents in state `new`:** it meant to list every state, but SOAR drops an empty parameter, so the connector listed its default `new` — an incident moved to `open` or `closed` in TRAP was never rechecked. It now lists `new`, `open` and `closed`. Re-import `proofpoint_trap_detail` and `proofpoint_trap_summary` (both stay inactive — the orchestrator runs them) and `proofpoint_trap_recheck` (keep it active), and re-point their asset names if you had changed them. On its first run after the upgrade, the recheck sees every incident in its window that changed state since it last saw it as `new`: each gets an update, a re-run of the enrichment, and, if closed in TRAP, a closed container — expect a burst then.
 
 ## Install order
 
@@ -122,7 +126,7 @@ See the copied implementation plan doc in `docs/` for what the playbook stores a
 Settings the playbooks read. Create them (step above), then add your own rows below the
 header row when you need them; the use case works with them empty.
 
-- `proofpoint_trap_excluded_senders`: sender addresses `proofpoint_trap_detail` leaves out, one per row (case does not matter) — typically an address present on every incident. Such an address gets no `Sender Email` artifact, its domain no `Sender Domain` one (unless another sender shares it), and it never names a container: when TRAP gives an incident no summary, the container is named `TRAP-<id>: <first sender not in this list>` instead of `TRAP-<id>: No summary`. Leave it empty to leave nothing out; the header row is ignored.
+- `proofpoint_trap_excluded_email`: email addresses `proofpoint_trap_detail` and `proofpoint_trap_attachments` leave out, as sender, recipient or Cc — typically an address present on every incident. Columns: `email` (the address, case does not matter), `date` (DD/MM/YYYY) and `reason` (for you only), `enabled` (`yes` to apply the row, anything else to keep it without applying it). The file ships with two example rows, `sender1@example.com` and `sender2@example.com`: replace them with your real addresses (example.com never sends real mail, so left as they are they match nothing). An excluded address gets no `Sender Email` or `Recipient Email` artifact, its domain no `Sender Domain` one (unless another sender shares it), and it never names a container: when TRAP gives an incident no summary, the container is named `TRAP-<id>: <first sender not excluded>` instead of `TRAP-<id>: No summary`. With no enabled row nothing is left out; the header row is ignored.
 
 ## Verification
 

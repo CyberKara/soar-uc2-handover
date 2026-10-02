@@ -1,0 +1,23 @@
+{
+  "name": "proofpoint_trap_excluded_email",
+  "content": [
+    [
+      "email",
+      "date",
+      "reason",
+      "enabled"
+    ],
+    [
+      "sender1@example.com",
+      "01/10/2026",
+      "default",
+      "yes"
+    ],
+    [
+      "sender2@example.com",
+      "01/10/2026",
+      "default",
+      "yes"
+    ]
+  ]
+}

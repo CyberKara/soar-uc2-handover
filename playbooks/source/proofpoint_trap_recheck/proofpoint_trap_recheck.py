@@ -117,14 +117,16 @@ def list_incidents(action=None, success=None, container=None, results=None, hand
     ################################################################################
     ################################################################################
 
-    # state "" means every state -- this pass must see open and closed incidents
-    # too, the ones the on_poll main pass no longer looks at. Built here as well
-    # as in the block's bindings, so an empty value can never be dropped and
-    # fall back to the action's own default ("new").
-    parameters = [{
-        "state": "",
-        "hours_back": str(DEFAULT_LOOKBACK_HOURS),
-    }]
+    # This pass must see open and closed incidents too, the ones the on_poll
+    # main pass no longer looks at. One parameter set per state: SOAR drops an
+    # empty parameter at dispatch, so the old state "" never reached the
+    # connector, which then listed its default ("new") only -- a close made in
+    # TRAP was never seen (2026-10-02, app_run parameters had no "state").
+    # Several parameter sets = one app_run, one action result each.
+    parameters = [
+        {"state": state, "hours_back": str(DEFAULT_LOOKBACK_HOURS)}
+        for state in ("new", "open", "closed")
+    ]
 
     ################################################################################
     ################################################################################
@@ -166,12 +168,23 @@ def process_incidents(action=None, success=None, container=None, results=None, h
         ]
     )
 
-    if not result_data or result_data[0][0] != "success":
+    # One action result per state listed (new, open, closed). If any of them
+    # failed, skip the cycle: an incident missing from this pass would only
+    # be compared again next time, but a half-listed cycle is not worth acting on.
+    if not result_data or any(row[0] != "success" for row in result_data):
         phantom.error("list_incidents failed -- skipping this recheck cycle")
         return
 
-    incidents = result_data[0][1] or []
-    phantom.debug("Recheck cycle: {} incident(s) in window".format(len(incidents)))
+    incidents = []
+    seen_ids = set()
+    for row in result_data:
+        for incident in row[1] or []:
+            inc_key = str(incident.get("id", ""))
+            if inc_key in seen_ids:
+                continue
+            seen_ids.add(inc_key)
+            incidents.append(incident)
+    phantom.debug("Recheck cycle: {} incident(s) in window over {} state listing(s)".format(len(incidents), len(result_data)))
 
     # Read prior state. Row 0 is the header ("incident_id") -- skip it,
     # same convention as cyberark_rotation_orchestrator's STATE_LIST_NAME

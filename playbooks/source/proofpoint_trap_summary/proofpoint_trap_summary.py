@@ -1,5 +1,5 @@
 """
-Automation playbook (PB8) for label &#39;proofpoint_trap&#39;, left inactive: proofpoint_trap_orchestrator runs it last. Once proofpoint_trap_detail has enriched the container (an &#39;Enrichment Complete&#39; or &#39;Enrichment Failed&#39; artifact exists), reads every artifact on the container and writes one &#39;TRAP Summary&#39; note with a markdown table per artifact type (incident, senders, recipients, domains, URLs, click IPs, MIME bodies, attachments, enrichment runs, then any other type). Every later run rewrites the same note in place.
+Automation playbook (PB8) for label &#39;proofpoint_trap&#39;, left inactive: proofpoint_trap_orchestrator runs it last. Once proofpoint_trap_detail has enriched the container (an &#39;Enrichment Complete&#39; or &#39;Enrichment Failed&#39; artifact exists), reads every artifact on the container and writes one &#39;TRAP Summary&#39; note with a markdown table per artifact type (incident, senders, recipients, domains, URLs, click IPs, MIME bodies, attachments, enrichment runs, then any other type). Every later run rewrites the same note in place. When the newest Enrichment Complete says TRAP has closed the incident, closes the container once and adds a 'Closed in TRAP' note.
 """
 
 
@@ -122,6 +122,7 @@ def build_summary(action=None, success=None, container=None, results=None, handl
             ("Alerts", cef("alertCount")),
             ("New artifacts", cef("artifactsCreated")),
             ("Already present", cef("artifactsAlreadyPresent")),
+            ("TRAP state", cef("incidentState")),
             ("Message", cef("message")),
         ]),
     ]
@@ -295,6 +296,44 @@ def write_summary_note(action=None, success=None, container=None, results=None, 
         )
         phantom.debug("Blanked leftover summary part {!r} (note {}): HTTP {}".format(
             stale.get("title"), stale["id"], response.status_code))
+
+    # Close the container when TRAP has closed the incident. The newest
+    # Enrichment Complete carries the TRAP state proofpoint_trap_detail fetched
+    # (incidentState); a close made in TRAP reaches it through
+    # proofpoint_trap_recheck's Event Info Update and the orchestrator re-run.
+    # Once only: the "Closed in TRAP" note marks it, so a container an analyst
+    # reopens is not closed again by a later run.
+    try:
+        latest = phantom.requests.get(
+            uri=phantom.build_phantom_rest_url("artifact"),
+            params={"_filter_container": container_id, "_filter_name": '"Enrichment Complete"',
+                    "sort": "id", "order": "desc", "page_size": 1},
+            verify=False,
+        ).json().get("data") or []
+        trap_state = str(((latest[0].get("cef") or {}).get("incidentState") if latest else "") or "").lower()
+        if trap_state == "closed":
+            marker = phantom.requests.get(
+                uri=note_url,
+                params={"_filter_container": container_id, "_filter_title": '"Closed in TRAP"', "page_size": 1},
+                verify=False,
+            ).json().get("count") or 0
+            status = (phantom.requests.get(
+                uri=phantom.build_phantom_rest_url("container", container_id), verify=False,
+            ).json() or {}).get("status")
+            if marker:
+                phantom.debug("TRAP incident closed; container already handled once (note 'Closed in TRAP')")
+            elif status == "closed":
+                phantom.debug("TRAP incident closed; container already closed")
+            else:
+                phantom.set_status(container=container, status="closed")
+                phantom.add_note(
+                    container=container, note_type="general", title="Closed in TRAP", note_format="markdown",
+                    content="The TRAP incident **{}** was closed in TRAP, so this container was closed. "
+                            "Reopen it to keep working: it will not be closed again automatically.".format(
+                                container.get("source_data_identifier") or "?"))
+                phantom.debug("TRAP incident closed: container {} closed".format(container_id))
+    except Exception as e:
+        phantom.error("Could not check whether TRAP closed the incident: {}".format(str(e)))
 
     ################################################################################
     ################################################################################

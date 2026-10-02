@@ -128,7 +128,9 @@ TRAP web UI, `<scheme>://<host of base_url>/incidents/<id>`. The web UI and the 
 
 ### add comment
 
-`summary` is required, `detail` is optional.
+`summary` is required, `detail` is optional. The connector always sends `detail`, as an empty string
+when it is blank (v1.0.38+): the API doc marks it optional, but the real appliance answers a comment
+without it with HTTP 500 `java.lang.NullPointerException: Null detail`.
 
 ### download mime body
 
@@ -144,6 +146,7 @@ Before v1.0.35 this action called `/api/incidents/{id}/events/{event_id}/mime`, 
 | No incidents ingested | Label not configured | Verify the event label is created and selected in Ingest Settings |
 | Duplicate containers | — | Not possible — dedup uses TRAP incident ID as `source_data_identifier` |
 | Close incident fails | Missing field | Both `summary` and `detail` are required |
+| `add comment` fails with `API Error: HTTP 500 -- java.lang.NullPointerException: Null detail` | Connector v1.0.37 or older sent no `detail` when it was blank; the appliance needs the field even though the API doc marks it optional | Upgrade to v1.0.38+, or give the action a non-empty `detail` |
 | `list incidents` fails with `unsupported type for timedelta hours component: str` | `hours_back` arrived as a string — a VPE literal action parameter always does | Fixed in v1.0.34 (the value is validated like every other numeric parameter). On an older build, bind `hours_back` to a numeric datapath instead of a literal |
 | Timeout errors | Large response | Increase `timeout` in asset config. Connector retries 500/502/503/504 automatically. |
 | `download mime body` fails with `Event <id> not found on incident <id>` for every event | Connector v1.0.34 or older: it called a path the real appliance does not have (see the action's section above) | Upgrade to v1.0.35+ |

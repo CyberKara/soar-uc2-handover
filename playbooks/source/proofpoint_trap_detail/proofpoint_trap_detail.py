@@ -1,5 +1,5 @@
 """
-Automation playbook (PB1) for label proofpoint_trap, left inactive: proofpoint_trap_orchestrator runs it first. Fetches the TRAP incident with its events, downloads each event&#39;s original email, and creates the derived artifacts (sender/recipient emails, domains, threat URLs, click IPs, MIME bodies), a detail note linking to the incident in TRAP, and a final Enrichment Complete artifact. Creates no sender artifact for an address in the custom list proofpoint_trap_excluded_senders, renames a container TRAP gave no summary after its first remaining sender, and on the incident&#39;s first enrichment comments on the TRAP incident with a link to the SOAR case. A failed fetch or platform write adds an error note and an Enrichment Failed artifact instead, so a later run can retry. Assets are selected in each action block, never in code, so an importer can point them at their own asset names.
+Automation playbook (PB1) for label proofpoint_trap, left inactive: proofpoint_trap_orchestrator runs it first. Fetches the TRAP incident with its events, downloads each event&#39;s original email, and creates the derived artifacts (sender/recipient emails, domains, threat URLs, click IPs, MIME bodies), a detail note linking to the incident in TRAP, and a final Enrichment Complete artifact. Creates no sender or recipient artifact for an address in the custom list proofpoint_trap_excluded_email (enabled rows) nor for an abuse-mailbox report copy when TRAP also gives the reported email (the reporting user becomes a Recipient Email, role reporter), renames a container TRAP gave no summary after its first remaining sender, and on the incident&#39;s first enrichment comments on the TRAP incident with a link to the SOAR case. A failed fetch or platform write adds an error note and an Enrichment Failed artifact instead, so a later run can retry. Assets are selected in each action block, never in code, so an importer can point them at their own asset names.
 """
 
 
@@ -223,21 +223,26 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
     events = incident.get("events", [])
     phantom.debug("Processing {} events from incident {}".format(len(events), incident.get("id", "?")))
 
-    # Sender addresses the operator wants left out: the custom list
-    # proofpoint_trap_excluded_senders, one address per row, compared without
-    # case (e.g. a mailbox present on every incident). An address in it gets
-    # no Sender Email artifact, gives no Sender Domain, and never names the
-    # container. A missing or empty list excludes nothing.
-    excluded_senders = set()
-    list_ok, list_message, list_rows = phantom.get_list(list_name="proofpoint_trap_excluded_senders")
+    # Email addresses the operator wants left out: the custom list
+    # proofpoint_trap_excluded_email, columns email, date, reason, enabled
+    # (e.g. a mailbox present on every incident). A row counts when its email
+    # holds an address and enabled is "yes" (any case); date and reason are
+    # for the operator only. Addresses compare without case. An excluded
+    # address gets no Sender Email or Recipient Email artifact (sender,
+    # recipient or Cc), gives no Sender Domain, and never names the container.
+    # A missing or empty list excludes nothing.
+    excluded_addresses = set()
+    list_ok, list_message, list_rows = phantom.get_list(list_name="proofpoint_trap_excluded_email")
     if list_ok:
         for row in list_rows or []:
-            for value in row or []:
-                if value and "@" in str(value):
-                    excluded_senders.add(str(value).strip().lower())
+            row = list(row or []) + [None] * 4
+            address = str(row[0] or "").strip().lower()
+            enabled = str(row[3] or "").strip().lower()
+            if "@" in address and enabled == "yes":
+                excluded_addresses.add(address)
     else:
-        phantom.debug("No proofpoint_trap_excluded_senders list ({}): every sender counts".format(list_message))
-    skipped_senders = set()
+        phantom.debug("No proofpoint_trap_excluded_email list ({}): every sender counts".format(list_message))
+    skipped_addresses = set()
 
     # Separate dedup sets per role so an address playing both sender and
     # recipient across different alerts gets an artifact for each role,
@@ -245,6 +250,8 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
     seen_sender_emails = set()
     seen_recipient_emails = set()
     seen_cc_emails = set()
+    seen_reporter_emails = set()
+    report_copies_skipped = 0
     seen_domains = set()
     seen_ips = set()
     artifacts = []
@@ -331,18 +338,49 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
     for event in events:
         event_id = event.get("id", "")
         emails = event.get("emails", [])
+        # An abuse-mailbox report lists the email twice: abuseCopy true is the
+        # report (the analyzer forwarding it to the abuse mailbox), abuseCopy
+        # false the reported email itself. The report's sender, recipient and
+        # Cc are the same on every incident, so they get no artifact -- only
+        # when the event also carries the reported email, so nothing is lost
+        # when TRAP gives the report alone. The user who reported it (header
+        # X-PhishAlarm-Reporter) becomes a Recipient Email, role "reporter".
+        has_reported_email = any((e or {}).get("abuseCopy") is False for e in emails)
 
         for email in emails:
             subject = email.get("subject", "")
             message_id = email.get("messageId", "")
             delivery_time = _stringify_delivery_time(email.get("messageDeliveryTime"))
             headers = email.get("headers") or {}
+            report_copy = email.get("abuseCopy") is True and has_reported_email
+
+            if report_copy:
+                report_copies_skipped += 1
+                reporter = ""
+                for header_name, header_value in headers.items():
+                    if str(header_name).lower() == "x-phishalarm-reporter":
+                        reporter = str(header_value or "").strip()
+                if reporter and reporter.lower() in excluded_addresses:
+                    skipped_addresses.add(reporter.lower())
+                elif reporter and reporter.lower() not in seen_reporter_emails:
+                    seen_reporter_emails.add(reporter.lower())
+                    artifacts.append({
+                        "name": "Recipient Email",
+                        "description": "User who reported alert {} (subject: {})".format(event_id, subject),
+                        "label": "event",
+                        "cef": {
+                            "emailAddress": reporter,
+                            "emailRole": "reporter",
+                        },
+                        "cef_types": {"emailAddress": ["email"]},
+                        "run_automation": False,
+                    })
 
             # Sender email
             sender = email.get("sender") or {}
-            from_addr = sender.get("email", "")
-            if from_addr and from_addr.strip().lower() in excluded_senders:
-                skipped_senders.add(from_addr.strip().lower())
+            from_addr = "" if report_copy else sender.get("email", "")
+            if from_addr and from_addr.strip().lower() in excluded_addresses:
+                skipped_addresses.add(from_addr.strip().lower())
             elif from_addr and from_addr not in seen_sender_emails:
                 seen_sender_emails.add(from_addr)
                 body_type = email.get("bodyType", "")
@@ -381,8 +419,10 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
 
             # Recipient email
             recipient = email.get("recipient") or {}
-            to_addr = recipient.get("email", "")
-            if to_addr and to_addr not in seen_recipient_emails:
+            to_addr = "" if report_copy else recipient.get("email", "")
+            if to_addr and to_addr.strip().lower() in excluded_addresses:
+                skipped_addresses.add(to_addr.strip().lower())
+            elif to_addr and to_addr not in seen_recipient_emails:
                 seen_recipient_emails.add(to_addr)
                 artifacts.append({
                     "name": "Recipient Email",
@@ -404,9 +444,11 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
             # vault attachment, not this structured response), which is out
             # of scope for this function. Left as a harmless no-op rather than
             # removed, in case `headers` ever does carry one on some tenant.
-            cc_raw = headers.get("Cc") or headers.get("CC") or headers.get("cc") or ""
+            cc_raw = "" if report_copy else (headers.get("Cc") or headers.get("CC") or headers.get("cc") or "")
             for cc_addr in [a.strip() for a in cc_raw.split(",") if a.strip()]:
-                if cc_addr not in seen_cc_emails:
+                if cc_addr.lower() in excluded_addresses:
+                    skipped_addresses.add(cc_addr.lower())
+                elif cc_addr not in seen_cc_emails:
                     seen_cc_emails.add(cc_addr)
                     artifacts.append({
                         "name": "Recipient Email",
@@ -480,15 +522,18 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
                 "run_automation": False,
             })
 
-    if skipped_senders:
-        phantom.debug("{} sender address(es) in proofpoint_trap_excluded_senders: no artifact for them".format(
-            len(skipped_senders)))
+    if report_copies_skipped:
+        phantom.debug("{} abuse-mailbox report cop(y/ies): no sender/recipient artifact for them".format(
+            report_copies_skipped))
+    if skipped_addresses:
+        phantom.debug("{} address(es) in proofpoint_trap_excluded_email: no artifact for them".format(
+            len(skipped_addresses)))
 
     # Real TRAP incidents often have no summary or description, and the
     # connector then names the container "TRAP-<id>: No summary" (it lists
     # incidents without their events, so it has no sender yet). Name it after
     # the sender instead: the first sender address, in alert order, that has a
-    # Sender Email artifact (so never one in proofpoint_trap_excluded_senders).
+    # Sender Email artifact (so never one in proofpoint_trap_excluded_email).
     # Only that fallback name is replaced, so a real summary or an earlier
     # rename is never overwritten.
     fallback_name = "TRAP-{}: No summary".format(incident_id)
@@ -509,7 +554,7 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
                 phantom.error("Could not rename the container to {!r} (HTTP {}): {}".format(
                     new_name, rename.status_code, rename.text[:200]))
         else:
-            phantom.debug("No sender outside proofpoint_trap_excluded_senders: name stays {!r}".format(fallback_name))
+            phantom.debug("No sender outside proofpoint_trap_excluded_email: name stays {!r}".format(fallback_name))
 
     # Post only what is not on the container yet. A re-run (proofpoint_trap_recheck
     # flags a changed incident, usually one that gained alerts) rebuilds the list
@@ -616,6 +661,10 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
         ("already_present", build_artifact_list__already_present),
     ):
         phantom.save_run_data(key="build_artifact_list:" + output_key, value=json.dumps(output_value))
+    # The incident's TRAP workflow state (new/open/closed) as fetched now;
+    # finalize_detail records it on Enrichment Complete, where
+    # proofpoint_trap_summary reads it to close a container TRAP has closed.
+    phantom.save_run_data(key="build_artifact_list:incident_state", value=json.dumps(incident.get("state")))
 
     ################################################################################
     ################################################################################
@@ -859,7 +908,9 @@ def finalize_detail(action=None, success=None, container=None, results=None, han
     alert_count = json.loads(phantom.get_run_data(key="build_artifact_list:alert_count") or "null")
     event_count = json.loads(phantom.get_run_data(key="build_artifact_list:event_count") or "null")
     already_present = json.loads(phantom.get_run_data(key="build_artifact_list:already_present") or "0")
+    incident_state = json.loads(phantom.get_run_data(key="build_artifact_list:incident_state") or "null")
 
+    # incidentState: the incident's TRAP state when this run fetched it.
     finalize_detail__cef_dictionary = json.dumps({
         "message": "TRAP incident {} detail extraction complete. {} alerts, {} new artifacts, {} already on the container.".format(
             incident_id, alert_count if alert_count is not None else "?", artifact_count, already_present),
@@ -868,6 +919,7 @@ def finalize_detail(action=None, success=None, container=None, results=None, han
         "artifactsCreated": int(artifact_count),
         "artifactsAlreadyPresent": int(already_present),
         "runIndex": int(run_index),
+        "incidentState": incident_state or "",
     })
 
     # Also saved as run data: dispatch_enrichment_complete reads this key.
@@ -1130,6 +1182,7 @@ def comment_on_trap_incident(action=None, success=None, container=None, results=
 
     if build_artifact_list__incident_id is not None:
         parameters.append({
+            "detail": "Extracted by SOAR automation",
             "summary": "Extracted by SOAR automation",
             "incident_id": build_artifact_list__incident_id,
         })
@@ -1152,9 +1205,12 @@ def comment_on_trap_incident(action=None, success=None, container=None, results=
 
     base_url = (phantom.get_base_url() or "").rstrip("/")
     case_link = "{}/mission/{}".format(base_url, container.get("id")) if base_url else "case {}".format(container.get("id"))
+    # TRAP needs detail even though its API doc marks it optional: a comment
+    # without it fails with HTTP 500 "Null detail".
     parameters = [{
         "incident_id": incident_id,
-        "summary": "This incident has been extracted by SOAR automation, please review it in SOAR: {}".format(case_link),
+        "summary": "Extracted by SOAR automation",
+        "detail": "This incident has been extracted by SOAR automation, please review it in SOAR: {}".format(case_link),
     }]
 
     ################################################################################
