@@ -1,0 +1,37 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out the tag and check it matches the connector version
+        run: |
+          version="$(jq -r .app_version connectors/source/proofpoint_trap/proofpoint_trap.json)"
+          tag="v${version}"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "${tag}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match connector app_version ${version}" >&2
+            exit 1
+          fi
+          test -f "connectors/proofpoint_trap-v${version}.tgz"
+          echo "TAG=${tag}" >> "$GITHUB_ENV"
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${TAG}" \
+            --title "${TAG}" \
+            --target "${GITHUB_SHA}" \
+            --generate-notes \
+            connectors/*.tgz playbooks/*.tgz
