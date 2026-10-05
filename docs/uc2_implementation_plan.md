@@ -4,6 +4,15 @@
 
 # Proofpoint TRAP Incident Triage (UC2) — Playbook Implementation Plan
 
+**2026-10-05 — URLs in notes are not clickable (user request).** SOAR makes a URL in a note a link unless it
+sits in backticks. PB8's table cells (`cell()`) and PB1's incident summary line now put every `scheme://…` or
+`www.…` in backticks; PB3 already did (and defangs). Left clickable on purpose: PB1's "Open in TRAP" and PB6's
+isolation-browser links. The 8.6 UI renders notes as GFM (`remark-gfm` 1.x / `marked`, read from soar8's UI
+bundles), which links `http(s)://`, `www.` and email addresses but not bare domains — email addresses stay
+links (offered to the user, not done). Live as ids 347-355 (deployed 15:00Z), active = orchestrator 355 +
+recheck 353 only. Verified: PB8 re-run on container 2499 (run 5954) shows the URLs in backticks; fresh incident
+container 2508 ran orchestrator → PB1/PB3/PB2/PB8 all `success`. Not exported to the handover mirror yet.
+
 **2026-10-02 — Close the container when TRAP closes the incident (user request). Live-tested: container 1896 closed
 by a mock close (14:19Z). PB7 fixed on the way: it had only ever rechecked incidents in state `new`.** Live as ids
 334-342 (deployed 14:10Z), active = orchestrator 342 + recheck 340 only.
@@ -30,6 +39,9 @@ by a mock close (14:19Z). PB7 fixed on the way: it had only ever rechecked incid
   tick 14:19:18Z → `Event Info Update` → PB1 `Enrichment Complete` `incidentState: closed` (14:19:28Z) → PB8
   closed the container (14:19:29Z) + note "Closed in TRAP". No other container got an update or was closed.
   **Not exercised:** the once-only path (an analyst reopens, a later run must not close again).
+- **Handover:** package `dist/handover/proofpoint_trap-2026-10-02-r20` → mirror `cyberkara/soar-uc2-handover`
+  `9a6ce76` (first push since r15 `caa5eae`: also carries connector v1.0.38, `proofpoint_trap_excluded_email`,
+  the abuseCopy skip and the `reporter` recipient). HANDOVER has the 2026-10-02 upgrade note (EN + FR).
 
 **2026-10-01 (later) — TRAP comment fixed; exclusion list renamed and widened; abuse-mailbox report copies skipped. Deployed (ids 300-308) + connector v1.0.38 installed 19:2xZ.**
 - **`comment_on_trap_incident` failed on the appliance** with `API Error: HTTP 500 -- java.lang.NullPointerException:
@@ -53,7 +65,7 @@ by a mock close (14:19Z). PB7 fixed on the way: it had only ever rechecked incid
   API reference example). PB1 now gives no Sender/Recipient/Cc artifact to an `abuseCopy: true` email **only
   when the same event also carries an `abuseCopy: false` one** (a report-only event keeps its artifacts), and
   turns header `X-PhishAlarm-Reporter` into a `Recipient Email` with `emailRole: reporter` (PB8's Recipient table
-  shows the role). Whether the REAL appliance sends both copies is unconfirmed — check one `get incident`.
+  shows the role). **Works on the appliance** (user, from the appliance, 2026-10-05).
   Mock template 1011 reproduces the pair. **Live-tested container 1747 (19:51Z):** no artifact for the analyzer or
   the abuse mailbox; `Sender Email` = the real sender (abuseCopy false); `Recipient Email` user3 as `recipient` AND
   as `reporter`; Threat Domain + URL kept; comment succeeded. (No `Sender Domain` there: the report copy's URL had
@@ -65,8 +77,7 @@ by a mock close (14:19Z). PB7 fixed on the way: it had only ever rechecked incid
   listed mock sender; severity `low`.
 - New mock installed + restarted by the user 19:47Z (`splunk-lab` `3057f31`): a comment without `detail` now
   500s as on the appliance. **Left for the user:** delete the old list `proofpoint_trap_excluded_senders` (id 5,
-  the session's permission check refused it); confirm on the appliance that real incidents carry both abuseCopy
-  copies (`get incident`).
+  the session's permission check refused it). The abuseCopy appliance check is done (user, 2026-10-05: works).
 
 **Status:** [x] planned | [x] built | [x] validated ✓ (on SOAR 8.5, before the 2026-09-05 rebuild)
 

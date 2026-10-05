@@ -743,6 +743,11 @@ def prepare_detail_note(action=None, success=None, container=None, results=None,
     score = result_data[0][2] if result_data else "?"
     state = result_data[0][3] if result_data else "?"
 
+    # A URL in a note is clickable unless it sits in backticks.
+    import re
+    summary = re.sub(r"(?:[a-z][a-z0-9+.-]*://|www\.)[^\s`]*[^\s`,;.)]",
+                     lambda m: "`" + m.group(0) + "`", str(summary).replace("`", "'"), flags=re.I)
+
     # The incident's page in the TRAP web UI (connector 1.0.37+); omitted when absent.
     url_rows = phantom.collect2(container=container, datapath=["get_trap_incident:action_result.data.*.incident_url"])
     incident_url = url_rows[0][0] if url_rows and url_rows[0] and url_rows[0][0] else ""

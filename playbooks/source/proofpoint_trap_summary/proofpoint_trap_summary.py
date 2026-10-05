@@ -60,11 +60,16 @@ def build_summary(action=None, success=None, container=None, results=None, handl
         phantom.debug("proofpoint_trap_detail has not finished on this container yet -- no summary")
         return
 
+    import re
+
     def cell(value, limit=200):
         text = "" if value is None else str(value)
         text = " ".join(text.split())
         if len(text) > limit:
             text = text[:limit - 3] + "..."
+        # A URL in a note is clickable unless it sits in backticks.
+        text = re.sub(r"(?:[a-z][a-z0-9+.-]*://|www\.)[^\s`]*[^\s`,;.)]",
+                      lambda m: "`" + m.group(0) + "`", text.replace("`", "'"), flags=re.I)
         return text.replace("|", "\\|")
 
     def created(artifact):
