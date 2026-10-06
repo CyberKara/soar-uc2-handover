@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Air-Gapped Handover Package
 
-Generated 2026-10-05 15:24 UTC from `proofpoint_trap` (source env: `soar8`).
+Generated 2026-10-06 11:13 UTC from `proofpoint_trap` (source env: `soar8`).
 
 This package is self-contained — everything needed to deploy this use case by hand
 in an environment with no network access back to this repo or to `soar8`.
@@ -17,7 +17,7 @@ in an environment with no network access back to this repo or to `soar8`.
 | `playbooks/*.tgz` (PBs) | proofpoint_trap_detail, proofpoint_trap_triage, proofpoint_trap_attachments, proofpoint_trap_acknowledge, proofpoint_trap_close, proofpoint_trap_isolation_notify, proofpoint_trap_recheck, proofpoint_trap_summary, proofpoint_trap_orchestrator |
 | `playbooks/source/` | Same CFs/playbooks, extracted — for reading, not for import |
 | `assets/*.json` | Asset config templates (credentials redacted — see below) |
-| `custom_lists/*.json` | Custom list schema (header row only — see the custom-list section below) |
+| `custom_lists/*.json` | Custom lists — the rows this package defines, never the source's data rows (see the custom-list section below) |
 | `docs/` | Implementation plan doc, for full design context |
 
 ## [!] Upgrading over an earlier install — read this first
@@ -57,6 +57,8 @@ previous package. On a completely fresh target, skip to Install order.
 
 - **URLs in notes are no longer clickable (2026-10-05).** SOAR turns a URL in a note into a link unless it sits in backticks. `proofpoint_trap_summary` now puts every URL in its tables in backticks, and `proofpoint_trap_detail` does the same for the incident summary line; the email notes of `proofpoint_trap_attachments` already did. Two links stay clickable on purpose: **Open in TRAP** in the detail note and the isolation-browser links of `proofpoint_trap_isolation_notify`. Re-import `proofpoint_trap_detail` and `proofpoint_trap_summary` (both stay inactive — the orchestrator runs them) and re-point their asset names if you had changed them. Notes written before the upgrade keep their links; a summary note is rewritten at the container's next run.
 
+- **Artifact labels and data types (2026-10-06).** Every artifact the playbooks create now has the label `event`, `Enrichment Complete` and `Enrichment Failed` included (they had labels of their own that nothing read; the playbooks find them by name). `proofpoint_trap_detail` no longer lets SOAR guess a data type for the fields it does not declare (SOAR had tagged the email role, subject, dates and the incident state as `domain` / `host name`), and declares: the sender's `messageId` as `internet message id`, a threat domain's `url` as `url`, `fileName` as `file name` on `MIME Body` and `Email Attachment`, and the `incidentId` of an `Event Info Update` as `proofpoint trap incident id` (the TRAP actions are offered on it). With only the IMAP and SMTP mail apps, `internet message id` offers no action yet; `email` and `vault id` offer SMTP's `send email`. Re-import `proofpoint_trap_detail`, `proofpoint_trap_attachments` (both stay inactive) and `proofpoint_trap_recheck` (check it is still active after the import), and re-point their asset names if you had changed them. Artifacts created before the upgrade keep their labels and data types.
+
 ## Install order
 
 1. **Install the connector app(s)** — Apps > Install App, upload each file in `connectors/`.
@@ -90,7 +92,7 @@ previous package. On a completely fresh target, skip to Install order.
    | `soar8` | Phantom | `proofpoint_trap_detail` | `assets/soar8.json` |
 
 3. **Create the custom list(s)** from `custom_lists/*.json` — each file has the exact
-   `content` array (header row only, never the source's data rows) to POST to `/rest/decided_list`:
+   `content` array (the rows this package defines — never the source's data rows) to POST to `/rest/decided_list`:
    ```bash
    curl -sk -u '<user>:<password>' -X POST https://<target>:<port>/rest/decided_list \
      -H 'Content-Type: application/json' \
@@ -125,8 +127,8 @@ See the copied implementation plan doc in `docs/` for what the playbook stores a
 
 ## Custom lists you fill in
 
-Settings the playbooks read. Create them (step above), then add your own rows below the
-header row when you need them; the use case works with them empty.
+Settings the playbooks read. Create them (step above), then fill them in as each list's
+description below says, when you need them; the use case works with them left as shipped.
 
 - `proofpoint_trap_excluded_email`: email addresses `proofpoint_trap_detail` and `proofpoint_trap_attachments` leave out, as sender, recipient or Cc — typically an address present on every incident. Columns: `email` (the address, case does not matter), `date` (DD/MM/YYYY) and `reason` (for you only), `enabled` (`yes` to apply the row, anything else to keep it without applying it). The file ships with two example rows, `sender1@example.com` and `sender2@example.com`: replace them with your real addresses (example.com never sends real mail, so left as they are they match nothing). An excluded address gets no `Sender Email` or `Recipient Email` artifact, its domain no `Sender Domain` one (unless another sender shares it), and it never names a container: when TRAP gives an incident no summary, the container is named `TRAP-<id>: <first sender not excluded>` instead of `TRAP-<id>: No summary`. With no enabled row nothing is left out; the header row is ignored.
 

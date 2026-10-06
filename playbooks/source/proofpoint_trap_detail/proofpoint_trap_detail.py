@@ -131,13 +131,13 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
                 "message": "TRAP incident {} detail extraction failed: {}".format(incident_id, msg),
                 "artifactsCreated": 0,
             },
-            label="enrichment_failed",
+            label="event",
             name="Enrichment Failed",
             severity="low",
             run_automation=False,
         )
         if not success:
-            phantom.error("Failed to create enrichment_failed artifact: {}".format(message))
+            phantom.error("Failed to create Enrichment Failed artifact: {}".format(message))
 
     # Collect get_incident result
     result_data = phantom.collect2(
@@ -317,7 +317,7 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
                 "description": "Raw MIME body from incident {} event {}".format(incident_id_val, mime_event_id),
                 "label": "event",
                 "cef": {"vaultId": vault_id, "fileName": file_name},
-                "cef_types": {"vaultId": ["vault id"]},
+                "cef_types": {"vaultId": ["vault id"], "fileName": ["file name"]},
                 "run_automation": False,
                 # Per-event SDI, NOT the shared incident_id_val every other
                 # artifact in this batch uses -- proofpoint_trap_attachments
@@ -401,7 +401,7 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
                         "abuseCopy": abuse_copy_str,
                         "emailHeaders": selected_headers,
                     },
-                    "cef_types": {"emailAddress": ["email"]},
+                    "cef_types": {"emailAddress": ["email"], "messageId": ["internet message id"]},
                     "run_automation": False,
                 })
                 # Extract domain from sender
@@ -479,7 +479,7 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
                             "destinationDnsDomain": url_domain,
                             "url": url_val,
                         },
-                        "cef_types": {"destinationDnsDomain": ["domain"]},
+                        "cef_types": {"destinationDnsDomain": ["domain"], "url": ["url"]},
                         "run_automation": False,
                     })
 
@@ -506,7 +506,7 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
                         "destinationDnsDomain": url_domain,
                         "url": threat_url,
                     },
-                    "cef_types": {"destinationDnsDomain": ["domain"]},
+                    "cef_types": {"destinationDnsDomain": ["domain"], "url": ["url"]},
                     "run_automation": False,
                 })
 
@@ -892,13 +892,13 @@ def finalize_detail(action=None, success=None, container=None, results=None, han
             container=container,
             raw_data={},
             cef_data={"message": msg, "artifactsCreated": 0},
-            label="enrichment_failed",
+            label="event",
             name="Enrichment Failed",
             severity="low",
             run_automation=False,
         )
         if not signal_ok:
-            phantom.error("Failed to create enrichment_failed artifact: {}".format(signal_message))
+            phantom.error("Failed to create Enrichment Failed artifact: {}".format(signal_message))
         return
 
     # "add artifact" has no description parameter, so the summary goes into
@@ -1001,12 +1001,17 @@ def dispatch_artifact_list(action=None, success=None, container=None, results=No
     artifact_cefs = json.loads(phantom.get_run_data(key="build_artifact_list:cef_dictionary") or "null") or []
     artifact_contains = json.loads(phantom.get_run_data(key="build_artifact_list:contains") or "null") or []
 
+    # determine_contains False: "add artifact" otherwise guesses a data type
+    # for every CEF field not listed in "contains" (it tagged emailRole
+    # "recipient" and email subjects as domain / host name). build_artifact_list
+    # lists every field that has a data type; the rest stay untyped.
     parameters = []
     for index, artifact_name in enumerate(artifact_names):
         parameters.append({
             "name": artifact_name,
             "label": artifact_labels[index],
             "contains": artifact_contains[index],
+            "determine_contains": False,
             "container_id": container.get("id"),
             "cef_dictionary": artifact_cefs[index],
             "source_data_identifier": artifact_sdis[index],
@@ -1048,7 +1053,7 @@ def dispatch_enrichment_complete(action=None, success=None, container=None, resu
     if source_data_identifier_value is not None:
         parameters.append({
             "name": "Enrichment Complete",
-            "label": "enrichment_complete",
+            "label": "event",
             "container_id": id_value,
             "cef_dictionary": finalize_detail__cef_dictionary,
             "source_data_identifier": source_data_identifier_value,
@@ -1063,8 +1068,11 @@ def dispatch_enrichment_complete(action=None, success=None, container=None, resu
     # proofpoint_trap_triage and proofpoint_trap_summary; an artifact running
     # automation here would start a second orchestrator run alongside the
     # first, and those playbooks would again run side by side.
+    # No data-type guessing either: none of this artifact's fields has one
+    # (it tagged incidentState "new" as domain / host name).
     for params in parameters:
         params["run_automation"] = False
+        params["determine_contains"] = False
 
     ################################################################################
     ## Custom Code End

@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Paquet de transfert (déploiement air-gapped)
 
-Généré le 2026-10-05 15:24 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
+Généré le 2026-10-06 11:13 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
 
 Ce paquet est autonome — tout ce qu'il faut pour déployer ce cas d'usage manuellement
 dans un environnement sans accès réseau vers ce dépôt ni vers `soar8`.
@@ -17,7 +17,7 @@ dans un environnement sans accès réseau vers ce dépôt ni vers `soar8`.
 | `playbooks/*.tgz` (PB) | proofpoint_trap_detail, proofpoint_trap_triage, proofpoint_trap_attachments, proofpoint_trap_acknowledge, proofpoint_trap_close, proofpoint_trap_isolation_notify, proofpoint_trap_recheck, proofpoint_trap_summary, proofpoint_trap_orchestrator |
 | `playbooks/source/` | Mêmes CF/playbooks, extraits — pour lecture, pas pour import |
 | `assets/*.json` | Modèles de configuration d'assets (identifiants masqués — voir ci-dessous) |
-| `custom_lists/*.json` | Schéma de la/les liste(s) personnalisée(s) (en-têtes uniquement — voir la section dédiée ci-dessous) |
+| `custom_lists/*.json` | Liste(s) personnalisée(s) — les lignes définies par ce paquet, jamais les lignes de données de la source (voir la section dédiée ci-dessous) |
 | `docs/` | Document de plan d'implémentation, pour le contexte de conception complet |
 
 ## [!] Mise à niveau d'une installation existante — à lire en premier
@@ -58,6 +58,8 @@ d'installation.
 
 - **Les URL des notes ne sont plus cliquables (2026-10-05).** SOAR transforme une URL d'une note en lien sauf si elle est entre accents graves (backticks). `proofpoint_trap_summary` met désormais chaque URL de ses tableaux entre accents graves, et `proofpoint_trap_detail` fait de même pour la ligne de résumé de l'incident ; les notes d'e-mail de `proofpoint_trap_attachments` le faisaient déjà. Deux liens restent cliquables volontairement : **Open in TRAP** dans la note de détail et les liens du navigateur isolé de `proofpoint_trap_isolation_notify`. Réimportez `proofpoint_trap_detail` et `proofpoint_trap_summary` (tous deux restent inactifs — l'orchestrateur les lance) et refaites pointer leurs noms d'actifs si vous les aviez modifiés. Les notes écrites avant la mise à jour gardent leurs liens ; une note de résumé est réécrite à la prochaine exécution du conteneur.
 
+- **Libellés et types de données des artefacts (2026-10-06).** Chaque artefact créé par les playbooks porte désormais le libellé `event`, `Enrichment Complete` et `Enrichment Failed` compris (ils avaient leurs propres libellés, que rien ne lisait ; les playbooks les retrouvent par leur nom). `proofpoint_trap_detail` ne laisse plus SOAR deviner un type de données pour les champs qu'il ne déclare pas (SOAR avait marqué le rôle de l'e-mail, l'objet, les dates et l'état de l'incident comme `domain` / `host name`), et déclare : le `messageId` de l'expéditeur comme `internet message id`, l'`url` d'un domaine menaçant comme `url`, `fileName` comme `file name` sur `MIME Body` et `Email Attachment`, et l'`incidentId` d'un `Event Info Update` comme `proofpoint trap incident id` (les actions TRAP y sont proposées). Avec les seules applications de messagerie IMAP et SMTP, `internet message id` ne propose encore aucune action ; `email` et `vault id` proposent `send email` de SMTP. Réimportez `proofpoint_trap_detail`, `proofpoint_trap_attachments` (tous deux restent inactifs) et `proofpoint_trap_recheck` (vérifiez qu'il est toujours actif après l'import), et refaites pointer leurs noms d'actifs si vous les aviez modifiés. Les artefacts créés avant la mise à jour gardent leurs libellés et types de données.
+
 ## Ordre d'installation
 
 1. **Installer l'application/les applications connecteur** — Apps > Install App, charger
@@ -95,7 +97,7 @@ d'installation.
    | `soar8` | Phantom | `proofpoint_trap_detail` | `assets/soar8.json` |
 
 3. **Créer la/les liste(s) personnalisée(s)** à partir de `custom_lists/*.json` — chaque
-   fichier contient le tableau `content` exact (ligne d'en-tête seule, jamais les lignes de données de la source) à
+   fichier contient le tableau `content` exact (les lignes définies par ce paquet, jamais les lignes de données de la source) à
    envoyer en POST vers `/rest/decided_list` :
    ```bash
    curl -sk -u '<user>:<password>' -X POST https://<target>:<port>/rest/decided_list \
@@ -136,8 +138,9 @@ playbook y stocke et à quel moment.
 
 ## Listes personnalisées à remplir
 
-Réglages lus par les playbooks. Créez-les (étape ci-dessus), puis ajoutez vos propres
-lignes sous la ligne d'en-tête si besoin ; le cas d'usage fonctionne avec des listes vides.
+Réglages lus par les playbooks. Créez-les (étape ci-dessus), puis remplissez-les comme
+l'indique la description de chaque liste ci-dessous, si besoin ; le cas d'usage fonctionne
+avec les listes telles que livrées.
 
 - `proofpoint_trap_excluded_email` : adresses e-mail que `proofpoint_trap_detail` et `proofpoint_trap_attachments` écartent, comme expéditeur, destinataire ou Cc — typiquement une adresse présente sur chaque incident. Colonnes : `email` (l'adresse, sans tenir compte de la casse), `date` (JJ/MM/AAAA) et `reason` (pour vous uniquement), `enabled` (`yes` pour appliquer la ligne, toute autre valeur pour la garder sans l'appliquer). Le fichier est livré avec deux lignes d'exemple, `sender1@example.com` et `sender2@example.com` : remplacez-les par vos vraies adresses (example.com n'envoie jamais de vrai courrier : laissées telles quelles, elles ne correspondent à rien). Une adresse écartée n'a pas d'artefact `Sender Email` ni `Recipient Email`, son domaine pas d'artefact `Sender Domain` (sauf si un autre expéditeur le partage), et elle ne nomme jamais un conteneur : quand TRAP ne donne pas de résumé à un incident, le conteneur est nommé `TRAP-<id>: <premier expéditeur non écarté>` au lieu de `TRAP-<id>: No summary`. Sans ligne activée, rien n'est écarté ; la ligne d'en-tête est ignorée.
 

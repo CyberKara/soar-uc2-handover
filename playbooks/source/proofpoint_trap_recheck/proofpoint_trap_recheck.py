@@ -424,7 +424,7 @@ def dispatch_updates(action=None, success=None, container=None, results=None, ha
                 "source_data_identifier": "trap-{}-mime-{}".format(inc_id, event_id),
                 "label": "event",
                 "cef": {"vaultId": vault_id, "fileName": file_name},
-                "cef_types": {"vaultId": ["vault id"]},
+                "cef_types": {"vaultId": ["vault id"], "fileName": ["file name"]},
                 "container_id": container_id,
                 "run_automation": False,
                 # An artifact created without a severity gets SOAR's default
@@ -453,6 +453,9 @@ def dispatch_updates(action=None, success=None, container=None, results=None, ha
             "source_data_identifier": "trap-{}-recheck-{}".format(inc_id, sig_suffix),
             "label": "event",
             "cef": update_cef,
+            # The connector's data type for a TRAP incident id: the TRAP
+            # actions taking incident_id are offered on it from the artifact.
+            "cef_types": {"incidentId": ["proofpoint trap incident id"]},
             "container_id": container_id,
             "run_automation": True,
             "severity": "low",  # never raise the container severity, see above

@@ -618,7 +618,7 @@ def extract_attachments(action=None, success=None, container=None, results=None,
                 "source_data_identifier": "trap-{}-{}-attachment-{}-{}".format(incident_id, event_id, filename, sha256[:12]),
                 "label": "event",
                 "cef": attachment_cef,
-                "cef_types": {"vaultId": ["vault id"], "fileHashSha256": ["sha256"]},
+                "cef_types": {"vaultId": ["vault id"], "fileHashSha256": ["sha256"], "fileName": ["file name"]},
                 "container_id": container_id,
                 "run_automation": False,
                 # UC2 artifacts are enrichment data, not severity signals: an

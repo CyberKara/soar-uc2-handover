@@ -4,6 +4,28 @@
 
 # Proofpoint TRAP Incident Triage (UC2) — Playbook Implementation Plan
 
+**2026-10-06 — Artifact data types and labels (user request). Live as ids 366-374 (deployed by the user
+01:08Z; active = orchestrator 374 + recheck 372 only). Verified on fresh incident container 2591 (01:13Z):
+orchestrator → PB1/PB3/PB2/PB8 `success`, severity `low`, every artifact `event`, Sender Email `messageId` →
+`internet message id`, nothing guessed on role/subject/dates/`incidentState`; app_runs 7483/7485 received
+`determine_contains: false` (not dropped as empty). Then the remaining paths, triggered with the mock's
+`POST /_admin/trap/add_event` (an event with `urls` + `attachments` on incident 1790910428): PB7's tick
+01:28Z wrote `MIME Body` (`fileName` → `file name`) and `Event Info Update` (`incidentId` → `proofpoint trap
+incident id`), whose orchestrator run 6231 had PB1 write Threat Domain (`url` → `url`, `destinationDnsDomain` →
+`domain`) and PB3 write Email Attachment (`fileName` → `file name`); all runs `success`, container still `low`.**
+Every UC2 artifact gets the label
+`event` — `Enrichment Complete`/`Enrichment Failed` move off their own `enrichment_complete`/`enrichment_failed`
+(nothing read those labels; every playbook finds the markers by name). PB1 passes `determine_contains: False`
+to "add artifact", which had guessed `domain`/`host name` for `emailRole`, `emailSubject`, `bodyType`,
+`deliveryTime`, `abuseCopy`, `incidentState` and Threat Domain's `url`. Declared now: Sender Email `messageId` →
+`internet message id`; Threat Domain `url` → `url`; MIME Body (PB1, PB7) and Email Attachment (PB3) `fileName` →
+`file name`; Event Info Update (PB7) `incidentId` → `proofpoint trap incident id` (the connector's own type:
+the 8 TRAP actions taking `incident_id` are offered on it). Unchanged: the artifact `type` field (free text, no
+vendor list, no phishing app sets it — user chose not to set it), existing artifacts (new ones only), Event
+Info's `incidentId` (connector-built; waits for the next connector release). The appliance has only the IMAP
+and SMTP mail apps (user, 2026-10-06): no action there takes `internet message id`; SMTP `send email` takes
+`email` and `vault id`. Survey of other phishing apps + community playbooks and the rules: `constraints.md`.
+
 **2026-10-05 — URLs in notes are not clickable (user request).** SOAR makes a URL in a note a link unless it
 sits in backticks. PB8's table cells (`cell()`) and PB1's incident summary line now put every `scheme://…` or
 `www.…` in backticks; PB3 already did (and defangs). Left clickable on purpose: PB1's "Open in TRAP" and PB6's
@@ -11,7 +33,7 @@ isolation-browser links. The 8.6 UI renders notes as GFM (`remark-gfm` 1.x / `ma
 bundles), which links `http(s)://`, `www.` and email addresses but not bare domains — email addresses stay
 links (offered to the user, not done). Live as ids 347-355 (deployed 15:00Z), active = orchestrator 355 +
 recheck 353 only. Verified: PB8 re-run on container 2499 (run 5954) shows the URLs in backticks; fresh incident
-container 2508 ran orchestrator → PB1/PB3/PB2/PB8 all `success`. Not exported to the handover mirror yet.
+container 2508 ran orchestrator → PB1/PB3/PB2/PB8 all `success`. Handover mirror → `db6e1da` (package r21, upgrade note 2026-10-05: re-import PB1 + PB8).
 
 **2026-10-02 — Close the container when TRAP closes the incident (user request). Live-tested: container 1896 closed
 by a mock close (14:19Z). PB7 fixed on the way: it had only ever rechecked incidents in state `new`.** Live as ids
