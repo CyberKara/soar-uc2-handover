@@ -43,13 +43,13 @@ from datetime import datetime, timedelta
 #
 # Trigger: Manual run by analyst
 # Playbook input: isolation_browser_url (default:
-# https://my_isolated_browser/browser?url=) -- deliberately not hardcoded,
+# https://www.domain.tld/browser?url=) -- deliberately not hardcoded,
 # per constraints.md's no-hardcoded-config rule; this is a per-deployment
 # value, not project-fixed.
 
 import urllib.parse
 
-DEFAULT_ISOLATION_BROWSER_URL = "https://my_isolated_browser/browser?url="
+DEFAULT_ISOLATION_BROWSER_URL = "https://www.domain.tld/browser?url="
 # The target SOAR shows at most about 22,000 characters of a note, so no note
 # is posted longer than this; a longer one is split by _note_parts().
 _NOTE_MAX_CHARS = 20000

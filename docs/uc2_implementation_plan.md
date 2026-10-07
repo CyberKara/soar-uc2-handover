@@ -1,8 +1,23 @@
-> **Note:** this copy has had 5 reference(s) to the source lab's own
+> **Note:** this copy has had 6 reference(s) to the source lab's own
 > internal addresses replaced with `<lab-address-redacted>`. They named
 > the lab that built this package, never a target system of yours.
 
 # Proofpoint TRAP Incident Triage (UC2) — Playbook Implementation Plan
+
+**2026-10-07 — PB6's default isolation prefix is `https://www.domain.tld/browser?url=`; the target stays
+URL-encoded. Live as ids 384-392 (deployed 17:39Z; active = orchestrator 392 + recheck 390 only). Verified: PB6
+run 7242 on container 2870 (owner/status set for the test, restored after) → `success`, `link_count` 2, one
+email to the mock SMTP and one note, both carrying e.g. `https://www.domain.tld/browser?url=https%3A%2F%2Fsoar8.<lab-address-redacted>%2Fmission%2F2870`
+that decodes to its exact target. Handover NOT yet refreshed — next package: re-import PB6.**
+The isolation browser's working link has the form `browser?url=https%3A%2F%2Fwww.google.fr%2F` (user, from the
+appliance, 2026-10-07): URL encoding (`urllib.parse.quote(target, safe="")` — `:`/`/` become `%3A`/`%2F`,
+letters, digits and `. - _ ~` stay), which PB6 has done since it was built. The user first described it as
+"base64 encoded"; a base64 version (new CF `base64_encode` + two PB6 blocks, live as ids 375-383, run 7101) was
+built, deployed and then reverted the same day once the example link showed URL encoding — **do not re-introduce
+base64 for these links.** Only the placeholder default changed (`https://my_isolated_browser/browser?url=` before);
+each site still sets its own prefix through the `isolation_browser_url` input. The CF `base64_encode` was kept as a
+shared CF (user, 2026-10-07): it moved out of UC2 to `playbooks/common/custom_functions/` (use case `common`,
+soar8 CF id 46) and is not part of UC2 or its handover.
 
 **2026-10-06 — Artifact data types and labels (user request). Live as ids 366-374 (deployed by the user
 01:08Z; active = orchestrator 374 + recheck 372 only). Verified on fresh incident container 2591 (01:13Z):
@@ -12,7 +27,8 @@ orchestrator → PB1/PB3/PB2/PB8 `success`, severity `low`, every artifact `even
 `POST /_admin/trap/add_event` (an event with `urls` + `attachments` on incident 1790910428): PB7's tick
 01:28Z wrote `MIME Body` (`fileName` → `file name`) and `Event Info Update` (`incidentId` → `proofpoint trap
 incident id`), whose orchestrator run 6231 had PB1 write Threat Domain (`url` → `url`, `destinationDnsDomain` →
-`domain`) and PB3 write Email Attachment (`fileName` → `file name`); all runs `success`, container still `low`.**
+`domain`) and PB3 write Email Attachment (`fileName` → `file name`); all runs `success`, container still `low`.
+Handover mirror → `d471db0` (package r22, upgrade note 2026-10-06: re-import PB1, PB3, PB7).**
 Every UC2 artifact gets the label
 `event` — `Enrichment Complete`/`Enrichment Failed` move off their own `enrichment_complete`/`enrichment_failed`
 (nothing read those labels; every playbook finds the markers by name). PB1 passes `determine_contains: False`
@@ -1495,16 +1511,19 @@ in a sandboxed browser instead of directly), so the analyst can inspect them wit
 **Trigger:** Manual run by analyst, launched from the container after reviewing PB1's enrichment.
 Independent entry point, same convention as PB4/PB5 — no chaining, no writes back to TRAP.
 
-**Inputs:** `isolation_browser_url` (playbook input, default `https://my_isolated_browser/browser?url=`)
+**Inputs:** `isolation_browser_url` (playbook input, default `https://www.domain.tld/browser?url=` since
+2026-10-07, `https://my_isolated_browser/browser?url=` before)
 — deliberately **not hardcoded** in the code block, per user decision (matches `constraints.md`'s "no
 hardcoded asset/app names" spirit — this is a per-deployment config value, not project-fixed).
 
-**Link format (user-specified 2026-08-13):**
+**Link format (user-specified 2026-08-13; confirmed against the appliance's working link 2026-10-07):**
 ```
 {isolation_browser_url}{URL_ENCODED_target}
 ```
 One link per target — the container's own SOAR URL (`{base_url}/mission/{container_id}`) plus each
-unique threat URL found in the incident.
+unique threat URL found in the incident. URL encoding = `urllib.parse.quote(target, safe="")`: `:` and
+`/` become `%3A`/`%2F`, dots stay — e.g. `browser?url=https%3A%2F%2Fwww.google.fr%2F`. **Not base64**
+(tried and reverted 2026-10-07, see the top of this file).
 
 **Built flow (`playbooks/proofpoint_trap/proofpoint_trap_isolation_notify.py`):**
 ```

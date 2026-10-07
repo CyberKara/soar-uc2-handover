@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Air-Gapped Handover Package
 
-Generated 2026-10-06 11:13 UTC from `proofpoint_trap` (source env: `soar8`).
+Generated 2026-10-07 19:07 UTC from `proofpoint_trap` (source env: `soar8`).
 
 This package is self-contained — everything needed to deploy this use case by hand
 in an environment with no network access back to this repo or to `soar8`.
@@ -58,6 +58,8 @@ previous package. On a completely fresh target, skip to Install order.
 - **URLs in notes are no longer clickable (2026-10-05).** SOAR turns a URL in a note into a link unless it sits in backticks. `proofpoint_trap_summary` now puts every URL in its tables in backticks, and `proofpoint_trap_detail` does the same for the incident summary line; the email notes of `proofpoint_trap_attachments` already did. Two links stay clickable on purpose: **Open in TRAP** in the detail note and the isolation-browser links of `proofpoint_trap_isolation_notify`. Re-import `proofpoint_trap_detail` and `proofpoint_trap_summary` (both stay inactive — the orchestrator runs them) and re-point their asset names if you had changed them. Notes written before the upgrade keep their links; a summary note is rewritten at the container's next run.
 
 - **Artifact labels and data types (2026-10-06).** Every artifact the playbooks create now has the label `event`, `Enrichment Complete` and `Enrichment Failed` included (they had labels of their own that nothing read; the playbooks find them by name). `proofpoint_trap_detail` no longer lets SOAR guess a data type for the fields it does not declare (SOAR had tagged the email role, subject, dates and the incident state as `domain` / `host name`), and declares: the sender's `messageId` as `internet message id`, a threat domain's `url` as `url`, `fileName` as `file name` on `MIME Body` and `Email Attachment`, and the `incidentId` of an `Event Info Update` as `proofpoint trap incident id` (the TRAP actions are offered on it). With only the IMAP and SMTP mail apps, `internet message id` offers no action yet; `email` and `vault id` offer SMTP's `send email`. Re-import `proofpoint_trap_detail`, `proofpoint_trap_attachments` (both stay inactive) and `proofpoint_trap_recheck` (check it is still active after the import), and re-point their asset names if you had changed them. Artifacts created before the upgrade keep their labels and data types.
+
+- **Isolation-browser prefix (2026-10-07).** The default `isolation_browser_url` of `proofpoint_trap_isolation_notify` is now `https://www.domain.tld/browser?url=` (it was `https://my_isolated_browser/browser?url=`). It is still a placeholder: put your isolation browser's real prefix in the `isolation_browser_url` field when you launch the playbook, or set it once as the default — open the playbook in the editor, change `DEFAULT_ISOLATION_BROWSER_URL` in its Global Custom Code and save. The target URL is still URL-encoded after `?url=` (`:` and `/` become `%3A` and `%2F`, dots stay), e.g. `https://www.domain.tld/browser?url=https%3A%2F%2Fwww.google.fr%2F`. Re-import `proofpoint_trap_isolation_notify` (a data playbook: nothing to activate) and re-point its `smtp` asset name if you had changed it. If you had already set your own default in that playbook, the import replaces it: set it again.
 
 ## Install order
 
