@@ -81,10 +81,24 @@ Design was decided by the user the same day; the item list and its status are in
   archives; 21 gitleaks hits = VPE `comparisonKey` ids, the same pins as r23; `.github/` kept. Appliance:
   re-import PB1, PB2, PB3 and PB8 (all four stay inactive). **Superseded by r25:** r24 still has the old
   shared-mailbox rule, and its note tells the operator to list the shared mailbox.
-- **Handover r25 (pending the user's go-ahead):** export from ids 420-428, with the corrected upgrade note.
-  Appliance: re-import PB1.
-- **Open:** the operator's two appliance facts (a sample `X-PhishAlarm-Sender` value; the dispositions their asset
-  ingests).
+- **Handover r25 — mirror `cyberkara/soar-uc2-handover` → `3228127`** (pushed 2026-10-08 with the user's go-ahead;
+  package `dist/handover/proofpoint_trap-2026-10-08-r25`, exported from live ids 420-428; corrected upgrade note).
+  Same scan results as r24: 0 lab addresses, paths or key material, archives included; 21 `comparisonKey` hits =
+  the same pins. Against r24, only PB1, the note and this doc changed. Appliance: from r24, re-import PB1; from
+  r23 or earlier, PB1, PB2, PB3 and PB8.
+- **`X-PhishAlarm-Sender` format (operator sample, 2026-10-08): `"Name <address>`, with a quote opened before the
+  display name and never closed. Fixed, live as ids 429-437 (deployed by the user 2026-10-08 14:59Z), verified on case
+  3110 (incident 1014): named after the plain address, Sender Domain without `>`, severity high for
+  Malicious over Informational.**
+  - The bug: `email.utils.parseaddr` returns the whole `Name <address>` as the address for that form. It contains
+    `@`, so r25's PB1 used it for the case name and the Sender Email, and the Sender Domain ended in `>`.
+  - The fix: PB1 `_header_address()` takes the address in the last `<...>`, else `parseaddr`'s, and keeps it
+    only if it is one plain address. Tested on 11 forms, including `"Name" <a>`, `Name <a>`, a bare address, no
+    address, `<not an address>`.
+  - No public doc names the header (our vendored TRAP reference lists six other `X-PhishAlarm-*` headers;
+    Proofpoint's PhishAlarm guides need a portal login).
+  - Mock seed 1014 has the exact form; upgrade note added for r26.
+- **Open:** the dispositions the operator's TRAP asset ingests.
 - **Known limit:** a re-run does not add the new fields to a Sender Email that already exists (dedup by
   address + role), so older cases keep the old shape.
 

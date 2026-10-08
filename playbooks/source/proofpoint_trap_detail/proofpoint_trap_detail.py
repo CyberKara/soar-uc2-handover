@@ -232,6 +232,17 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
         return flat
 
     from email.utils import parseaddr  # local import, same reason as urllib.parse above
+    import re
+
+    def _header_address(value):
+        # X-PhishAlarm-Sender arrives on the appliance as `"Name <addr>`, with an
+        # unclosed quote (operator sample, 2026-10-08). parseaddr then returns the
+        # whole text as the address, so take the address inside the last <...>
+        # first, else parseaddr's, and keep it only if it is one plain address.
+        value = str(value or "")
+        bracketed = re.findall(r"<([^<>\s]+)>", value)
+        candidate = (bracketed[-1] if bracketed else parseaddr(value)[1]).strip().strip("\"'")
+        return candidate if re.fullmatch(r"[^@\s<>\"',;]+@[^@\s<>\"',;]+\.[^@\s<>\"',;]+", candidate) else ""
 
     def _stringify_delivery_time(value):
         # messageDeliveryTime isn't always a plain string — a real captured
@@ -391,7 +402,7 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
             headers = email.get("headers") or {}
             report_copy = email.get("abuseCopy") is True and has_reported_email
             raw_header_sender = _header_value(headers, "X-PhishAlarm-Sender")
-            header_sender = parseaddr(raw_header_sender)[1].strip() if raw_header_sender else ""
+            header_sender = _header_address(raw_header_sender)
             sender_from_header = (email.get("abuseCopy") is not False and not has_reported_email
                                   and "@" in header_sender)
             treat_as_report = report_copy or sender_from_header
