@@ -5,16 +5,26 @@
 # Proofpoint TRAP Incident Triage (UC2) — Playbook Implementation Plan
 
 **2026-10-07 — Operator feedback: shared-mailbox sender, header fields, CLEAR verdict, attachment MD5/size. Live
-as ids 411-419** (deployed by the user 2026-10-08 00:42Z, since this session's auto mode refuses deploys; active =
-recheck 417 + orchestrator 419 only; first deployed 22:42Z as 393-401) **and verified on case 2990 (incident 1012,
-2026-10-08 00:09Z)**; the 00:42Z redeploy added the PB2 tag fix below. Handover package r24. Design was decided by the user
-the same day; the item list and its status are in `docs/next-steps.md` (Splunk), entry 2026-10-07.
+as ids 420-428** (deployed by the user 2026-10-08 01:29Z, since this session's auto mode refuses deploys; active =
+recheck 426 + orchestrator 428 only; earlier deploys 393-401 at 22:42Z and 411-419 at 00:42Z) **and verified on
+cases 2990 (incident 1012) and 3003 (incident 1013)**. The 00:42Z redeploy added the PB2 tag fix below; the
+01:29Z one, the corrected shared-mailbox rule. Handover r24 shipped the old rule; r25 carries the correction.
+Design was decided by the user the same day; the item list and its status are in `docs/next-steps.md`
+(Splunk), entry 2026-10-07.
 
 - **PB1 `build_artifact_list`:**
-  - **Shared-mailbox sender.** When no Sender Email is left (TRAP gives no sender address, or only one in
-    `proofpoint_trap_excluded_email`), the address in `X-PhishAlarm-Sender` (`parseaddr`: bare or
-    `Name <addr>`) becomes the Sender Email, with `senderSource: X-PhishAlarm-Sender`, plus a Sender Domain.
-    The existing rename then names the case after it.
+  - **Shared-mailbox sender (rule corrected 2026-10-08).** When TRAP gives only the report (no `abuseCopy:
+    false` original in the event; `abuseCopy` true or unset) and the report carries `X-PhishAlarm-Sender`
+    (`parseaddr`: bare or `Name <addr>`), that address is the Sender Email, with `senderSource:
+    X-PhishAlarm-Sender`, plus a Sender Domain. The report is otherwise handled as a report copy: its own sender
+    and recipient are not used, and `X-PhishAlarm-Reporter` becomes the `reporter`. The existing rename then
+    names the case after it.
+    - The r24 rule (only when no Sender Email is left) needed every shared mailbox in
+      `proofpoint_trap_excluded_email`, and the user can't list thousands of service mailboxes.
+    - Vendor sample: a report copy's sender is the reporting tool (`analyzer@…`), its recipient the abuse
+      mailbox.
+    - Verified on case 3003 (incident 1013: the report's sender IS a shared mailbox in no list): named
+      `TRAP-1013: accounts@vendor-payments.example.org`; the shared mailbox only as `reporter`.
   - **Header fields.** Sender Email carries `receivedSpf`, `dkimSignature`, `inReplyTo` (typed
     `internet message id`), `received` and `phishAlarmSender` as flat fields. `emailHeaders` is kept, and
     `_WANTED_HEADERS` gains `In-Reply-To`, `Received` and `X-PhishAlarm-Sender`.
@@ -60,12 +70,19 @@ the same day; the item list and its status are in `docs/next-steps.md` (Splunk),
 - **Not live-tested:** PB1's TRAP-list attachments (the mock always serves the email); a Malicious raise to
   high (same code path as the medium raise).
 - **Mock gotcha:** a restart shifts every seed so that the LATEST `created_at` lands at now-30s. A seed dated
-  earlier falls before the poll checkpoint and is never ingested, which is why 1012 is now the latest seed.
+  earlier falls before the poll checkpoint and is never ingested, so each new test seed goes after the latest
+  one (1012, then 1013). A seed whose case already exists on soar8 is skipped as a duplicate.
 - **PB2 tag fix (after the test, deployed 2026-10-08 00:42Z as ids 411-419):** the tag uses the sub-disposition
   only under Unknown, like the severity. The mock's synthetic incidents pair Needs Manual Review with other
   dispositions; real TRAP cannot.
-- **Handover r24** (`dist/handover/proofpoint_trap-2026-10-08-r24`, upgrade note "Sender, headers, CLEAR verdict
-  and attachments"). Appliance: re-import PB1, PB2, PB3 and PB8 (all four stay inactive).
+- **Handover r24 — mirror `cyberkara/soar-uc2-handover` → `7be4caf`** (pushed 2026-10-08 with the user's go-ahead;
+  package `dist/handover/proofpoint_trap-2026-10-08-r24`, exported from live ids 411-419; upgrade note "Sender,
+  headers, CLEAR verdict and attachments"). Scan: 0 lab addresses, paths or key material, including inside the
+  archives; 21 gitleaks hits = VPE `comparisonKey` ids, the same pins as r23; `.github/` kept. Appliance:
+  re-import PB1, PB2, PB3 and PB8 (all four stay inactive). **Superseded by r25:** r24 still has the old
+  shared-mailbox rule, and its note tells the operator to list the shared mailbox.
+- **Handover r25 (pending the user's go-ahead):** export from ids 420-428, with the corrected upgrade note.
+  Appliance: re-import PB1.
 - **Open:** the operator's two appliance facts (a sample `X-PhishAlarm-Sender` value; the dispositions their asset
   ingests).
 - **Known limit:** a re-run does not add the new fields to a Sender Email that already exists (dedup by

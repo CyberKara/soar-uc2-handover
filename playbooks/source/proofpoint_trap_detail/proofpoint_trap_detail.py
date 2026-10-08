@@ -1,5 +1,5 @@
 """
-Automation playbook (PB1) for label proofpoint_trap, left inactive: proofpoint_trap_orchestrator runs it first. Fetches the TRAP incident with its events, downloads each event&#39;s original email, and creates the derived artifacts (sender/recipient emails, domains, threat URLs, click IPs, MIME bodies), a detail note linking to the incident in TRAP, and a final Enrichment Complete artifact. Creates no sender or recipient artifact for an address in the custom list proofpoint_trap_excluded_email (enabled rows) nor for an abuse-mailbox report copy when TRAP also gives the reported email (the reporting user becomes a Recipient Email, role reporter), renames a container TRAP gave no summary after its first remaining sender (when none is left, after the sender the X-PhishAlarm-Sender header names, which also becomes the Sender Email), gives each Sender Email the Received-SPF, DKIM-Signature, In-Reply-To, Received and X-PhishAlarm-Sender headers as fields, turns the attachments TRAP lists for an alert whose original email could not be downloaded into Email Attachment artifacts (name, type, size, MD5, SHA256), and on the incident&#39;s first enrichment comments on the TRAP incident with a link to the SOAR case. A failed fetch or platform write adds an error note and an Enrichment Failed artifact instead, so a later run can retry. Assets are selected in each action block, never in code, so an importer can point them at their own asset names.
+Automation playbook (PB1) for label proofpoint_trap, left inactive: proofpoint_trap_orchestrator runs it first. Fetches the TRAP incident with its events, downloads each event&#39;s original email, and creates the derived artifacts (sender/recipient emails, domains, threat URLs, click IPs, MIME bodies), a detail note linking to the incident in TRAP, and a final Enrichment Complete artifact. Creates no sender or recipient artifact for an address in the custom list proofpoint_trap_excluded_email (enabled rows) nor for an abuse-mailbox report copy when TRAP also gives the reported email (the reporting user becomes a Recipient Email, role reporter), renames a container TRAP gave no summary after its first remaining sender (for a report TRAP gives without the reported email, the sender the X-PhishAlarm-Sender header names, which is also its Sender Email), gives each Sender Email the Received-SPF, DKIM-Signature, In-Reply-To, Received and X-PhishAlarm-Sender headers as fields, turns the attachments TRAP lists for an alert whose original email could not be downloaded into Email Attachment artifacts (name, type, size, MD5, SHA256), and on the incident&#39;s first enrichment comments on the TRAP incident with a link to the SOAR case. A failed fetch or platform write adds an error note and an Enrichment Failed artifact instead, so a later run can retry. Assets are selected in each action block, never in code, so an importer can point them at their own asset names.
 """
 
 
@@ -375,6 +375,13 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
         # when the event also carries the reported email, so nothing is lost
         # when TRAP gives the report alone. The user who reported it (header
         # X-PhishAlarm-Reporter) becomes a Recipient Email, role "reporter".
+        # When TRAP gives the report alone and the report carries the header
+        # X-PhishAlarm-Sender (a report sent from a shared mailbox, operator
+        # 2026-10-07), that header names the reported email's sender: it is the
+        # Sender Email, and the report is otherwise handled as a report copy.
+        # The report's own sender is the reporting tool or the shared mailbox,
+        # never the reported email's sender, so no mailbox needs listing in
+        # proofpoint_trap_excluded_email for this.
         has_reported_email = any((e or {}).get("abuseCopy") is False for e in emails)
 
         for email in emails:
@@ -383,9 +390,15 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
             delivery_time = _stringify_delivery_time(email.get("messageDeliveryTime"))
             headers = email.get("headers") or {}
             report_copy = email.get("abuseCopy") is True and has_reported_email
+            raw_header_sender = _header_value(headers, "X-PhishAlarm-Sender")
+            header_sender = parseaddr(raw_header_sender)[1].strip() if raw_header_sender else ""
+            sender_from_header = (email.get("abuseCopy") is not False and not has_reported_email
+                                  and "@" in header_sender)
+            treat_as_report = report_copy or sender_from_header
 
-            if report_copy:
-                report_copies_skipped += 1
+            if treat_as_report:
+                if report_copy:
+                    report_copies_skipped += 1
                 reporter = ""
                 for header_name, header_value in headers.items():
                     if str(header_name).lower() == "x-phishalarm-reporter":
@@ -408,7 +421,10 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
 
             # Sender email
             sender = email.get("sender") or {}
-            from_addr = "" if report_copy else sender.get("email", "")
+            if sender_from_header:
+                from_addr = header_sender
+            else:
+                from_addr = "" if report_copy else sender.get("email", "")
             if from_addr and from_addr.strip().lower() in excluded_addresses:
                 skipped_addresses.add(from_addr.strip().lower())
             elif from_addr and from_addr not in seen_sender_emails:
@@ -427,10 +443,13 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
                     "abuseCopy": abuse_copy_str,
                     "emailHeaders": selected_headers,
                 }
+                if sender_from_header:
+                    sender_cef["senderSource"] = "X-PhishAlarm-Sender"
                 sender_cef.update(_flat_header_cef(headers))
                 artifacts.append({
                     "name": "Sender Email",
-                    "description": "Sender from alert {} (subject: {})".format(event_id, subject),
+                    "description": "{} from alert {} (subject: {})".format(
+                        "Sender named by X-PhishAlarm-Sender" if sender_from_header else "Sender", event_id, subject),
                     "label": "event",
                     "cef": sender_cef,
                     "cef_types": {"emailAddress": ["email"], "messageId": ["internet message id"],
@@ -452,7 +471,7 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
 
             # Recipient email
             recipient = email.get("recipient") or {}
-            to_addr = "" if report_copy else recipient.get("email", "")
+            to_addr = "" if treat_as_report else recipient.get("email", "")
             if to_addr and to_addr.strip().lower() in excluded_addresses:
                 skipped_addresses.add(to_addr.strip().lower())
             elif to_addr and to_addr not in seen_recipient_emails:
@@ -477,7 +496,7 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
             # vault attachment, not this structured response), which is out
             # of scope for this function. Left as a harmless no-op rather than
             # removed, in case `headers` ever does carry one on some tenant.
-            cc_raw = "" if report_copy else (headers.get("Cc") or headers.get("CC") or headers.get("cc") or "")
+            cc_raw = "" if treat_as_report else (headers.get("Cc") or headers.get("CC") or headers.get("cc") or "")
             for cc_addr in [a.strip() for a in cc_raw.split(",") if a.strip()]:
                 if cc_addr.lower() in excluded_addresses:
                     skipped_addresses.add(cc_addr.lower())
@@ -565,61 +584,6 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
             threat_label = "{} ({})".format(threat_name, ", ".join(details)) if details else threat_name
             if threat_label not in threat_names:
                 threat_names.append(threat_label)
-
-    # A report sent from a shared mailbox can leave no sender: TRAP gives no
-    # sender address, or only the shared mailbox, which the operator puts in
-    # proofpoint_trap_excluded_email. The reporting tool then names the
-    # reported email's sender in the header X-PhishAlarm-Sender (operator,
-    # 2026-10-07); it becomes the Sender Email, so the rename below and the
-    # summary use it. Only when no other sender is left.
-    if not any(a["name"] == "Sender Email" for a in artifacts):
-        for event in events:
-            for email in event.get("emails", []):
-                raw_sender = _header_value(email.get("headers"), "X-PhishAlarm-Sender")
-                header_addr = parseaddr(raw_sender)[1].strip() if raw_sender else ""
-                if "@" not in header_addr:
-                    continue
-                if header_addr.lower() in excluded_addresses:
-                    skipped_addresses.add(header_addr.lower())
-                    continue
-                if header_addr in seen_sender_emails:
-                    continue
-                seen_sender_emails.add(header_addr)
-                subject = email.get("subject", "")
-                abuse_copy = email.get("abuseCopy")
-                sender_cef = {
-                    "emailAddress": header_addr,
-                    "emailRole": "sender",
-                    "senderSource": "X-PhishAlarm-Sender",
-                    "emailSubject": subject,
-                    "bodyType": email.get("bodyType", ""),
-                    "messageId": email.get("messageId", ""),
-                    "deliveryTime": _stringify_delivery_time(email.get("messageDeliveryTime")),
-                    "abuseCopy": "true" if abuse_copy is True else ("false" if abuse_copy is False else ""),
-                    "emailHeaders": _extract_selected_headers(email.get("headers") or {}),
-                }
-                sender_cef.update(_flat_header_cef(email.get("headers")))
-                artifacts.append({
-                    "name": "Sender Email",
-                    "description": "Sender named by X-PhishAlarm-Sender in alert {} (subject: {})".format(
-                        event.get("id", ""), subject),
-                    "label": "event",
-                    "cef": sender_cef,
-                    "cef_types": {"emailAddress": ["email"], "messageId": ["internet message id"],
-                                  "inReplyTo": ["internet message id"]},
-                    "run_automation": False,
-                })
-                domain = header_addr.split("@")[-1]
-                if domain and domain not in seen_domains:
-                    seen_domains.add(domain)
-                    artifacts.append({
-                        "name": "Sender Domain",
-                        "description": "Domain from sender {}".format(header_addr),
-                        "label": "event",
-                        "cef": {"sourceDnsDomain": domain},
-                        "cef_types": {"sourceDnsDomain": ["domain"]},
-                        "run_automation": False,
-                    })
 
     if report_copies_skipped:
         phantom.debug("{} abuse-mailbox report cop(y/ies): no sender/recipient artifact for them".format(
