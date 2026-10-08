@@ -1,5 +1,5 @@
 """
-Automation playbook (PB8) for label &#39;proofpoint_trap&#39;, left inactive: proofpoint_trap_orchestrator runs it last. Once proofpoint_trap_detail has enriched the container (an &#39;Enrichment Complete&#39; or &#39;Enrichment Failed&#39; artifact exists), reads every artifact on the container and writes one &#39;TRAP Summary&#39; note with a markdown table per artifact type (incident, senders, recipients, domains, URLs, click IPs, MIME bodies, attachments, enrichment runs, then any other type). Every later run rewrites the same note in place. When the newest Enrichment Complete says TRAP has closed the incident, closes the container once and adds a 'Closed in TRAP' note.
+Automation playbook (PB8) for label &#39;proofpoint_trap&#39;, left inactive: proofpoint_trap_orchestrator runs it last. Once proofpoint_trap_detail has enriched the container (an &#39;Enrichment Complete&#39; or &#39;Enrichment Failed&#39; artifact exists), reads every artifact on the container and writes one &#39;TRAP Summary&#39; note: the CLEAR verdict and the threat names of the alerts first, then a markdown table per artifact type (incident, senders, recipients, domains, URLs, click IPs, MIME bodies, attachments, enrichment runs, then any other type). Every later run rewrites the same note in place. When the newest Enrichment Complete says TRAP has closed the incident, closes the container once and adds a 'Closed in TRAP' note.
 """
 
 
@@ -83,7 +83,30 @@ def build_summary(action=None, success=None, container=None, results=None, handl
     def enrichment_result(artifact):
         return "complete" if artifact.get("name") == "Enrichment Complete" else "failed"
 
+    def dkim_short(artifact):
+        # DKIM-Signature is long (the signature itself); the signing domain
+        # and selector are what an analyst compares with the sender.
+        value = (artifact.get("cef") or {}).get("dkimSignature") or ""
+        tags = dict(re.findall(r"(?:^|;)\s*([ds])=([^;\s]+)", value))
+        return "; ".join("{}={}".format(k, tags[k]) for k in ("d", "s") if k in tags) or value
+
+    def file_size(artifact):
+        size = (artifact.get("cef") or {}).get("fileSize")
+        try:
+            size = int(size)
+        except (TypeError, ValueError):
+            return size
+        return "{:,} KB ({} bytes)".format(round(size / 1024), size) if size >= 1024 else "{} bytes".format(size)
+
     cef = lambda key: (lambda a: (a.get("cef") or {}).get(key))
+    # Received is a whole routing line; the column keeps it short so the
+    # summary stays within the note size limit. The full chain is in the
+    # Email Content note.
+    def shortened(value, limit):
+        text = " ".join(str(value or "").split())
+        return text[:limit - 3] + "..." if len(text) > limit else text
+
+    cef_short = lambda key, limit: (lambda a: shortened((a.get("cef") or {}).get(key), limit))
     sections = [
         ("Incident", ["Event Info", "Event Info Update"], [
             ("Artifact", lambda a: a.get("name")),
@@ -96,11 +119,17 @@ def build_summary(action=None, success=None, container=None, results=None, handl
         ]),
         ("Sender Email", ["Sender Email"], [
             ("Address", cef("emailAddress")),
+            ("Address source", cef("senderSource")),
             ("Subject", cef("emailSubject")),
             ("Delivered", cef("deliveryTime")),
             ("Message ID", cef("messageId")),
+            ("In-Reply-To", cef("inReplyTo")),
             ("Body type", cef("bodyType")),
             ("Abuse copy", cef("abuseCopy")),
+            ("X-PhishAlarm-Sender", cef("phishAlarmSender")),
+            ("Received-SPF", cef_short("receivedSpf", 80)),
+            ("DKIM", dkim_short),
+            ("Received", cef_short("received", 80)),
         ]),
         ("Recipient Email", ["Recipient Email"], [
             ("Address", cef("emailAddress")),
@@ -118,7 +147,10 @@ def build_summary(action=None, success=None, container=None, results=None, handl
         ("Email Attachment", ["Email Attachment"], [
             ("File name", cef("fileName")),
             ("Type", cef("fileType")),
+            ("Size", file_size),
             ("SHA256", cef("fileHashSha256")),
+            ("MD5", cef("fileHashMd5")),
+            ("Source", cef("attachmentSource")),
             ("Warning", cef("mimeTypeMismatch")),
         ]),
         ("Enrichment runs", ["Enrichment Complete", "Enrichment Failed"], [
@@ -143,6 +175,20 @@ def build_summary(action=None, success=None, container=None, results=None, handl
             datetime.utcnow().strftime("%Y-%m-%d %H:%M"), len(artifacts)),
         "",
     ]
+
+    # The verdict first: TRAP's CLEAR analysis (Abuse Disposition / Sub
+    # Disposition) from the latest Event Info or Event Info Update, and the
+    # threat names of the incident's alerts from the latest Enrichment
+    # Complete -- a file a detection source condemned is named there.
+    info = (by_name.get("Event Info Update") or []) + (by_name.get("Event Info") or [])
+    info = max(info, key=lambda a: a.get("id") or 0) if info else None
+    info_cef = (info or {}).get("cef") or {}
+    verdict = " / ".join(str(v) for v in (info_cef.get("abuseDisposition"), info_cef.get("subDisposition")) if v)
+    intro += ["**CLEAR verdict:** {}  ".format(cell(verdict) if verdict else "not available")]
+    completes = by_name.get("Enrichment Complete") or []
+    threat_names = ((max(completes, key=lambda a: a.get("id") or 0).get("cef") or {}).get("threatNames")
+                    if completes else "")
+    intro += ["**Threats named by the alerts:** {}".format(cell(threat_names, 600) if threat_names else "none"), ""]
 
     # (title, header lines, row lines, closing lines) per table
     tables = []

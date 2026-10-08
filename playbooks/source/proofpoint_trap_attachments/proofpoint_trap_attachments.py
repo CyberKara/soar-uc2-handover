@@ -1,5 +1,5 @@
 """
-Automation playbook (PB3) for label &#39;proofpoint_trap&#39;, left inactive: proofpoint_trap_orchestrator runs it after proofpoint_trap_detail. Processes each &#39;MIME Body&#39; artifact not yet processed (vaulted raw .eml from proofpoint_trap_detail or proofpoint_trap_recheck): an &#39;Email Content&#39; note showing the email safely, each file attachment vaulted as its own &#39;Email Attachment&#39; artifact (vaultId, fileName, fileHashSha256), and an &#39;Attachment Extraction&#39; note. A note longer than 20,000 characters is split into parts.
+Automation playbook (PB3) for label &#39;proofpoint_trap&#39;, left inactive: proofpoint_trap_orchestrator runs it after proofpoint_trap_detail. Processes each &#39;MIME Body&#39; artifact not yet processed (vaulted raw .eml from proofpoint_trap_detail or proofpoint_trap_recheck): an &#39;Email Content&#39; note showing the email safely, each file attachment vaulted as its own &#39;Email Attachment&#39; artifact (vaultId, fileName, fileHashSha256, fileHashMd5, fileSize), and an &#39;Attachment Extraction&#39; note. A note longer than 20,000 characters is split into parts.
 """
 
 
@@ -601,11 +601,17 @@ def extract_attachments(action=None, success=None, container=None, results=None,
                 phantom.debug("Vault upload failed for {}: {}".format(filename, upload.get("message")))
                 continue
 
+            # MD5 and size as TRAP's own attachment view shows them (operator,
+            # 2026-10-07), computed from the same bytes as the SHA256.
+            # usedforsecurity=False: a FIPS-mode host refuses a plain md5().
             attachment_cef = {
                 "vaultId": attachment_vault_id,
                 "fileName": filename,
                 "fileHashSha256": sha256,
+                "fileHashMd5": hashlib.md5(payload, usedforsecurity=False).hexdigest(),
+                "fileSize": len(payload),
                 "fileType": content_type,
+                "attachmentSource": "original email",
             }
             if type_mismatch:
                 attachment_cef["mimeTypeMismatch"] = "declared {}, expected {} from filename".format(content_type, guessed_type)
@@ -618,7 +624,8 @@ def extract_attachments(action=None, success=None, container=None, results=None,
                 "source_data_identifier": "trap-{}-{}-attachment-{}-{}".format(incident_id, event_id, filename, sha256[:12]),
                 "label": "event",
                 "cef": attachment_cef,
-                "cef_types": {"vaultId": ["vault id"], "fileHashSha256": ["sha256"], "fileName": ["file name"]},
+                "cef_types": {"vaultId": ["vault id"], "fileHashSha256": ["sha256"], "fileHashMd5": ["md5"],
+                              "fileName": ["file name"]},
                 "container_id": container_id,
                 "run_automation": False,
                 # UC2 artifacts are enrichment data, not severity signals: an
@@ -705,6 +712,9 @@ def extract_attachments(action=None, success=None, container=None, results=None,
         received_chain = parsed.get_all("Received") or []
         reply_to = parsed.get("Reply-To", "")
         x_originating_ip = parsed.get("X-Originating-IP", "")
+        # Asked for by the operator (2026-10-07), shown after the others.
+        extra_headers = [(name, parsed.get_all(name) or [])
+                         for name in ("In-Reply-To", "X-PhishAlarm-Sender", "Received-SPF", "DKIM-Signature")]
         return_path = parsed.get("Return-Path", "")
         from_header = parsed.get("From", "")
 
@@ -724,6 +734,9 @@ def extract_attachments(action=None, success=None, container=None, results=None,
             lines.append("**Reply-To:** {}  ".format(_md_text(str(reply_to))))
         if x_originating_ip:
             lines.append("**X-Originating-IP:** {}  ".format(_md_text(str(x_originating_ip))))
+        for header_name, header_values in extra_headers:
+            for header_value in header_values:
+                lines.append("**{}:** {}  ".format(header_name, _md_text(" ".join(str(header_value).split()))))
         if auth_results:
             lines += ["", "**Authentication-Results:**", ""]
             lines += ["- " + _md_text(" ".join(str(ar).split())) for ar in auth_results]

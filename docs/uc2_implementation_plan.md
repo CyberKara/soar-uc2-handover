@@ -4,11 +4,79 @@
 
 # Proofpoint TRAP Incident Triage (UC2) — Playbook Implementation Plan
 
+**2026-10-07 — Operator feedback: shared-mailbox sender, header fields, CLEAR verdict, attachment MD5/size. Live
+as ids 411-419** (deployed by the user 2026-10-08 00:42Z, since this session's auto mode refuses deploys; active =
+recheck 417 + orchestrator 419 only; first deployed 22:42Z as 393-401) **and verified on case 2990 (incident 1012,
+2026-10-08 00:09Z)**; the 00:42Z redeploy added the PB2 tag fix below. Handover package r24. Design was decided by the user
+the same day; the item list and its status are in `docs/next-steps.md` (Splunk), entry 2026-10-07.
+
+- **PB1 `build_artifact_list`:**
+  - **Shared-mailbox sender.** When no Sender Email is left (TRAP gives no sender address, or only one in
+    `proofpoint_trap_excluded_email`), the address in `X-PhishAlarm-Sender` (`parseaddr`: bare or
+    `Name <addr>`) becomes the Sender Email, with `senderSource: X-PhishAlarm-Sender`, plus a Sender Domain.
+    The existing rename then names the case after it.
+  - **Header fields.** Sender Email carries `receivedSpf`, `dkimSignature`, `inReplyTo` (typed
+    `internet message id`), `received` and `phishAlarmSender` as flat fields. `emailHeaders` is kept, and
+    `_WANTED_HEADERS` gains `In-Reply-To`, `Received` and `X-PhishAlarm-Sender`.
+  - **TRAP attachments.** An alert with no `MIME Body` (not this run, not earlier) gets `Email Attachment`
+    artifacts from TRAP's `events[].emails[].attachments[]` (name, type, size, MD5, SHA256; no Vault file).
+    They use PB3's identifier, and `_artifact_key` now dedups `Email Attachment` by that identifier.
+  - **Threat names.** The alerts' threat names (`threatname`/`malwareName`, with category and source) go to
+    `Enrichment Complete` as `threatNames`.
+- **PB3:** `Email Attachment` adds `fileHashMd5` (`usedforsecurity=False`, FIPS-safe), `fileSize` and
+  `attachmentSource`. The Email Content note adds In-Reply-To, X-PhishAlarm-Sender, Received-SPF and
+  DKIM-Signature.
+- **PB2:** severity = the higher of the TRAP Severity mapping and the CLEAR verdict mapping:
+  - Malicious → high;
+  - Suspicious, False Negative, and Unknown with Needs Manual Review or no sub-disposition → medium;
+  - Unknown / Likely Harmless, Bulk, Spam, Low Risk, Known Good → low.
+
+  The verdict is read from the latest Event Info / Update (`collect2` `scope="all"`). One tag per case,
+  `trap-<words>` (the sub-disposition, else the disposition), read with `phantom.get_tags`; a stale verdict
+  tag is removed, and no other tag is ever touched. `add_tags`/`remove_tags`/`get_tags` exist on 8.6
+  (`api/container/`, read on soar8 2026-10-07).
+- **PB8:** the note opens with "CLEAR verdict" and "Threats named by the alerts". Sender Email gets the columns
+  Address source, In-Reply-To, X-PhishAlarm-Sender, Received-SPF, DKIM (`d=`/`s=` only) and Received (80
+  characters). Email Attachment gets Size, MD5 and Source.
+- **Mock (live `soar8/migration/mock-backend/mock_api_gateway.py`, and the identical copy in
+  `soar-connectors/test/`):**
+  - seed incident 1012 (shared-mailbox report copy only, no sender, no summary, Unknown / Needs Manual Review,
+    the five headers, one vendor-shape attachment);
+  - the email builder copies those headers into the downloadable email and adds per-email attachments as parts,
+    whose bytes match the listed MD5/SHA256/size (checked offline).
+
+  Live only after a `mock-api-gateway.service` restart.
+- **Gates:** userCode sync, VPE shape, SOAR validator: 0 errors, 0 warnings.
+- **Verified live:**
+  - case 2990 (orchestrator runs 7401-7407, all `success`):
+    - name `TRAP-1012: billing@supplier-billing.example.net`;
+    - Sender Email from `X-PhishAlarm-Sender` with the five header fields;
+    - attachment MD5 / SHA256 / size = TRAP's list;
+    - severity `medium` (TRAP Severity empty → low, raised by the verdict);
+    - tag `trap-needs-manual-review`; PB8 verdict line and new columns; PB3 note headers.
+  - The synthetic cases since the deploy (2978-2989) each got the expected severity and tag (Bulk, Spam,
+    Unknown-NMR, Unknown, Low Risk).
+  - PB2 run 7409 replaced a stale `trap-malicious` tag and kept an analyst tag.
+- **Not live-tested:** PB1's TRAP-list attachments (the mock always serves the email); a Malicious raise to
+  high (same code path as the medium raise).
+- **Mock gotcha:** a restart shifts every seed so that the LATEST `created_at` lands at now-30s. A seed dated
+  earlier falls before the poll checkpoint and is never ingested, which is why 1012 is now the latest seed.
+- **PB2 tag fix (after the test, deployed 2026-10-08 00:42Z as ids 411-419):** the tag uses the sub-disposition
+  only under Unknown, like the severity. The mock's synthetic incidents pair Needs Manual Review with other
+  dispositions; real TRAP cannot.
+- **Handover r24** (`dist/handover/proofpoint_trap-2026-10-08-r24`, upgrade note "Sender, headers, CLEAR verdict
+  and attachments"). Appliance: re-import PB1, PB2, PB3 and PB8 (all four stay inactive).
+- **Open:** the operator's two appliance facts (a sample `X-PhishAlarm-Sender` value; the dispositions their asset
+  ingests).
+- **Known limit:** a re-run does not add the new fields to a Sender Email that already exists (dedup by
+  address + role), so older cases keep the old shape.
+
 **2026-10-07 — PB6's default isolation prefix is `https://www.domain.tld/browser?url=`; the target stays
 URL-encoded. Live as ids 384-392 (deployed 17:39Z; active = orchestrator 392 + recheck 390 only). Verified: PB6
 run 7242 on container 2870 (owner/status set for the test, restored after) → `success`, `link_count` 2, one
 email to the mock SMTP and one note, both carrying e.g. `https://www.domain.tld/browser?url=https%3A%2F%2Fsoar8.<lab-address-redacted>%2Fmission%2F2870`
-that decodes to its exact target. Handover NOT yet refreshed — next package: re-import PB6.**
+that decodes to its exact target. Handover mirror `cyberkara/soar-uc2-handover` → `2b2c7f7` (package `dist/handover/proofpoint_trap-2026-10-07-r23`,
+upgrade note 2026-10-07: re-import PB6, set the real prefix).**
 The isolation browser's working link has the form `browser?url=https%3A%2F%2Fwww.google.fr%2F` (user, from the
 appliance, 2026-10-07): URL encoding (`urllib.parse.quote(target, safe="")` — `:`/`/` become `%3A`/`%2F`,
 letters, digits and `. - _ ~` stay), which PB6 has done since it was built. The user first described it as
