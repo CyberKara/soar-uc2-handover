@@ -1,5 +1,5 @@
 """
-Automation playbook (PB7) for label proofpoint_trap_recheck, run by its Timer asset, not by TRAP incidents. Periodically re-scans the whole in-window TRAP incident backlog (all states) for already-ingested incidents that changed since ingestion -- a field edit, disposition change, or newly-linked event that on_poll&#39;s checkpoint-based main pass can&#39;t see again once a container exists.
+Automation playbook (PB7) for label proofpoint_trap_recheck, run by its Timer asset. Finds ingested TRAP incidents that changed and adds an Event Info Update to their containers, which runs proofpoint_trap_orchestrator again.
 """
 
 
@@ -14,35 +14,10 @@ from datetime import datetime, timedelta
 
 
 
-# Design notes (kept here because a VPE save replaces the module docstring):
-# Proofpoint TRAP Recheck
-#
-# Automation playbook triggered on container creation for label
-# 'proofpoint_trap_recheck' (a Timer asset tick, not a real TRAP incident
-# container). Periodically re-scans the whole in-window TRAP incident
-# backlog (all states, not just poll_state="new") for incidents that have
-# already been ingested into SOAR but changed since -- a field edit,
-# disposition change, or newly-linked event that on_poll's own checkpoint-
-# based main pass would never see again once an incident has a container.
-#
-# Moved out of the connector's on_poll 2026-08-18 (previously
-# _run_recheck_pass/_incident_signature) -- see uc2_implementation_plan.md's
-# "fold into pb" entry for the reasoning. Custom list
-# `proofpoint_trap_recheck_state` (columns: incident_id, signature) replaces
-# the connector's self._state["incident_hashes"]/["incident_event_ids"]
-# persistent state -- durable across playbook runs the same way, just
-# playbook-owned instead of connector-owned. Dropped the connector's
-# newly-linked-event diffing in favor of a simpler design: any detected
-# change re-fetches/re-vaults ALL of that incident's MIME bodies, relying on
-# the already-proven SDI-based artifact dedup (native "add artifact" 400s
-# harmlessly on a duplicate SDI) instead of tracking per-incident event_ids.
-#
-# Trigger: Container created on label 'proofpoint_trap_recheck' (Timer asset)
-
 import hashlib
 
 STATE_LIST_NAME = "proofpoint_trap_recheck_state"
-DEFAULT_LOOKBACK_HOURS = 168  # 7 days, matches the connector's old default
+DEFAULT_LOOKBACK_HOURS = 168  # 7 days
 
 
 def _get_field_value(incident, field_name):
@@ -53,9 +28,7 @@ def _get_field_value(incident, field_name):
 
 
 def _build_event_info_cef(incident):
-    # Duplicated from proofpoint_trap_connector.py's _build_event_info_cef
-    # -- the cost of moving this off the connector (see this playbook's
-    # module docstring). Keep both in sync if either changes.
+    # Same fields as the connector's _build_event_info_cef; keep both in sync.
     inc_id = incident.get("id", "")
     disposition = _get_field_value(incident, "Abuse Disposition")
     sub_disposition = _get_field_value(incident, "Sub Disposition")
@@ -117,12 +90,9 @@ def list_incidents(action=None, success=None, container=None, results=None, hand
     ################################################################################
     ################################################################################
 
-    # This pass must see open and closed incidents too, the ones the on_poll
-    # main pass no longer looks at. One parameter set per state: SOAR drops an
-    # empty parameter at dispatch, so the old state "" never reached the
-    # connector, which then listed its default ("new") only -- a close made in
-    # TRAP was never seen (2026-10-02, app_run parameters had no "state").
-    # Several parameter sets = one app_run, one action result each.
+    # This pass must see open and closed incidents too. One parameter set per
+    # state: SOAR drops an empty parameter, so state "" would list only the
+    # connector's default (new). Several sets = one app_run, one result each.
     parameters = [
         {"state": state, "hours_back": str(DEFAULT_LOOKBACK_HOURS)}
         for state in ("new", "open", "closed")
@@ -143,8 +113,7 @@ def process_incidents(action=None, success=None, container=None, results=None, h
     phantom.debug("process_incidents() called")
 
     ################################################################################
-    # Diff each listed incident's signature against the recheck state list; incidents 
-    # that changed and already have a container go to the recheck batch.
+    # Find ingested incidents whose signature changed since the last tick.
     ################################################################################
 
     list_incidents_result_data = phantom.collect2(container=container, datapath=["list_incidents:action_result.status","list_incidents:action_result.data"], action_results=results)
@@ -186,9 +155,7 @@ def process_incidents(action=None, success=None, container=None, results=None, h
             incidents.append(incident)
     phantom.debug("Recheck cycle: {} incident(s) in window over {} state listing(s)".format(len(incidents), len(result_data)))
 
-    # Read prior state. Row 0 is the header ("incident_id") -- skip it,
-    # same convention as cyberark_rotation_orchestrator's STATE_LIST_NAME
-    # read-modify-write pattern.
+    # Read prior state. Row 0 is the header ("incident_id"): skip it.
     known_signatures = {}
     read_success, _read_msg, rows = phantom.get_list(list_name=STATE_LIST_NAME)
     if read_success and rows:
@@ -334,9 +301,7 @@ def dispatch_updates(action=None, success=None, container=None, results=None, ha
     phantom.debug("dispatch_updates() called")
 
     ################################################################################
-    # Build MIME Body + Event Info Update artifacts on each changed incident's container 
-    # (raw REST, cross-container write), then persist the new signatures to the recheck 
-    # state list.
+    # Write MIME Body and Event Info Update artifacts, then save the signatures.
     ################################################################################
 
     dispatch_mime_refetch_result_data = phantom.collect2(container=container, datapath=["dispatch_mime_refetch:action_result.parameter.incident_id","dispatch_mime_refetch:action_result.data.*.event_id","dispatch_mime_refetch:action_result.data.*.vault_id","dispatch_mime_refetch:action_result.data.*.file_name"], action_results=results)
@@ -356,11 +321,8 @@ def dispatch_updates(action=None, success=None, container=None, results=None, ha
     except Exception:
         to_recheck = []
 
-    # dispatch_mime_refetch fanned out one app_run per to_recheck row
-    # (same order as the parameters list built in process_incidents) --
-    # action_result.parameter.incident_id ties each app_run's MIME results
-    # back to the right incident, since app_runs aren't guaranteed to
-    # complete in dispatch order.
+    # One action result per changed incident; action_result.parameter.incident_id
+    # ties each result to its incident (results are not in dispatch order).
     mime_rows = phantom.collect2(
         container=container,
         datapath=[
@@ -380,24 +342,16 @@ def dispatch_updates(action=None, success=None, container=None, results=None, ha
             continue
         mime_by_incident.setdefault(str(inc_id), []).append((event_id, vault_id, file_name))
 
-    # phantom.add_artifact() targets the CURRENT run's own container in
-    # every existing usage in this repo -- this playbook's own `container`
-    # is the Timer tick's container, not the target TRAP incident's, so
-    # this is a genuine cross-container write. Raw REST POST instead, same
-    # idiom PB3 (proofpoint_trap_attachments) already uses for exactly this
-    # reason -- container_id goes explicitly in the body, no ambiguity
-    # about execution context.
+    # Raw REST with container_id: the target is another container (this run's
+    # own is the Timer tick's).
     total_artifacts = 0
     for row in to_recheck:
         inc_id = row["incident_id"]
         container_id = row["container_id"]
         event_info_cef = row["event_info_cef"]
 
-        # A raw REST POST does NOT no-op on a duplicate source_data_identifier
-        # (verified on 8.6: the same MIME Body posted twice yields two
-        # artifacts), so without this every recheck piles another copy of every
-        # event's MIME onto the container -- and proofpoint_trap_attachments
-        # re-processes each copy. Skip what the container already carries.
+        # Raw REST does not dedup on source_data_identifier, so skip the MIME
+        # Bodies the container already has (else every recheck adds a copy).
         existing_mime_sdis = set()
         try:
             existing_resp = phantom.requests.get(
@@ -427,10 +381,8 @@ def dispatch_updates(action=None, success=None, container=None, results=None, ha
                 "cef_types": {"vaultId": ["vault id"], "fileName": ["file name"]},
                 "container_id": container_id,
                 "run_automation": False,
-                # An artifact created without a severity gets SOAR's default
-                # (medium) and RAISES a lower container severity, undoing the
-                # mapping proofpoint_trap_triage applies. UC2 artifacts carry
-                # enrichment data, never a severity of their own.
+                # low: an artifact at the default (medium) raises a lower
+                # container severity.
                 "severity": "low",
             }
             try:
@@ -474,10 +426,8 @@ def dispatch_updates(action=None, success=None, container=None, results=None, ha
 
     phantom.debug("Created {} artifact(s) across {} rechecked incident(s)".format(total_artifacts, len(to_recheck)))
 
-    # Update state only after the artifact dispatch attempt above -- best
-    # effort, matching this UC's existing "attempted work, not
-    # platform-verified landed" convention (see PB1's finalize_event_artifacts
-    # removal, uc2_implementation_plan.md 2026-08-13).
+    # Update state after the dispatch attempt (best effort: attempted, not
+    # verified).
     try:
         new_state = json.loads(phantom.get_run_data(key="process_incidents:new_state") or "{}")
         content = [["incident_id", "signature"]] + [[k, v] for k, v in sorted(new_state.items())]

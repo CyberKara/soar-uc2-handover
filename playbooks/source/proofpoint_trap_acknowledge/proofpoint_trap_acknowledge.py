@@ -1,5 +1,5 @@
 """
-Data playbook (PB4) manually launched by an analyst from the container once they&#39;ve reviewed the artifacts/notes PB1-PB3 produced. Prompts for a comment, then assigns the TRAP incident to SOAR, moves its status from new to open, and posts the comment. Independent of proofpoint_trap_triage/proofpoint_trap_close.
+Data playbook (PB4), run by an analyst. Prompts for a comment, then assigns the TRAP incident to SOAR, moves it from new to open and posts the comment.
 """
 
 
@@ -13,18 +13,6 @@ from datetime import datetime, timedelta
 ################################################################################
 
 
-
-# Design notes (kept here because a VPE save replaces the module docstring):
-# Proofpoint TRAP Acknowledge (PB4)
-#
-# Data playbook manually launched by an analyst from the container, once
-# they've reviewed the artifacts/enrichment notes PB1-PB3 produced. Prompts
-# for a comment, then writes three things to the real TRAP incident: the
-# comment, an assignee marking it claimed by SOAR, and a status change from
-# new to open. Independent of proofpoint_trap_triage/proofpoint_trap_close —
-# no chaining.
-#
-# Trigger: Manual run by analyst
 
 ACK_ASSIGNEE = "SOAR"
 ACK_FALLBACK_COMMENT = "Acknowledged by SOAR"
@@ -46,8 +34,7 @@ def extract_incident_id(action=None, success=None, container=None, results=None,
     phantom.debug("extract_incident_id() called")
 
     ################################################################################
-    # Extract TRAP incident ID (+ raw TRAP Severity) via the shared proofpoint_trap_extract_incident_id 
-    # custom function.
+    # Read the TRAP incident ID and severity (shared custom function).
     ################################################################################
 
     parameters = [{}]
@@ -369,13 +356,9 @@ def add_ack_note(action=None, success=None, container=None, results=None, handle
     comment = json.loads(phantom.get_run_data(key="process_comment:comment") or '""')
     prompt_status = json.loads(phantom.get_run_data(key="process_comment:prompt_status") or '""')
 
-    # All three actions are dispatched unconditionally above, so a missing
-    # action_result does NOT mean the step was skipped: when SOAR refuses to
-    # dispatch (a manifest-required parameter missing, the case of this
-    # playbook's own assignee+team bug) no app_run is created at all and
-    # collect2 finds nothing, while the playbook run records the attempt as
-    # failed. Report that as a failure with where to read the reason, never as
-    # "not run".
+    # A missing action_result is a failure, not a skipped step: SOAR refusing to
+    # dispatch (a manifest-required parameter missing) creates no app_run, and
+    # the playbook run records the attempt as failed.
     NO_RESULT = "failed - not dispatched (reason in the playbook run's actions)"
 
     assignee_data = phantom.collect2(container=container, datapath=["update_incident_assignee:action_result.status"])
@@ -443,8 +426,7 @@ def read_incident_id(action=None, success=None, container=None, results=None, ha
     phantom.debug("read_incident_id() called")
 
     ################################################################################
-    # Bridge block: read extract_incident_id CF result (same pattern as cyberark_rotation_orchestrator.py 
-    # read_discover_result).
+    # Read the incident ID from the custom function result.
     ################################################################################
 
     extract_incident_id__result = phantom.collect2(container=container, datapath=["extract_incident_id:custom_function_result.data.incident_id"])

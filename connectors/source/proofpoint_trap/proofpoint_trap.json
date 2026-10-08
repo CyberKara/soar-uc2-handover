@@ -1,7 +1,7 @@
 {
     "appid": "a7c41f8e-3b2d-4e9a-bf56-1d8e9a4c2f7b",
     "name": "Proofpoint TRAP",
-    "description": "Ingest and manage incidents from Proofpoint Threat Response Auto-Pull (TRAP) on-premises. NOTE: Before enabling polling, create a label (e.g. proofpoint_trap) in Administration > Event Settings > Labels, then select it in the asset Ingest Settings.",
+    "description": "Ingest and manage incidents from Proofpoint Threat Response Auto-Pull (TRAP) on-premises.",
     "type": "siem",
     "product_vendor": "Proofpoint",
     "product_name": "Threat Response Auto-Pull",
@@ -10,7 +10,7 @@
     "logo_dark": "logo_dark.svg",
     "publisher": "Ted",
     "license": "Copyright (c) 2026",
-    "app_version": "1.0.38",
+    "app_version": "1.0.39",
     "utctime_updated": "2026-08-20T00:00:00.000000Z",
     "package_name": "phantom_proofpoint_trap",
     "main_module": "proofpoint_trap_connector.py",
@@ -80,7 +80,7 @@
             "order": 8
         },
         "severity": {
-            "description": "Initial severity of the created container (promoted later by proofpoint_trap_triage from the real TRAP Severity field)",
+            "description": "Initial severity of a new container",
             "data_type": "string",
             "required": false,
             "default": "low",
@@ -99,7 +99,7 @@
         {
             "action": "test connectivity",
             "identifier": "test_connectivity",
-            "description": "Validate the asset configuration for connectivity using supplied configuration (Incidents API, /api/incidents)",
+            "description": "Validate the asset configuration (Incidents API, /api/incidents)",
             "type": "test",
             "read_only": true,
             "parameters": {},
@@ -151,7 +151,7 @@
         {
             "action": "list incidents",
             "identifier": "list_incidents",
-            "description": "List/search TRAP incidents by state, time window, and Abuse/Sub Disposition \u2014 the same filtering On Poll uses for ingestion, exposed as an on-demand action (Incidents API, /api/incidents)",
+            "description": "List TRAP incidents by state, time window and Abuse/Sub Disposition, with the same filters as On Poll (Incidents API, /api/incidents)",
             "type": "investigate",
             "read_only": true,
             "parameters": {
@@ -163,20 +163,20 @@
                     "order": 0
                 },
                 "hours_back": {
-                    "description": "How many hours back (from now) to search, by created date. Capped at 30-day chunks per TRAP's API limit, chunked automatically for longer windows",
+                    "description": "Hours back from now, by created date (a window over 30 days is split automatically)",
                     "data_type": "numeric",
                     "required": false,
                     "default": 1,
                     "order": 1
                 },
                 "abuse_disposition": {
-                    "description": "Comma-separated Abuse Disposition values to filter to. Valid: Malicious, Suspicious, Spam, Bulk, Low Risk, False Negative, Known Good, Unknown. Leave blank for any",
+                    "description": "Comma-separated: Malicious, Suspicious, Spam, Bulk, Low Risk, False Negative, Known Good, Unknown. Blank = any",
                     "data_type": "string",
                     "required": false,
                     "order": 2
                 },
                 "sub_disposition": {
-                    "description": "Comma-separated Sub Disposition values to filter to, applied in addition to abuse_disposition. Valid: Needs Manual Review, Likely Harmless. Only meaningful when abuse_disposition includes Unknown",
+                    "description": "Comma-separated: Needs Manual Review, Likely Harmless. Applies only with Unknown",
                     "data_type": "string",
                     "required": false,
                     "order": 3
@@ -277,7 +277,7 @@
         {
             "action": "get incident",
             "identifier": "get_incident",
-            "description": "Retrieve full details of one or more TRAP incidents including events and email data. Accepts a single incident ID or a list of IDs. (Incidents API, /api/incidents)",
+            "description": "Retrieve one or more TRAP incidents with their events and emails (Incidents API, /api/incidents)",
             "type": "investigate",
             "read_only": true,
             "parameters": {
@@ -377,7 +377,7 @@
             "action": "download mime body",
             "identifier": "download_mime_body",
             "description": "Download the raw MIME body for one or all events of a TRAP incident and store it in the Vault (Alert API, /api/v1/alerts/{id}/download_original_msg)",
-            "verbose": "Fetches the raw MIME (.eml) content for a specific event (or, if event_id is omitted, every event) on a TRAP incident, saves it to the SOAR Vault, and returns the vault_id so analysts/playbooks can review or attach the original email. Run outside a container (e.g. from the asset's action panel) there is no Vault to save to: each message is still downloaded and checked, and its size and subject are returned, but vault_id and file_name are empty.",
+            "verbose": "Saves the original email (.eml) of one event, or of every event when event_id is omitted, to the Vault and returns its vault_id. Run outside a container (the asset's action panel) nothing is stored: size and subject are returned, vault_id and file_name stay empty.",
             "type": "investigate",
             "read_only": true,
             "parameters": {
@@ -814,7 +814,7 @@
         {
             "action": "update team and assignee",
             "identifier": "update_incident_assignee",
-            "description": "Update a TRAP incident's team and/or assignee (Incidents API, /api/incidents)",
+            "description": "Update a TRAP incident's team and assignee (Incidents API, /api/incidents)",
             "type": "generic",
             "read_only": false,
             "parameters": {

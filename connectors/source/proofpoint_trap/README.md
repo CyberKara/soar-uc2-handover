@@ -1,225 +1,134 @@
 # Proofpoint TRAP
 
-## Overview
-
 Ingest and manage incidents from Proofpoint Threat Response Auto-Pull (TRAP) on-premises.
-
-- **Version:** 1.0.13
-- **Type:** SIEM (ingest connector)
-- **Auth:** API key (`Authorization` header)
-- **Min SOAR version:** 6.4.1
-- **Polling:** Yes — requires an event label (see below)
+Classic `BaseConnector` app, Python 3.13, API-key auth (`Authorization` header). The version is the
+manifest's `app_version`. The playbooks that use it are UC2 in `soar-playbooks`
+(`docs/usecases/uc2_implementation_plan.md`).
 
 ## Prerequisites
 
-1. Proofpoint TRAP instance accessible over HTTPS from the SOAR host.
-2. API key generated in **TRAP > System Settings > API Keys**.
-3. **SOAR event label** created before enabling polling:
-   - Go to **Administration > Event Settings > Labels**
-   - Create a label (e.g. `proofpoint_trap`)
-   - This label will be selected in the asset's Ingest Settings
+1. HTTPS access from the SOAR host to TRAP.
+2. An API key from **TRAP > System Settings > API Keys**.
+3. A SOAR label for the cases (e.g. `proofpoint_trap`): **Administration > Event Settings >
+   Labels**, then select it in the asset's **Ingest Settings**. Polling creates nothing without it.
 
 ## Installation
 
-Build on a connected host and install the package; never compile on the target
-SOAR (air-gapped deployments have no build tooling or network there).
-
-Build (from the `soar-connectors` repo root):
+Build on a connected host, never on the target (an air-gapped SOAR has no build tooling):
 
 ```bash
-tools/build.sh proofpoint_trap          # -> dist/proofpoint_trap-v<version>.tgz
+tools/build.sh proofpoint_trap          # from the soar-connectors root -> dist/proofpoint_trap-v<version>.tgz
 ```
 
-Transfer the `.tgz` to the target and install it via **Apps > Install App** in the
-SOAR UI. SOAR refuses a package whose `app_version` is not higher than the one
-already installed.
+Install the `.tgz` with **Apps > Install App**. SOAR refuses a package whose `app_version` is not
+higher than the installed one.
 
-## Asset Configuration
+## Asset configuration
 
-| Field | Type | Required | Default | Description | Example |
-|-------|------|----------|---------|-------------|---------|
-| `base_url` | string | Yes | — | TRAP server URL | `https://trap.corp.local` |
-| `api_key` | password | Yes | — | API key (stored encrypted) | |
-| `verify_ssl` | boolean | No | `true` | Verify TRAP TLS certificate | `true` |
-| `timeout` | numeric | No | `60` | Request timeout in seconds | `60` |
-| `poll_state` | string | No | `new` | Incident state to poll. Valid (confirmed against the real Incident API doc, v1.0.12+): `new`, `open`, `closed` | `new` |
-| `abuse_disposition` | string | No | `Unknown` | Comma-separated Abuse Disposition filter (v1.0.10+: full confirmed vocabulary). Valid: `Malicious`, `Suspicious`, `Spam`, `Bulk`, `Low Risk`, `False Negative`, `Known Good`, `Unknown` | `Unknown` |
-| `sub_disposition` | string | No | (empty) | Comma-separated Sub Disposition filter (v1.0.10+). Valid: `Needs Manual Review`, `Likely Harmless`. Applied *in addition to* `abuse_disposition` — an incident must pass both. **Only ever populated on `Unknown`-disposition incidents** on real Threat Response (confirmed against the Incident API doc, v1.0.12+) — setting this while `abuse_disposition` excludes `Unknown` guarantees zero results. Leave empty unless `abuse_disposition` includes `Unknown`. | (empty — no filter) |
-| `poll_hours` | numeric | No | `1` | Hours to look back on first poll | `1` |
+| Field | Default | Notes |
+|---|---|---|
+| `base_url` | — | e.g. `https://trap.example.com`; the TRAP web UI shares the host |
+| `api_key` | — | stored encrypted |
+| `verify_ssl` | `true` | |
+| `timeout` | `60` | seconds; 500/502/503/504 are retried |
+| `poll_state` | `new` | `new`, `open` or `closed` |
+| `abuse_disposition` | `Unknown` | comma-separated: Malicious, Suspicious, Spam, Bulk, Low Risk, False Negative, Known Good, Unknown (case-sensitive) |
+| `sub_disposition` | empty | Needs Manual Review, Likely Harmless; applied on top of `abuse_disposition` and exists only under Unknown, so with Unknown excluded it matches nothing |
+| `poll_hours` | `1` | first-poll lookback; a window over 30 days (TRAP's limit) is split into 30-day calls |
+| `severity` / `sensitivity` | `low` / `amber` | initial values of a new case |
 
-## Setting Up Polling (Ingestion)
+## Ingestion (`on_poll`)
 
-**Requires event label** — polling will not work without this step.
+Each incident becomes one case, `TRAP-<id>: <summary>` (`No summary` when TRAP has none),
+`source_data_identifier` = incident id (no duplicate cases), `data` = the incident. It carries one
+artifact, **Event Info** (`run_automation: true`):
 
-1. **Create a label** in **Administration > Event Settings > Labels** (e.g. `proofpoint_trap`).
-2. Open the TRAP asset, go to the **Ingest Settings** tab.
-3. **Select the label** you created.
-4. Set a polling interval (in minutes) or use **Poll Now** for a manual one-time run.
-5. Save the asset.
+| CEF field | Content |
+|---|---|
+| `incidentId` | data type `proofpoint trap incident id` (1.0.39+) |
+| `abuseDisposition`, `subDisposition`, `classification`, `trapSeverity` | incident field values |
+| `threatScore`, `eventIds`, `message` | score, alert ids, summary |
 
-**On-prem date-range cap (v1.0.9+):** on-premises Threat Response rejects
-`created_after`/`created_before` incident-list queries spanning more than 30
-days. If `poll_hours` (or the gap since the last successful poll) exceeds
-that, the connector automatically splits the fetch into consecutive
-<=30-day calls and merges the results — no config needed, but be aware a
-wide first-run window (e.g. `poll_hours` in the thousands) now costs
-multiple API calls per poll instead of one.
-
-### What gets created
-
-Each TRAP incident produces:
-- **1 container** — named `TRAP-<id>: <summary>`, with severity mapped from TRAP.
-- **N artifacts:**
-  - **URL Artifact** — one per URL in `hosts.url` (CEF: `requestURL`, contains `url`)
-  - **Event Info** — abuse disposition (`cs1`), classification (`cs2`), threat score (`cn1`)
-
-  (An earlier version also created an "IP Artifact" from `hosts.attacker` and a "Forensics URL" from `hosts.forensics` — removed 2026-08-06 once confirmed against real incident data that `hosts` only ever has `url`, not `attacker`/`forensics`.)
-  (MIME bodies are no longer fetched here: since v1.0.30 the `proofpoint_trap_detail` playbook calls `download mime body` and builds the **MIME Body** artifacts itself.)
-
-The connector uses `expand_events=false` for lightweight polling. For full email event details (sender, recipient, attachments), use the `get incident` action.
-
-### Severity mapping
-
-TRAP severities collapse into SOAR's 3-level scale:
-
-| TRAP Severity | SOAR Severity |
-|---------------|---------------|
-| `Critical`    | `high`        |
-| `High`        | `medium`      |
-| `Informational` | `low`       |
-| *(other / unset)* | `low`     |
-
-TRAP's `Critical` maps to SOAR's highest tier (`high`) so on-call sees true-positive phishing first; `High` drops one level because TRAP auto-raises dispositions aggressively and SOAR's `high` should stay reserved for Critical. Anything unclassified falls to `low` rather than a default `medium` to prevent noisy auto-close workflows from firing on ambiguous incidents.
-
-### Checkpoint
-
-After each poll, the connector saves a `last_poll_time` checkpoint. Subsequent polls only fetch incidents created after this time.
-
-## Test Connectivity
-
-Calls the TRAP API to verify the API key and network connectivity.
-
-**Expected result:** "Test Connectivity Passed"
-
-**Common errors:**
-- `Auth Error` — invalid API key. Regenerate in TRAP System Settings.
-- `Connection error` — check `base_url` and network access.
-- `SSL error` — TRAP cert untrusted. Install CA cert on SOAR or set `verify_ssl` to false.
+Polling uses `expand_events=false`; the playbooks fetch events, emails and URLs with `get incident`
+and `download mime body`. A `last_poll_time` checkpoint moves forward after each scheduled poll
+(not after Poll Now). Changes to an incident after ingestion are found by the UC2 playbook
+`proofpoint_trap_recheck`, not by the connector.
 
 ## Actions
 
-| Action | Identifier | Type | Description |
-|--------|-----------|------|-------------|
-| test connectivity | `test_connectivity` | test | Validate API key and connectivity |
-| on poll | `on_poll` | ingest | Ingest incidents as containers/artifacts |
-| get incident | `get_incident` | investigate | Fetch full incident details by ID (accepts a single ID or a list of IDs) |
-| download mime body | `download_mime_body` | investigate | Fetch raw MIME (.eml) for one event, or every event on an incident, and store in the Vault |
-| close incident | `close_incident` | generic | Close an incident (requires summary + detail) |
-| add comment | `add_comment` | generic | Add a comment to an incident |
+Every action taking an incident takes `incident_id` (data type `proofpoint trap incident id`).
 
-### close incident
+| Action | Parameters | Notes |
+|---|---|---|
+| test connectivity | — | `Auth Error` = bad key; `Connection error` = `base_url`/network; `SSL error` = untrusted cert |
+| list incidents | `state`, `hours_back`, `abuse_disposition`, `sub_disposition`, `expand_events`, `max_results` | the On Poll filters on demand; an empty `state` is dropped by SOAR, so send one call per state for "all" |
+| get incident | `incident_id` (one or a list), `expand_events` (default true) | each result also has `incident_url`, the incident's TRAP web page |
+| download mime body | `incident_id`, `event_id` (omit = every event) | below |
+| close incident | `incident_id`, `summary`, `detail` | both texts required by TRAP |
+| add comment | `incident_id`, `summary`, `detail` | `detail` is always sent: the appliance answers a comment without it with HTTP 500 `Null detail` |
+| add user to incident | `incident_id`, `targets`, `attackers` | |
+| update incident description | `incident_id`, `description`, `overwrite` | |
+| update team and assignee | `incident_id`, `assignee`, `team` | both required together; a 404 "previous team and assignee are same" is reported as success (`no_op: true`) |
+| set incident field value | `incident_id`, `field`, `value` | e.g. `Severity`, `Classification`, `Abuse Disposition` |
 
-Both `summary` and `detail` are **required** by the TRAP API. The action will fail if either is missing.
-
-### get incident
-
-Each incident in the result also carries `incident_url` (since 1.0.37): the incident's page in the
-TRAP web UI, `<scheme>://<host of base_url>/incidents/<id>`. The web UI and the API share the host.
-
-### add comment
-
-`summary` is required, `detail` is optional. The connector always sends `detail`, as an empty string
-when it is blank (v1.0.38+): the API doc marks it optional, but the real appliance answers a comment
-without it with HTTP 500 `java.lang.NullPointerException: Null detail`.
-
-### download mime body
-
-Params: `incident_id` (required), `event_id` (optional — omit to fetch every event on the incident). An incident's events are TRAP *alerts*, and each one is fetched from the Alert API, `GET /api/v1/alerts/{event_id}/download_original_msg` with `Accept: message/rfc822` (vendor doc: "Download Original Abuse Messages"). With `event_id` omitted, the action first reads the incident (`expand_events=true`) to list its event ids. Each message downloads to the container's Vault via `Vault.create_attachment` as `trap-<incident>-<event>.eml`; output data includes `event_id`, `vault_id`, `file_name`, `size` and `subject` per event. **Run outside a container** — from the asset's action panel (App Debugger), where SOAR supplies no container and so no Vault — each message is still downloaded and checked, and `size`/`subject` show which message came back, but nothing is stored: `vault_id`/`file_name` are empty and the result message ends "not stored: run outside a container" (v1.0.36+; v1.0.35 failed every event there with `Vault error: Container None does not exist`). Partial failure (e.g. one bad event_id among several) reports `succeeded`/`failed`/`total` in the summary and only fails the action if *all* events failed. Each failed event's HTTP status, request path and the start of the response body go to the action's progress output; the result message quotes the first failure and lists the other failed event ids.
-
-Before v1.0.35 this action called `/api/incidents/{id}/events/{event_id}/mime`, a path that only this lab's mock served — the real appliance answers it with 404, so every download failed with `Event <id> not found on incident <id>`.
+**download mime body.** Each event (a TRAP alert) is fetched with
+`GET /api/v1/alerts/{event_id}/download_original_msg` (`Accept: message/rfc822`) and stored in the
+case's Vault as `trap-<incident>-<event>.eml`. Output per event: `event_id`, `vault_id`,
+`file_name`, `size`, `subject`. Run from the asset's action panel there is no case and so no
+Vault: each message is still downloaded and checked, nothing is stored. The action fails only when
+every event fails; each failure's HTTP status, path and body start go to the progress output.
 
 ## Troubleshooting
 
-| Issue | Cause | Fix |
-|-------|-------|-----|
-| No incidents ingested | Filter mismatch | Check `poll_state`, `abuse_disposition`, and `sub_disposition` (if set) match actual incidents in TRAP — remember `sub_disposition` filters *in addition to* `abuse_disposition`, so an unpopulated Sub Disposition on most incidents will exclude everything if this is set unintentionally |
-| No incidents ingested | Label not configured | Verify the event label is created and selected in Ingest Settings |
-| Duplicate containers | — | Not possible — dedup uses TRAP incident ID as `source_data_identifier` |
-| Close incident fails | Missing field | Both `summary` and `detail` are required |
-| `add comment` fails with `API Error: HTTP 500 -- java.lang.NullPointerException: Null detail` | Connector v1.0.37 or older sent no `detail` when it was blank; the appliance needs the field even though the API doc marks it optional | Upgrade to v1.0.38+, or give the action a non-empty `detail` |
-| `list incidents` fails with `unsupported type for timedelta hours component: str` | `hours_back` arrived as a string — a VPE literal action parameter always does | Fixed in v1.0.34 (the value is validated like every other numeric parameter). On an older build, bind `hours_back` to a numeric datapath instead of a literal |
-| Timeout errors | Large response | Increase `timeout` in asset config. Connector retries 500/502/503/504 automatically. |
-| `download mime body` fails with `Event <id> not found on incident <id>` for every event | Connector v1.0.34 or older: it called a path the real appliance does not have (see the action's section above) | Upgrade to v1.0.35+ |
-| `download mime body` fails with `Vault error: Container None does not exist` | Run from the asset's action panel, which has no container, on v1.0.35 | Upgrade to v1.0.36+ (downloads without storing), or run the action from a case's Actions |
-| `download mime body` fails with `No original message for event <id> (HTTP 404)` | The id is not an alert id, or TRAP stored no message for that alert (not every alert source carries an email) | Check the event's `source` in `get incident` output. Other events on the same incident still download |
-| `download mime body` fails with `Unexpected response ... HTTP 200, Content-Type 'text/html'` | `base_url` reaches a web page (login page, proxy) instead of the API | Check `base_url`; nothing is written to the Vault in this case |
+| Symptom | Cause | Fix |
+|---|---|---|
+| No incidents ingested | filters, or no label | check `poll_state` / `abuse_disposition` / `sub_disposition` against TRAP; select the label in Ingest Settings |
+| `add comment` → HTTP 500 `Null detail` | 1.0.37 or older sent no `detail` | upgrade to 1.0.38+ |
+| `list incidents` → `unsupported type for timedelta` | `hours_back` as text, 1.0.33 or older | upgrade to 1.0.34+ |
+| `download mime body` → `Event <id> not found` on every event | 1.0.34 or older used a path the appliance does not have | upgrade to 1.0.35+ |
+| `download mime body` → `Container None does not exist` | 1.0.35 run from the action panel | upgrade to 1.0.36+, or run it from a case |
+| `download mime body` → `No original message for event <id> (HTTP 404)` | not an alert id, or the alert has no email | check the event's `source` in `get incident`; other events still download |
+| `download mime body` → `Unexpected response ... text/html` | `base_url` reaches a web page (login, proxy) | fix `base_url` |
+| Timeouts | large responses | raise `timeout` |
 
-### `update team and assignee` — diagnosing directly against TRAP, without SOAR
+### `update team and assignee` — testing directly against TRAP
 
-If this action is failing, it's faster to isolate the problem by hitting TRAP's
-API directly than round-tripping through SOAR's Test Action dialog every time.
-Run this from any host with network access to the TRAP appliance (the SOAR
-host itself works fine):
+Run from any host that reaches TRAP (the SOAR host works):
 
 ```bash
-BASE_URL="https://trap.example.com"            # asset's base_url
-API_KEY="<api key from TRAP System Settings>"  # asset's api_key
-INCIDENT_ID="134"                              # a real incident id
-ASSIGNEE="kiki"                                # must exist as a TRAP user
-TEAM="tata"                                    # must exist as a TRAP team
+BASE_URL="https://trap.example.com"   # asset base_url
+API_KEY="<api key>"                   # asset api_key
+INCIDENT_ID="134"; ASSIGNEE="kiki"; TEAM="tata"   # a real incident, TRAP user and team
 
-curl -sk -X POST \
-  -H "Authorization: ${API_KEY}" \
-  -H "Content-Type: application/json" \
+curl -sk -X POST -H "Authorization: ${API_KEY}" -H "Content-Type: application/json" \
   -d "{\"assignee\": \"${ASSIGNEE}\", \"team\": \"${TEAM}\"}" \
-  "${BASE_URL}/api/incidents/${INCIDENT_ID}/team_and_assignee.json" \
-  -w '\nHTTP %{http_code}\n'
+  "${BASE_URL}/api/incidents/${INCIDENT_ID}/team_and_assignee.json" -w '\nHTTP %{http_code}\n'
 ```
 
-Drop `-k` if `verify_ssl` is `true` in the asset and TRAP's cert chain is
-trusted by the host you're running this from.
-
-**Known real-appliance responses** (confirmed 2026-08-20; the connector
-handles the first two as documented, the last one is still unexplained):
-
 | Response | Meaning |
-|----------|---------|
-| `200` | Updated successfully. |
-| `404` `"the previous team and assignee are same, not updating the incident"` | No-op — requested values already match the incident's current state. Connector v1.0.31+ treats this as a SOAR-side success (`no_op: true` in the action's output data), not a failure. |
-| `404` `"no assignee found for <name>"` | `assignee` doesn't exist as a TRAP user — check spelling/case. |
-| `400` `"Both team and assignee are required. Team: null, assignee: ..."` | One of the two fields was omitted. TRAP requires **both together** on every call — the API doc's per-field table implies they're independently optional, but its own combined `"team and assignee ... required: yes"` row was the accurate one. Connector v1.0.33+ requires both and won't even send the request without them. |
-| `400` `"...org.hibernate.exception.ConstraintViolationException: could not extract resultset"` | A real database-layer rejection on TRAP's own backend, confirmed to happen even with a fully valid, existing `assignee` + `team` pair (not a request-shape problem, not a team-membership problem — both ruled out live). Still unexplained. Try the identical reassignment through TRAP's own web UI: if it also fails there, this is an appliance-side defect worth a Proofpoint support ticket, not something fixable from this connector. Full investigation: `soar-playbooks` repo, `docs/usecases/uc2_implementation_plan.md`'s "Scenario (2) diagnosed further" section. |
+|---|---|
+| `200` | updated |
+| `404` "the previous team and assignee are same" | nothing to change (the connector reports success) |
+| `404` "no assignee found for <name>" | not a TRAP user |
+| `400` "Both team and assignee are required" | one of the two missing |
+| `400` `ConstraintViolationException` | rejected by TRAP's database even for a valid user + team pair; unexplained. If the same change fails in TRAP's own web UI, it is an appliance defect for Proofpoint support |
 
-**Alternate write path worth testing if `team_and_assignee.json` stays
-broken:** `set incident field value` (`/api/incidents/{id}/incident_fields.json`)
-is a separate, more generic endpoint — already confirmed working for
-`Severity`/`Classification`/`Sub Disposition`/`Abuse Disposition`. Whether
-`Team`/`Assignee` are valid field names for it isn't documented, but it's a
-different server-side code path and worth 30 seconds to rule in or out:
+An untested alternative write path is `set incident field value`
+(`/api/incidents/{id}/incident_fields.json`), a different server-side code path:
 
 ```bash
-# Single field -- matches exactly what the connector's own "set incident
-# field value" action sends ({"fields": {field: value}})
-curl -sk -X POST \
-  -H "Authorization: ${API_KEY}" \
-  -H "Content-Type: application/json" \
-  -d '{"fields": {"Team": "tata"}}' \
-  "${BASE_URL}/api/incidents/${INCIDENT_ID}/incident_fields.json?allow_data_override=true" \
-  -w '\nHTTP %{http_code}\n'
-
-# Both fields in one call -- the raw API supports this even though the
-# connector's action only exposes one field per call
-curl -sk -X POST \
-  -H "Authorization: ${API_KEY}" \
-  -H "Content-Type: application/json" \
+curl -sk -X POST -H "Authorization: ${API_KEY}" -H "Content-Type: application/json" \
   -d '{"fields": {"Team": "tata", "Assignee": "kiki"}}' \
   "${BASE_URL}/api/incidents/${INCIDENT_ID}/incident_fields.json?allow_data_override=true" \
   -w '\nHTTP %{http_code}\n'
 ```
 
-If this succeeds where `team_and_assignee.json` doesn't, it's a genuinely
-fixable reroute (point the connector's `update team and assignee` action,
-or `proofpoint_trap_acknowledge` directly, at this endpoint instead). If it
-hits the same `ConstraintViolationException`, that rules out a
-request-shape/endpoint issue entirely and points at a shared, broken
-write path underneath both endpoints.
+If it succeeds where `team_and_assignee.json` fails, the connector (or
+`proofpoint_trap_acknowledge`) can use it instead; if it hits the same exception, the fault is in
+the write path behind both.
+
+## API reference
+
+`proofpoint_trap_api_reference.md` (vendor doc, sample tokens masked; not packaged). Proofpoint's
+doc marks some fields optional that the appliance requires (`detail` on a comment; `team` with
+`assignee`); trust the appliance.

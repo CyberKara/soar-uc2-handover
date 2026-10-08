@@ -1,5 +1,5 @@
 """
-Data playbook (PB5) manually launched by an analyst from the container whenever they&#39;re ready to close out the incident. Prompts for a closure reason, then closes the TRAP incident and posts the closing comment. Independent of proofpoint_trap_triage/proofpoint_trap_acknowledge.
+Data playbook (PB5), run by an analyst. Prompts for a closure reason, then closes the TRAP incident and posts the reason as a comment.
 """
 
 
@@ -22,8 +22,7 @@ def extract_incident_id(action=None, success=None, container=None, results=None,
     phantom.debug("extract_incident_id() called")
 
     ################################################################################
-    # Extract TRAP incident ID (+ raw TRAP Severity) via the shared proofpoint_trap_extract_incident_id 
-    # custom function.
+    # Read the TRAP incident ID and severity (shared custom function).
     ################################################################################
 
     parameters = [{}]
@@ -393,8 +392,7 @@ def read_incident_id(action=None, success=None, container=None, results=None, ha
     phantom.debug("read_incident_id() called")
 
     ################################################################################
-    # Bridge block: read extract_incident_id CF result (same pattern as cyberark_rotation_orchestrator.py 
-    # read_discover_result).
+    # Read the incident ID from the custom function result.
     ################################################################################
 
     extract_incident_id__result = phantom.collect2(container=container, datapath=["extract_incident_id:custom_function_result.data.incident_id"])

@@ -533,13 +533,8 @@ class ProofpointTrapConnector(BaseConnector):
             elif status == "duplicate":
                 self.debug_print("Duplicate container skipped for incident {}".format(incident.get("id", "")))
 
-        # Post-ingestion incident updates (a field edit, disposition change,
-        # or newly-linked event on an already-ingested incident) are no
-        # longer detected here -- moved to the proofpoint_trap_recheck
-        # playbook 2026-08-18 (Timer-asset triggered, custom list
-        # `proofpoint_trap_recheck_state` for durable state). See
-        # uc2_implementation_plan.md's "fold into pb" entry for the
-        # reasoning. on_poll is single-pass/checkpoint-only again.
+        # Changes to an already-ingested incident are detected by the
+        # proofpoint_trap_recheck playbook, not here: on_poll only moves forward.
 
         # Update poll checkpoint (skip on Poll Now — manual polls don't advance cursor)
         if not self.is_poll_now():
@@ -560,18 +555,15 @@ class ProofpointTrapConnector(BaseConnector):
             duplicate hit), None for "failed".
         """
         inc_id = incident.get("id", "")
-        # summary comes back empty on real incidents even when the key is
-        # present (confirmed 2026-08-06 against real data) -- dict.get's
-        # default only covers a MISSING key, not an empty-string value,
-        # so this needs an explicit fallback chain, not just .get(..., default)
+        # Real incidents often carry an empty summary, which .get()'s default
+        # does not replace.
         summary = incident.get("summary") or incident.get("description") or "No summary"
 
         container = {
             "name": "TRAP-{}: {}".format(inc_id, summary),
             "description": incident.get("description", ""),
             "source_data_identifier": str(inc_id),
-            # Initial value only — proofpoint_trap_triage (PB2) promotes
-            # this from the raw TRAP Severity field (trapSeverity below).
+            # Initial value only; proofpoint_trap_triage sets the real one.
             "severity": severity,
             "sensitivity": sensitivity,
             "status": "new",
@@ -600,13 +592,8 @@ class ProofpointTrapConnector(BaseConnector):
         return "created", container_id
 
     def _build_event_info_cef(self, incident):
-        """CEF field dict for the "Event Info" artifact — score, disposition,
-        sub disposition, classification, severity, event_ids. Used at first
-        ingestion only -- post-ingestion change detection (the old
-        _run_recheck_pass/_incident_signature, which used to reuse this too)
-        moved to the proofpoint_trap_recheck playbook 2026-08-18. Deliberately
-        excludes `hosts.url` — the playbook layer derives URL artifacts from
-        its own full incident fetch, not on_poll."""
+        """CEF fields of the "Event Info" artifact. proofpoint_trap_recheck
+        builds the same fields for "Event Info Update"; keep both in sync."""
         inc_id = incident.get("id", "")
         disposition = self._get_disposition(incident)
         sub_disposition = self._get_field_value(incident, "Sub Disposition")
@@ -615,8 +602,7 @@ class ProofpointTrapConnector(BaseConnector):
         score = incident.get("score", 0)
         # Same empty-summary fallback as the container name (see _handle_on_poll)
         message = incident.get("summary") or incident.get("description") or ""
-        # event_ids is present even in the lightweight list response (expand_events=false)
-        # -- confirmed against real data, no extra API call needed to surface it here.
+        # event_ids is present even in the list response (expand_events=false).
         event_ids = ",".join(str(x) for x in (incident.get("event_ids") or []))
 
         return {
@@ -639,6 +625,7 @@ class ProofpointTrapConnector(BaseConnector):
             "source_data_identifier": "trap-{}-info".format(inc_id),
             "label": "event",
             "cef": self._build_event_info_cef(incident),
+            "cef_types": {"incidentId": ["proofpoint trap incident id"]},
         }]
 
     # ------------------------------------------------------------------
@@ -717,16 +704,10 @@ class ProofpointTrapConnector(BaseConnector):
         """Retrieve one or more TRAP incidents. Accepts str or list."""
         action_result = self.add_action_result(ActionResult(dict(param)))
 
-        # Accept a single value, a real list, or a comma-joined string. The
-        # last form is what SOAR actually sends when this parameter
-        # (data_type=string, allow_list=true) is bound directly to a
-        # wildcard artifact datapath (e.g. "artifact:*.cef.incidentId")
-        # instead of an extracted scalar output variable: it text-joins
-        # every artifact's resolved value with ", ", including the literal
-        # word "None" for artifacts that don't have that CEF field — never
-        # a real JSON list, so the isinstance(list) branch below never
-        # fires for that binding. Confirmed live 2026-08-13: a 6-artifact
-        # container produced "1786622023, None, None, None, None, None".
+        # Accept a single value, a list, or a comma-joined string. SOAR sends
+        # the last form when the parameter is bound to a wildcard datapath
+        # ("artifact:*.cef.incidentId"): every artifact's value joined with
+        # ", ", the literal "None" for artifacts without the field.
         raw_input = param.get("incident_id")
         if isinstance(raw_input, list):
             raw_ids = [x for x in raw_input if x not in (None, "")]
@@ -852,12 +833,8 @@ class ProofpointTrapConnector(BaseConnector):
         )
 
     # ------------------------------------------------------------------
-    # Incident-update actions — confirmed 2026-08-12 against the vendor's
-    # own API reference (proofpoint_trap_api_reference.md): all four are
-    # legacy /api/incidents/{id}/... POST endpoints, NOT /api/v1/alerts
-    # (which is GET-only — alert details + download original message).
-    # Previously built against a PATCH /api/v1/alerts?id={id} guess that
-    # doesn't exist in the vendor doc; corrected below.
+    # Incident-update actions: POST /api/incidents/{id}/... endpoints
+    # (proofpoint_trap_api_reference.md). /api/v1/alerts is GET-only.
     # ------------------------------------------------------------------
 
     # ------------------------------------------------------------------
@@ -935,9 +912,8 @@ class ProofpointTrapConnector(BaseConnector):
         assignee = param.get("assignee", "")
         team = param.get("team", "")
 
-        # Both required together -- the appliance rejects a request with
-        # only one set. This check just fails fast with the same message
-        # the appliance itself returns.
+        # The appliance rejects a request with only one of the two; fail fast
+        # with the message it would return.
         if not assignee or not team:
             return action_result.set_status(
                 phantom.APP_ERROR,
@@ -952,14 +928,10 @@ class ProofpointTrapConnector(BaseConnector):
 
         ret_val, _ = self._make_rest_call("POST", url, action_result, json=body)
         if phantom.is_fail(ret_val):
-            # HTTP 404 here isn't "resource not found" -- TRAP uses it as an
-            # idempotency signal when the requested team/assignee already
-            # match the incident's current state, treated as success rather
-            # than a hard failure (same idiom as save_container's
-            # "duplicate container found"). Any other failure message
-            # (including a bad/unknown assignee, or a ConstraintViolationException
-            # from the appliance's own backend -- see README.md's
-            # troubleshooting section) passes through unchanged.
+            # A 404 "previous team and assignee are same" means nothing to
+            # change: success. Any other failure (unknown assignee, the
+            # appliance's ConstraintViolationException, see README.md) passes
+            # through unchanged.
             raw_msg = action_result.get_message() or ""
             if "previous team and assignee are same" not in raw_msg.lower():
                 return action_result.get_status()

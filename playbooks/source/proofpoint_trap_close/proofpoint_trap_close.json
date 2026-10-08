@@ -169,7 +169,7 @@
                         "advanced": {
                             "join": [],
                             "customName": "extract incident id",
-                            "description": "Extract TRAP incident ID (+ raw TRAP Severity) via the shared proofpoint_trap_extract_incident_id custom function.",
+                            "description": "Read the TRAP incident ID and severity (shared custom function).",
                             "customNameId": 0
                         },
                         "utilities": {
@@ -203,7 +203,7 @@
                         "type": "code",
                         "advanced": {
                             "join": [],
-                            "note": "Code block, not a native prompt: a VPE save regenerates prompt blocks whole and would drop the soar_local_admin fallback (TRAP containers have no owner). Calls phantom.prompt2 with callback process_close_reason, then returns.",
+                            "note": "Code block, not a prompt block: a VPE save would drop the approver fallback (owner, else soar_local_admin).",
                             "customName": "prompt close reason",
                             "description": "Ask the analyst for a closure reason (approver: container owner, else soar_local_admin).",
                             "customNameId": 0
@@ -230,7 +230,7 @@
                         "type": "code",
                         "advanced": {
                             "join": [],
-                            "note": "Reads via GET /rest/approval, not collect2 \u2014 same LEGACY_CUSTOM_FUNCTION_RESULT bug documented in proofpoint_trap_triage.py's history. Routes to add_close_note directly on expiry, skipping the TRAP close.",
+                            "note": "Reads the answer over REST (GET /rest/approval). Without approval, check_prompt_status goes to add_expired_note.",
                             "customName": "process close reason",
                             "description": "Read analyst's prompt response.",
                             "customNameId": 0
@@ -438,7 +438,7 @@
                             "join": [],
                             "note": "Reads incident_id (+ trap_severity where used) from the extract_incident_id CF result.",
                             "customName": "read incident id",
-                            "description": "Bridge block: read extract_incident_id CF result (same pattern as cyberark_rotation_orchestrator.py read_discover_result).",
+                            "description": "Read the incident ID from the custom function result.",
                             "customNameId": 0
                         },
                         "functionId": 7,
@@ -538,7 +538,7 @@
                 }
             },
             "notes": "",
-            "description": "Data playbook (PB5) manually launched by an analyst from the container whenever they're ready to close out the incident. Prompts for a closure reason, then closes the TRAP incident and posts the closing comment. Independent of proofpoint_trap_triage/proofpoint_trap_acknowledge."
+            "description": "Data playbook (PB5), run by an analyst. Prompts for a closure reason, then closes the TRAP incident and posts the reason as a comment."
         },
         "input_spec": [
             {
@@ -584,7 +584,7 @@
         "version": "8.6.0.530",
         "playbook_trigger": "artifact_created"
     },
-    "create_time": "2026-10-08T00:42:56.401263Z",
+    "create_time": "2026-10-08T22:25:21.582411Z",
     "draft_mode": false,
     "labels": [
         "proofpoint_trap"

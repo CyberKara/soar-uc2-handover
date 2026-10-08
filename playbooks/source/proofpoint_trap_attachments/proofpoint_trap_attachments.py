@@ -1,5 +1,5 @@
 """
-Automation playbook (PB3) for label &#39;proofpoint_trap&#39;, left inactive: proofpoint_trap_orchestrator runs it after proofpoint_trap_detail. Processes each &#39;MIME Body&#39; artifact not yet processed (vaulted raw .eml from proofpoint_trap_detail or proofpoint_trap_recheck): an &#39;Email Content&#39; note showing the email safely, each file attachment vaulted as its own &#39;Email Attachment&#39; artifact (vaultId, fileName, fileHashSha256, fileHashMd5, fileSize), and an &#39;Attachment Extraction&#39; note. A note longer than 20,000 characters is split into parts.
+Automation playbook (PB3), left inactive: proofpoint_trap_orchestrator runs it after proofpoint_trap_detail. For each new MIME Body: an Email Content note, one Email Attachment artifact per file, and an Attachment Extraction note.
 """
 
 
@@ -387,8 +387,7 @@ def extract_attachments(action=None, success=None, container=None, results=None,
     phantom.debug("extract_attachments() called")
 
     ################################################################################
-    # Find MIME Body artifacts not yet processed, parse each .eml from the vault, 
-    # and vault out any file attachments as their own artifacts.
+    # Process each new MIME Body: notes, attachment and Cc artifacts.
     ################################################################################
 
     container_artifact_data = phantom.collect2(container=container, datapath=["artifact:*.name","artifact:*.id","artifact:*.cef.vaultId","artifact:*.cef.fileName"])
@@ -402,57 +401,13 @@ def extract_attachments(action=None, success=None, container=None, results=None,
     ## Custom Code Start
     ################################################################################
 
-    # Design notes (kept here because a VPE save replaces the module docstring):
-    # Proofpoint TRAP Attachment Extraction
-    #
-    # Run by proofpoint_trap_orchestrator after proofpoint_trap_detail (label 'proofpoint_trap').
-    # Scans the container for 'MIME Body' artifacts (vaulted raw .eml, created by the
-    # proofpoint_trap connector's on_poll — see FR-21), parses each one for:
-    # - file attachments — vaulted as their own artifact (name 'Email Attachment',
-    # cef.vaultId + cef.fileName + cef.fileHashSha256 + cef.fileType) for
-    # downstream analyst review / future reputation enrichment (UC8). Includes
-    # forwarded emails attached as message/rfc822 (the raw embedded message is
-    # serialized and vaulted like any other attachment — these were silently
-    # skipped before 2026-08-12 because message/rfc822 parts report
-    # is_multipart()=True, tripping the "skip container parts" check meant for
-    # genuine multipart/* wrappers). Flags a MIME-type/filename mismatch
-    # (mimetypes.guess_type vs the part's declared Content-Type) as a possible
-    # disguised-executable signal.
-    # - Cc recipients — parsed directly from the raw MIME headers (getaddresses),
-    # as 'Recipient Email' artifacts (emailRole='cc'), matching PB1's existing
-    # artifact shape. PB1 attempts this too but only from the structured API's
-    # headers dict, which real payloads never populate (see its own comment) —
-    # this is the reliable path.
-    # - Return-Path vs From mismatch — envelope sender vs displayed sender is a
-    # classic spoofing signal, surfaced in the Email Content note.
-    # - the rendered email body (HTML preferred, falls back to plain text) and
-    # auth/routing headers (Authentication-Results, Reply-To, X-Originating-IP,
-    # Received chain) — none of this exists in TRAP's structured "get incident"
-    # API, only in the raw MIME — added as an "Email Content" note per event so
-    # an analyst can read the actual message without downloading the .eml.
-    #
-    # phantom.add_note() sanitizes content through a real (undocumented) tag
-    # allowlist, confirmed live 2026-08-12 by probing it directly: h1/h2/p/b/
-    # ul/li/hr/span/br survive; pre/details/summary/code/div/i are silently
-    # stripped (text kept, tag dropped); <a href=...> keeps the <a> tag but
-    # strips the href attribute, so links never work. So the Email Content
-    # note is not written with add_note() any more: it is a markdown note
-    # posted over REST, and the body is converted to SAFE markdown first
-    # (_email_html_to_markdown in the Global Custom Code) -- scripts/styles
-    # dropped, images as placeholders, links shown as text plus the defanged
-    # target (URL Defense links decoded), hidden text and forms flagged, all
-    # email text escaped. Nothing from the email loads or is clickable.
-    #
-    # Re-scans all MIME Body artifacts on every run (scope "all": they may have been
-    # created before the trigger that started this run, by proofpoint_trap_recheck)
-    # and skips any already marked processed via a data.attachments_extracted marker.
-    #
-    # Trigger: none of its own -- proofpoint_trap_orchestrator calls it; leave it inactive.
+    # Each MIME Body not yet marked processed (data.attachments_extracted;
+    # scope "all": it may come from an earlier trigger): attachments, forwarded
+    # emails included, become Email Attachment artifacts, Cc addresses Recipient
+    # Email (cc), and the email an Email Content note of safe markdown posted
+    # over REST (add_note's HTML sanitizer strips links and tags).
 
-
-    # Local re-imports — GUI edits recompile/lint each code block in isolation
-    # and don't see module-level imports (same gap already documented for
-    # urllib.parse/uuid elsewhere in this UC's playbooks).
+    # Local imports: a save drops module-level imports outside Global Custom Code.
     import base64
     import hashlib
     import html
@@ -501,7 +456,7 @@ def extract_attachments(action=None, success=None, container=None, results=None,
     for mime in mime_artifacts:
         artifact_id = mime["artifact_id"]
 
-        # Skip artifacts already processed (re-entry guard — see module docstring)
+        # Skip artifacts already processed.
         try:
             resp = phantom.requests.get(uri=phantom.build_phantom_rest_url("artifact", artifact_id), verify=False).json()
             current_data = resp.get("data") if isinstance(resp.get("data"), dict) else {}
@@ -513,8 +468,7 @@ def extract_attachments(action=None, success=None, container=None, results=None,
             continue
 
         source_file_name = mime["file_name"] or "trap-{}.eml".format(artifact_id)
-        # source_data_identifier on the MIME Body artifact is "trap-{incident_id}-mime-{event_id}"
-        # (see proofpoint_trap_connector.py _build_mime_artifact) — recover both IDs from it.
+        # A MIME Body's identifier is "trap-<incident>-mime-<event>" (proofpoint_trap_detail).
         sdi = resp.get("source_data_identifier") or ""
         sdi_parts = sdi.split("-mime-")
         incident_id = sdi_parts[0].replace("trap-", "", 1) if sdi_parts else "?"
@@ -601,9 +555,8 @@ def extract_attachments(action=None, success=None, container=None, results=None,
                 phantom.debug("Vault upload failed for {}: {}".format(filename, upload.get("message")))
                 continue
 
-            # MD5 and size as TRAP's own attachment view shows them (operator,
-            # 2026-10-07), computed from the same bytes as the SHA256.
-            # usedforsecurity=False: a FIPS-mode host refuses a plain md5().
+            # MD5 and size as TRAP shows them. usedforsecurity=False: a FIPS host
+            # refuses a plain md5().
             attachment_cef = {
                 "vaultId": attachment_vault_id,
                 "fileName": filename,
@@ -628,12 +581,8 @@ def extract_attachments(action=None, success=None, container=None, results=None,
                               "fileName": ["file name"]},
                 "container_id": container_id,
                 "run_automation": False,
-                # UC2 artifacts are enrichment data, not severity signals: an
-                # artifact created without a severity gets SOAR's default
-                # (medium) and RAISES a lower container severity, undoing the
-                # mapping proofpoint_trap_triage applies. These are created
-                # after that playbook's run on the same trigger, so nothing
-                # would put the container back until the next one.
+                # low: an artifact at the default (medium) raises a lower
+                # container severity.
                 "severity": "low",
             }
             try:
@@ -650,11 +599,7 @@ def extract_attachments(action=None, success=None, container=None, results=None,
             except Exception as e:
                 phantom.debug("Error creating attachment artifact: {}".format(str(e)))
 
-        # Cc recipients — from the raw MIME headers, not TRAP's structured API
-        # (PB1 also tries this from the structured response's headers dict but
-        # real payloads never populate it there, per its own comment; same
-        # artifact shape/SDI pattern here so a duplicate from PB1 would just
-        # dedupe cleanly if that ever changes).
+        # Cc recipients from the email's own headers.
         cc_addrs = sorted({addr for _, addr in getaddresses(parsed.get_all("Cc") or [])
                            if addr and addr.strip().lower() not in excluded_addresses})
         for cc_addr in cc_addrs:
@@ -712,7 +657,7 @@ def extract_attachments(action=None, success=None, container=None, results=None,
         received_chain = parsed.get_all("Received") or []
         reply_to = parsed.get("Reply-To", "")
         x_originating_ip = parsed.get("X-Originating-IP", "")
-        # Asked for by the operator (2026-10-07), shown after the others.
+        # Shown after the others.
         extra_headers = [(name, parsed.get_all(name) or [])
                          for name in ("In-Reply-To", "X-PhishAlarm-Sender", "Received-SPF", "DKIM-Signature")]
         return_path = parsed.get("Return-Path", "")
@@ -773,14 +718,8 @@ def extract_attachments(action=None, success=None, container=None, results=None,
 
         per_email_summary.append("**{}** (event {}): {} attachment(s)".format(source_file_name, event_id, extracted_this_email))
 
-        # Mark this MIME Body artifact processed regardless of whether it had
-        # attachments, so future artifact-created triggers on this container
-        # don't re-parse it.
-        # Updating an artifact re-applies ITS severity to the container, just
-        # as creating one does: PB1 creates MIME Body at the default (medium),
-        # so this update alone would undo proofpoint_trap_triage's mapping.
-        # Setting the artifact to low in the same update leaves the container
-        # as it is, and later updates of a low artifact cannot raise it.
+        # Mark it processed, at low: updating an artifact re-applies its severity
+        # to the container, like creating one.
         merged_data = dict(current_data)
         merged_data["attachments_extracted"] = True
         merged_data["attachments_extracted_count"] = extracted_this_email
@@ -794,11 +733,15 @@ def extract_attachments(action=None, success=None, container=None, results=None,
             phantom.debug("Could not mark MIME Body artifact {} as processed: {}".format(artifact_id, str(e)))
 
     if per_email_summary:
-        note_content = (
-            "# Email Attachment Extraction\n"
-            "**Total attachments extracted:** {}\n\n"
-            "{}"
-        ).format(total_extracted, "\n".join("- " + line for line in per_email_summary))
+        if total_extracted:
+            note_content = (
+                "# Email Attachment Extraction\n"
+                "**Total attachments extracted:** {}\n\n"
+                "{}"
+            ).format(total_extracted, "\n".join("- " + line for line in per_email_summary))
+        else:
+            note_content = "# Email Attachment Extraction\nNo attachments in {} email(s).".format(
+                len(per_email_summary))
         for part_title, part_content in _note_parts("Attachment Extraction", note_content):
             phantom.add_note(
                 container=container,

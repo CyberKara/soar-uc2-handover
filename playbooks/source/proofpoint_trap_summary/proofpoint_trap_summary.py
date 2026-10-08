@@ -1,5 +1,5 @@
 """
-Automation playbook (PB8) for label &#39;proofpoint_trap&#39;, left inactive: proofpoint_trap_orchestrator runs it last. Once proofpoint_trap_detail has enriched the container (an &#39;Enrichment Complete&#39; or &#39;Enrichment Failed&#39; artifact exists), reads every artifact on the container and writes one &#39;TRAP Summary&#39; note: the CLEAR verdict and the threat names of the alerts first, then a markdown table per artifact type (incident, senders, recipients, domains, URLs, click IPs, MIME bodies, attachments, enrichment runs, then any other type). Every later run rewrites the same note in place. When the newest Enrichment Complete says TRAP has closed the incident, closes the container once and adds a 'Closed in TRAP' note.
+Automation playbook (PB8), left inactive: proofpoint_trap_orchestrator runs it last. Writes one TRAP Summary note (verdict, then a table per artifact type) and closes the container once when TRAP has closed the incident.
 """
 
 

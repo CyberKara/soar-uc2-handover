@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Air-Gapped Handover Package
 
-Generated 2026-10-08 15:05 UTC from `proofpoint_trap` (source env: `soar8`).
+Generated 2026-10-08 22:35 UTC from `proofpoint_trap` (source env: `soar8`).
 
 This package is self-contained — everything needed to deploy this use case by hand
 in an environment with no network access back to this repo or to `soar8`.
@@ -11,7 +11,7 @@ in an environment with no network access back to this repo or to `soar8`.
 
 | Path | What |
 |------|------|
-| `connectors/` | Connector app package(s): proofpoint_trap-v1.0.38.tgz |
+| `connectors/` | Connector app package(s): proofpoint_trap-v1.0.39.tgz |
 | `connectors/source/` | Same connector(s), extracted — for reading, not for import |
 | `playbooks/*.tgz` (CFs) | proofpoint_trap_extract_incident_id |
 | `playbooks/*.tgz` (PBs) | proofpoint_trap_detail, proofpoint_trap_triage, proofpoint_trap_attachments, proofpoint_trap_acknowledge, proofpoint_trap_close, proofpoint_trap_isolation_notify, proofpoint_trap_recheck, proofpoint_trap_summary, proofpoint_trap_orchestrator |
@@ -64,6 +64,8 @@ previous package. On a completely fresh target, skip to Install order.
 - **Sender, headers, CLEAR verdict and attachments (2026-10-07, your feedback).** (1) When TRAP gives only the report (no copy of the reported email), as for a report sent from a shared mailbox, and the report carries the `X-PhishAlarm-Sender` header, `proofpoint_trap_detail` takes the sender from that header: it names the case `TRAP-<id>: <address>` and adds a Sender Email for it. The report's own sender and recipient (the reporting tool or the shared mailbox, and the abuse mailbox) are not used, and the user or mailbox that reported it is a Recipient Email with role `reporter`. Nothing needs adding to `proofpoint_trap_excluded_email` for this (package r24 said to list the shared mailbox there: not needed since r25). (2) Each Sender Email carries the fields `receivedSpf`, `dkimSignature`, `inReplyTo`, `received` and `phishAlarmSender`; the Email Content note shows In-Reply-To, X-PhishAlarm-Sender, Received-SPF and DKIM-Signature; the TRAP Summary has matching columns. (3) The TRAP Summary opens with the CLEAR verdict (Abuse Disposition / Sub Disposition) and the threat names of the incident's alerts. `proofpoint_trap_triage` sets the severity to the higher of TRAP Severity and the verdict (Malicious → high; Suspicious, False Negative, Unknown / Needs Manual Review or Unknown alone → medium; the rest → low) and tags the case with the verdict, e.g. `trap-needs-manual-review` or `trap-malicious`; a new verdict replaces that tag and no other tag is touched. (4) Email Attachment gets MD5 and size (`fileHashMd5`, `fileSize`); when an alert's original email cannot be downloaded, the attachments TRAP lists for it are added from TRAP's data (no file in the Vault). Re-import `proofpoint_trap_detail`, `proofpoint_trap_attachments`, `proofpoint_trap_triage` and `proofpoint_trap_summary` (all four stay inactive), and re-point their asset names if you had changed them. Cases enriched before the upgrade keep their Sender Email artifacts without the new fields.
 
 - **X-PhishAlarm-Sender with an unclosed quote (2026-10-08, your sample).** On your appliance the header reads like `"Name <address>`: the quote before the name is never closed. Up to package r25, `proofpoint_trap_detail` then took the whole text as the address, so the case name and the Sender Email showed `Name <address>` and the Sender Domain ended with `>`. It now reads the address between the last `<` and `>` (also for `"Name" <address>`, `Name <address>` and a bare address) and ignores a value with no valid address. Re-import `proofpoint_trap_detail` (stays inactive). Cases created before keep their name and artifacts.
+
+- **Connector 1.0.39 and shorter texts (2026-10-08).** Install connector v1.0.39 over the existing Proofpoint TRAP app: the incident ID on a new case's `Event Info` artifact is now typed `proofpoint trap incident id`, so the TRAP actions are offered on it. Re-import all nine playbooks: their descriptions, block notes and comments are shorter, and so are three notes. `TRAP Triage - Severity` no longer repeats the mapping (it is in the implementation plan's PB2 section), `TRAP Detail` drops its last sentence and an empty Summary line, and `Attachment Extraction` is one line when no email has an attachment. Nothing else changes: keep `proofpoint_trap_orchestrator` and `proofpoint_trap_recheck` active and the other four automation playbooks inactive. The implementation plan in `docs/` now describes the current design only.
 
 ## Install order
 

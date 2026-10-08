@@ -1,5 +1,5 @@
 """
-Automation playbook for label proofpoint_trap, the only UC2 playbook started at ingest and on each Event Info Update from proofpoint_trap_recheck. Runs proofpoint_trap_detail, proofpoint_trap_attachments, proofpoint_trap_triage and proofpoint_trap_summary one after another, each waiting for the previous one to finish, so the attachments are extracted from the emails detail has just downloaded, the severity is applied after the last artifact is written, and the summary sees everything. Those four playbooks stay inactive: this playbook calls them.
+Automation playbook for label proofpoint_trap, the only UC2 playbook active at ingest. Runs proofpoint_trap_detail, proofpoint_trap_attachments, proofpoint_trap_triage and proofpoint_trap_summary in turn, each after the previous one finishes; those four stay inactive.
 """
 
 

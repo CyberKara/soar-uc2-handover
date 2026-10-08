@@ -143,7 +143,7 @@
                         "advanced": {
                             "join": [],
                             "customName": "extract incident id",
-                            "description": "Extract TRAP incident ID (+ raw TRAP Severity) via the shared proofpoint_trap_extract_incident_id custom function.",
+                            "description": "Read the TRAP incident ID and severity (shared custom function).",
                             "customNameId": 0
                         },
                         "utilities": {
@@ -177,7 +177,7 @@
                         "type": "code",
                         "advanced": {
                             "join": [],
-                            "note": "Code block, not a native prompt: a VPE save regenerates prompt blocks whole and would drop the soar_local_admin fallback (TRAP containers have no owner). Calls phantom.prompt2 with callback process_comment, then returns.",
+                            "note": "Code block, not a prompt block: a VPE save would drop the approver fallback (owner, else soar_local_admin).",
                             "customName": "prompt comment",
                             "description": "Ask the analyst for an acknowledgement comment (approver: container owner, else soar_local_admin).",
                             "customNameId": 0
@@ -204,7 +204,7 @@
                         "type": "code",
                         "advanced": {
                             "join": [],
-                            "note": "Reads via GET /rest/approval, not collect2 \u2014 same LEGACY_CUSTOM_FUNCTION_RESULT bug documented in proofpoint_trap_triage.py's history. Falls back to a generic acknowledgement comment on expiry/no-response.",
+                            "note": "Reads the answer over REST (GET /rest/approval). No answer: a generic comment.",
                             "customName": "process comment",
                             "description": "Read analyst's prompt response.",
                             "customNameId": 0
@@ -257,7 +257,7 @@
                         "action": "update team and assignee",
                         "advanced": {
                             "join": [],
-                            "note": "Best-guess Alerts API v1 contract \u2014 see connector's dated comment.",
+                            "note": "On hold: sends assignee only, and the connector requires team too, so SOAR refuses it.",
                             "customName": "update incident assignee",
                             "description": "Assign the TRAP incident to SOAR.",
                             "customNameId": 0
@@ -324,7 +324,7 @@
                         "action": "set incident field value",
                         "advanced": {
                             "join": [],
-                            "note": "Best-guess Alerts API v1 contract \u2014 see connector's dated comment.",
+                            "note": "Sets the TRAP incident state to open.",
                             "customName": "set incident open",
                             "description": "Move the TRAP incident status from new to open.",
                             "customNameId": 0
@@ -402,7 +402,7 @@
                         "action": "add comment",
                         "advanced": {
                             "join": [],
-                            "note": "Uses the existing, already-proven add comment action \u2014 not update incident description.",
+                            "note": "Posts the analyst comment to TRAP.",
                             "customName": "add trap comment",
                             "description": "Add the analyst's acknowledgement comment to the TRAP incident.",
                             "customNameId": 0
@@ -465,7 +465,7 @@
                     },
                     "type": "code",
                     "errors": {},
-                    "userCode": "    ################################################################################\n    ################################################################################\n\n    incident_id = json.loads(phantom.get_run_data(key=\"read_incident_id:incident_id\"))\n    comment = json.loads(phantom.get_run_data(key=\"process_comment:comment\") or '\"\"')\n    prompt_status = json.loads(phantom.get_run_data(key=\"process_comment:prompt_status\") or '\"\"')\n\n    # All three actions are dispatched unconditionally above, so a missing\n    # action_result does NOT mean the step was skipped: when SOAR refuses to\n    # dispatch (a manifest-required parameter missing, the case of this\n    # playbook's own assignee+team bug) no app_run is created at all and\n    # collect2 finds nothing, while the playbook run records the attempt as\n    # failed. Report that as a failure with where to read the reason, never as\n    # \"not run\".\n    NO_RESULT = \"failed - not dispatched (reason in the playbook run's actions)\"\n\n    assignee_data = phantom.collect2(container=container, datapath=[\"update_incident_assignee:action_result.status\"])\n    assignee_status = assignee_data[0][0] if assignee_data and assignee_data[0][0] else NO_RESULT\n\n    status_data = phantom.collect2(container=container, datapath=[\"set_incident_open:action_result.status\"])\n    status_status = status_data[0][0] if status_data and status_data[0][0] else NO_RESULT\n\n    comment_data = phantom.collect2(container=container, datapath=[\"add_trap_comment:action_result.status\"])\n    comment_status = comment_data[0][0] if comment_data and comment_data[0][0] else NO_RESULT\n\n    note_lines = [\n        \"# TRAP Acknowledgement\",\n        \"**Incident ID:** {}\".format(incident_id),\n        \"**Comment:** {}\".format(comment),\n        \"**Prompt status:** {}\".format(prompt_status),\n        \"**Time:** {}\".format(datetime.now().strftime(\"%Y-%m-%d %H:%M:%S\")),\n        \"\",\n        \"## TRAP Actions\",\n        \"**update_incident_assignee:** {}\".format(assignee_status),\n        \"**set_incident_open:** {}\".format(status_status),\n        \"**add_comment:** {}\".format(comment_status),\n    ]\n\n    note_content = \"\\n\".join(note_lines)\n\n    phantom.add_note(\n        container=container,\n        note_type=\"general\",\n        title=\"TRAP Acknowledge - {}\".format(datetime.now().strftime(\"%Y-%m-%d %H:%M\")),\n        content=note_content,\n        note_format=\"markdown\",  # the content is markdown; add_note() defaults to html\n    )\n\n    phantom.debug(\"Acknowledge note added\")\n\n    # Playbook outputs, read by on_finish: success when all three TRAP actions\n    # succeeded, partial when some did, failed when none did.\n    trap_results = [assignee_status, status_status, comment_status]\n    succeeded = trap_results.count(\"success\")\n    playbook_output = {\n        \"status\": \"success\" if succeeded == len(trap_results) else (\"partial\" if succeeded else \"failed\"),\n        \"incident_id\": incident_id,\n        \"comment\": comment,\n    }\n    phantom.save_run_data(key=\"playbook_output\", value=json.dumps(playbook_output))\n\n    ################################################################################\n    ################################################################################\n",
+                    "userCode": "    ################################################################################\n    ################################################################################\n\n    incident_id = json.loads(phantom.get_run_data(key=\"read_incident_id:incident_id\"))\n    comment = json.loads(phantom.get_run_data(key=\"process_comment:comment\") or '\"\"')\n    prompt_status = json.loads(phantom.get_run_data(key=\"process_comment:prompt_status\") or '\"\"')\n\n    # A missing action_result is a failure, not a skipped step: SOAR refusing to\n    # dispatch (a manifest-required parameter missing) creates no app_run, and\n    # the playbook run records the attempt as failed.\n    NO_RESULT = \"failed - not dispatched (reason in the playbook run's actions)\"\n\n    assignee_data = phantom.collect2(container=container, datapath=[\"update_incident_assignee:action_result.status\"])\n    assignee_status = assignee_data[0][0] if assignee_data and assignee_data[0][0] else NO_RESULT\n\n    status_data = phantom.collect2(container=container, datapath=[\"set_incident_open:action_result.status\"])\n    status_status = status_data[0][0] if status_data and status_data[0][0] else NO_RESULT\n\n    comment_data = phantom.collect2(container=container, datapath=[\"add_trap_comment:action_result.status\"])\n    comment_status = comment_data[0][0] if comment_data and comment_data[0][0] else NO_RESULT\n\n    note_lines = [\n        \"# TRAP Acknowledgement\",\n        \"**Incident ID:** {}\".format(incident_id),\n        \"**Comment:** {}\".format(comment),\n        \"**Prompt status:** {}\".format(prompt_status),\n        \"**Time:** {}\".format(datetime.now().strftime(\"%Y-%m-%d %H:%M:%S\")),\n        \"\",\n        \"## TRAP Actions\",\n        \"**update_incident_assignee:** {}\".format(assignee_status),\n        \"**set_incident_open:** {}\".format(status_status),\n        \"**add_comment:** {}\".format(comment_status),\n    ]\n\n    note_content = \"\\n\".join(note_lines)\n\n    phantom.add_note(\n        container=container,\n        note_type=\"general\",\n        title=\"TRAP Acknowledge - {}\".format(datetime.now().strftime(\"%Y-%m-%d %H:%M\")),\n        content=note_content,\n        note_format=\"markdown\",  # the content is markdown; add_note() defaults to html\n    )\n\n    phantom.debug(\"Acknowledge note added\")\n\n    # Playbook outputs, read by on_finish: success when all three TRAP actions\n    # succeeded, partial when some did, failed when none did.\n    trap_results = [assignee_status, status_status, comment_status]\n    succeeded = trap_results.count(\"success\")\n    playbook_output = {\n        \"status\": \"success\" if succeeded == len(trap_results) else (\"partial\" if succeeded else \"failed\"),\n        \"incident_id\": incident_id,\n        \"comment\": comment,\n    }\n    phantom.save_run_data(key=\"playbook_output\", value=json.dumps(playbook_output))\n\n    ################################################################################\n    ################################################################################\n",
                     "warnings": {}
                 },
                 "9": {
@@ -479,7 +479,7 @@
                             "join": [],
                             "note": "Reads incident_id (+ trap_severity where used) from the extract_incident_id CF result.",
                             "customName": "read incident id",
-                            "description": "Bridge block: read extract_incident_id CF result (same pattern as cyberark_rotation_orchestrator.py read_discover_result).",
+                            "description": "Read the incident ID from the custom function result.",
                             "customNameId": 0
                         },
                         "functionId": 8,
@@ -498,8 +498,8 @@
                 }
             },
             "notes": "",
-            "description": "Data playbook (PB4) manually launched by an analyst from the container once they've reviewed the artifacts/notes PB1-PB3 produced. Prompts for a comment, then assigns the TRAP incident to SOAR, moves its status from new to open, and posts the comment. Independent of proofpoint_trap_triage/proofpoint_trap_close.",
-            "globalCustomCode": "\n\n\n# Design notes (kept here because a VPE save replaces the module docstring):\n# Proofpoint TRAP Acknowledge (PB4)\n#\n# Data playbook manually launched by an analyst from the container, once\n# they've reviewed the artifacts/enrichment notes PB1-PB3 produced. Prompts\n# for a comment, then writes three things to the real TRAP incident: the\n# comment, an assignee marking it claimed by SOAR, and a status change from\n# new to open. Independent of proofpoint_trap_triage/proofpoint_trap_close \u2014\n# no chaining.\n#\n# Trigger: Manual run by analyst\n\nACK_ASSIGNEE = \"SOAR\"\nACK_FALLBACK_COMMENT = \"Acknowledged by SOAR\""
+            "description": "Data playbook (PB4), run by an analyst. Prompts for a comment, then assigns the TRAP incident to SOAR, moves it from new to open and posts the comment.",
+            "globalCustomCode": "################################################################################\n\n\n\nACK_ASSIGNEE = \"SOAR\"\nACK_FALLBACK_COMMENT = \"Acknowledged by SOAR\"\n################################################################################\n"
         },
         "input_spec": [
             {
@@ -545,7 +545,7 @@
         "version": "8.6.0.530",
         "playbook_trigger": "artifact_created"
     },
-    "create_time": "2026-10-08T00:42:53.404683Z",
+    "create_time": "2026-10-08T22:25:18.375688Z",
     "draft_mode": false,
     "labels": [
         "proofpoint_trap"

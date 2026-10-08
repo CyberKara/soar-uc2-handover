@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Paquet de transfert (déploiement air-gapped)
 
-Généré le 2026-10-08 15:05 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
+Généré le 2026-10-08 22:35 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
 
 Ce paquet est autonome — tout ce qu'il faut pour déployer ce cas d'usage manuellement
 dans un environnement sans accès réseau vers ce dépôt ni vers `soar8`.
@@ -11,7 +11,7 @@ dans un environnement sans accès réseau vers ce dépôt ni vers `soar8`.
 
 | Chemin | Contenu |
 |--------|---------|
-| `connectors/` | Paquet(s) applicatif(s) connecteur : proofpoint_trap-v1.0.38.tgz |
+| `connectors/` | Paquet(s) applicatif(s) connecteur : proofpoint_trap-v1.0.39.tgz |
 | `connectors/source/` | Même(s) connecteur(s), extrait(s) — pour lecture, pas pour import |
 | `playbooks/*.tgz` (CF) | proofpoint_trap_extract_incident_id |
 | `playbooks/*.tgz` (PB) | proofpoint_trap_detail, proofpoint_trap_triage, proofpoint_trap_attachments, proofpoint_trap_acknowledge, proofpoint_trap_close, proofpoint_trap_isolation_notify, proofpoint_trap_recheck, proofpoint_trap_summary, proofpoint_trap_orchestrator |
@@ -65,6 +65,8 @@ d'installation.
 - **Expéditeur, en-têtes, verdict CLEAR et pièces jointes (2026-10-07, vos retours).** (1) Quand TRAP ne donne que le signalement (pas de copie de l'e-mail signalé), comme pour un signalement envoyé depuis une boîte partagée, et que le signalement porte l'en-tête `X-PhishAlarm-Sender`, `proofpoint_trap_detail` prend l'expéditeur dans cet en-tête : il nomme le cas `TRAP-<id>: <adresse>` et ajoute un Sender Email pour cette adresse. L'expéditeur et le destinataire du signalement lui-même (l'outil de signalement ou la boîte partagée, et la boîte abuse) ne sont pas utilisés, et l'utilisateur ou la boîte qui a signalé devient un Recipient Email de rôle `reporter`. Rien à ajouter dans `proofpoint_trap_excluded_email` pour cela (le paquet r24 disait d'y inscrire la boîte partagée : inutile depuis r25). (2) Chaque Sender Email porte les champs `receivedSpf`, `dkimSignature`, `inReplyTo`, `received` et `phishAlarmSender` ; la note Email Content affiche In-Reply-To, X-PhishAlarm-Sender, Received-SPF et DKIM-Signature ; le TRAP Summary a les colonnes correspondantes. (3) Le TRAP Summary commence par le verdict CLEAR (Abuse Disposition / Sub Disposition) et les noms de menaces des alertes de l'incident. `proofpoint_trap_triage` fixe la sévérité à la plus haute entre TRAP Severity et le verdict (Malicious → high ; Suspicious, False Negative, Unknown / Needs Manual Review ou Unknown seul → medium ; le reste → low) et étiquette le cas avec le verdict, par exemple `trap-needs-manual-review` ou `trap-malicious` ; un nouveau verdict remplace cette étiquette et aucune autre n'est touchée. (4) Email Attachment reçoit le MD5 et la taille (`fileHashMd5`, `fileSize`) ; quand l'e-mail d'origine d'une alerte ne peut pas être téléchargé, les pièces jointes que TRAP liste pour elle sont ajoutées à partir des données de TRAP (aucun fichier dans le Vault). Réimportez `proofpoint_trap_detail`, `proofpoint_trap_attachments`, `proofpoint_trap_triage` et `proofpoint_trap_summary` (tous les quatre restent inactifs), et refaites pointer leurs noms d'actifs si vous les aviez modifiés. Les cas enrichis avant la mise à jour gardent leurs artefacts Sender Email sans les nouveaux champs.
 
 - **X-PhishAlarm-Sender avec un guillemet non fermé (2026-10-08, votre exemple).** Sur votre appliance, l'en-tête a la forme `"Nom <adresse>` : le guillemet avant le nom n'est jamais fermé. Jusqu'au paquet r25, `proofpoint_trap_detail` prenait alors tout le texte comme adresse : le nom du cas et le Sender Email affichaient `Nom <adresse>`, et le Sender Domain se terminait par `>`. Il lit désormais l'adresse entre le dernier `<` et `>` (aussi pour `"Nom" <adresse>`, `Nom <adresse>` et une adresse seule) et ignore une valeur sans adresse valide. Réimportez `proofpoint_trap_detail` (reste inactif). Les cas créés avant gardent leur nom et leurs artefacts.
+
+- **Connecteur 1.0.39 et textes plus courts (2026-10-08).** Installez le connecteur v1.0.39 par-dessus l'app Proofpoint TRAP existante : l'ID d'incident de l'artefact `Event Info` d'un nouveau cas a désormais le type `proofpoint trap incident id`, ce qui propose les actions TRAP sur cet artefact. Réimportez les neuf playbooks : leurs descriptions, notes de blocs et commentaires sont plus courts, ainsi que trois notes. `TRAP Triage - Severity` ne répète plus la table de correspondance (elle est dans la section PB2 du plan d'implémentation), `TRAP Detail` perd sa dernière phrase et une ligne Summary vide, et `Attachment Extraction` tient en une ligne quand aucun e-mail n'a de pièce jointe. Rien d'autre ne change : gardez `proofpoint_trap_orchestrator` et `proofpoint_trap_recheck` actifs et les quatre autres playbooks d'automatisation inactifs. Le plan d'implémentation dans `docs/` ne décrit plus que la conception actuelle.
 
 ## Ordre d'installation
 

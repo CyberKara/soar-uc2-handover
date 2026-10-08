@@ -1,5 +1,5 @@
 """
-Automation playbook (PB2) for label proofpoint_trap, left inactive: proofpoint_trap_orchestrator runs it after proofpoint_trap_attachments, at ingest and on each Event Info Update. Reads the TRAP incident ID, the raw TRAP Severity and the CLEAR verdict (Abuse Disposition / Sub Disposition) off the latest Event Info artifact and sets the container&#39;s severity to the higher of the two each run, since new artifacts arrive at SOAR&#39;s default severity and raise a lower one. Tags the container with the verdict (e.g. trap-malicious, trap-needs-manual-review), replacing an earlier verdict tag. Adds a TRAP Triage - Severity note when that severity first applies or changes. No writes back to TRAP. Analyst-driven actions (acknowledge, close) live in separate manually-launched playbooks: proofpoint_trap_acknowledge, proofpoint_trap_close.
+Automation playbook (PB2), left inactive: proofpoint_trap_orchestrator runs it after proofpoint_trap_attachments. Sets the container severity to the higher of the TRAP Severity and the CLEAR verdict, tags the verdict and notes a severity change. No writes to TRAP.
 """
 
 
@@ -22,8 +22,7 @@ def extract_incident_id(action=None, success=None, container=None, results=None,
     phantom.debug("extract_incident_id() called")
 
     ################################################################################
-    # Extract TRAP incident ID (+ raw TRAP Severity) via the shared proofpoint_trap_extract_incident_id 
-    # custom function.
+    # Read the TRAP incident ID and severity (shared custom function).
     ################################################################################
 
     parameters = [{}]
@@ -48,8 +47,7 @@ def read_incident_id(action=None, success=None, container=None, results=None, ha
     phantom.debug("read_incident_id() called")
 
     ################################################################################
-    # Bridge block: read extract_incident_id CF result (incident_id + trap_severity) 
-    # and promote container severity.
+    # Set the container severity and verdict tag from the incident.
     ################################################################################
 
     extract_incident_id__result = phantom.collect2(container=container, datapath=["extract_incident_id:custom_function_result.data.incident_id","extract_incident_id:custom_function_result.data.trap_severity"])
@@ -90,8 +88,8 @@ def read_incident_id(action=None, success=None, container=None, results=None, ha
 
     # The CLEAR verdict (Abuse Disposition + Sub Disposition) of the latest
     # Event Info / Event Info Update also sets a severity; the container gets
-    # the higher of the two, so the verdict can raise a case, never lower it
-    # (user decision 2026-10-07). A sub-disposition exists only under Unknown.
+    # the higher of the two, so the verdict can raise a case, never lower it.
+    # A sub-disposition exists only under Unknown.
     disposition_map = {
         "Malicious": "high",
         "Suspicious": "medium",
@@ -168,13 +166,9 @@ def read_incident_id(action=None, success=None, container=None, results=None, ha
         added_ok, added_message = phantom.add_tags(container=container, tags=[current_tag])
         if not added_ok:
             phantom.error("Could not add verdict tag {}: {}".format(current_tag, added_message))
-    # proofpoint_trap_orchestrator runs this playbook on every automation trigger
-    # of the container (ingest, each Event Info Update), after detail and
-    # attachments have written their artifacts, and it re-applies the
-    # severity each time: new artifacts arrive at SOAR's default severity
-    # (medium) and raise a lower container severity. The note records the
-    # severity derived from TRAP, so it is written the first time and then only
-    # when that value differs from the one in the latest note.
+    # Re-applied on every run: new artifacts arrive at medium and raise a lower
+    # severity. The note is written the first time and when the value changes;
+    # its first line is what the next run compares.
     note_title = "TRAP Triage - Severity"
     last_noted = None
     try:
@@ -194,7 +188,7 @@ def read_incident_id(action=None, success=None, container=None, results=None, ha
             container=container,
             note_type="general",
             title=note_title,
-            content="**Severity: `{}` -> `{}`**\n\n{}\n\nTRAP incident ID: {}\n\nTRAP Severity: Critical -> high, High -> medium, Informational -> low, anything else -> low.\n\nCLEAR verdict: Malicious -> high; Suspicious, False Negative, Unknown / Needs Manual Review (or no sub-disposition) -> medium; Unknown / Likely Harmless, Bulk, Spam, Low Risk, Known Good -> low.".format(
+            content="**Severity: `{}` -> `{}`**\n\n{}\n\nTRAP incident ID: {}".format(
                 previous_severity, mapped_severity, reason, read_incident_id__incident_id
             ),
             note_format="markdown"

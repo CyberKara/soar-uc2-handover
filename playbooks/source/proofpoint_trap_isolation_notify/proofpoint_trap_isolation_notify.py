@@ -1,5 +1,5 @@
 """
-Data playbook (PB6) run by an analyst from a Proofpoint TRAP container. Emails the container owner isolation-browser links for the container URL and every threat URL found in the TRAP incident, and lists the same links in its TRAP Isolation Notify note.
+Data playbook (PB6), run by an analyst. Emails the container owner isolation-browser links for the case URL and every threat URL, and lists them in a note.
 """
 
 
@@ -13,39 +13,6 @@ from datetime import datetime, timedelta
 ################################################################################
 
 
-
-# Design notes (kept here because a VPE save replaces the module docstring):
-# Proofpoint TRAP Isolation Notify (PB6)
-#
-# Data playbook manually launched by an analyst from the container, once
-# they've reviewed PB1's enrichment. Emails the container owner a set of
-# isolation-browser links -- the container's own SOAR URL plus every threat
-# URL PB1 found in the incident (from "Threat Domain" artifacts' cef.url) --
-# each wrapped behind a configurable remote-browser-isolation prefix so the
-# analyst can preview them without direct exposure. Independent entry point,
-# same convention as PB4/PB5 -- no chaining, no writes back to TRAP.
-#
-# Recipient resolution (design decision, see uc2_implementation_plan.md's
-# PB6 section): TRAP containers never get an owner assigned automatically --
-# the same gap PB4/PB5 work around with a prompt-approval fallback. Email
-# delivery can't use that fallback (a real address is required, not just a
-# SOAR username), so this playbook requires the analyst to have already
-# self-assigned the *container itself* as owner AND moved the *container's
-# own* status to "open" in the SOAR UI (distinct from PB4's TRAP-side
-# assignee/status calls, which touch the remote TRAP incident, not the
-# container's own owner/status fields) -- fails fast with no silent fallback
-# if either is missing, since an isolation link must reach a real person.
-# Owner id -> email via GET /rest/ph_user/<id>.
-#
-# Delivery: new "smtp" asset (phsmtp reference connector,
-# soar-connectors/reference_connectors/phantom-apps/Apps/phsmtp/), mock-first
-# against migration/mock-backend/mock_smtp.py -- see that file's docstring.
-#
-# Trigger: Manual run by analyst
-# Playbook input: isolation_browser_url (default:
-# https://www.domain.tld/browser?url=) -- deliberately not hardcoded,
-# per constraints.md's no-hardcoded-config rule; this is a per-deployment
-# value, not project-fixed.
 
 import urllib.parse
 
@@ -94,8 +61,7 @@ def extract_incident_id(action=None, success=None, container=None, results=None,
     phantom.debug("extract_incident_id() called")
 
     ################################################################################
-    # Extract TRAP incident ID via the shared proofpoint_trap_extract_incident_id 
-    # custom function.
+    # Read the TRAP incident ID (shared custom function).
     ################################################################################
 
     parameters = [{}]
@@ -120,8 +86,7 @@ def read_incident_id(action=None, success=None, container=None, results=None, ha
     phantom.debug("read_incident_id() called")
 
     ################################################################################
-    # Bridge block: read extract_incident_id CF result (same pattern as cyberark_rotation_orchestrator.py 
-    # read_discover_result).
+    # Read the incident ID from the custom function result.
     ################################################################################
 
     extract_incident_id__result = phantom.collect2(container=container, datapath=["extract_incident_id:custom_function_result.data.incident_id"])
@@ -183,9 +148,7 @@ def resolve_recipient_and_build_links(action=None, success=None, container=None,
     phantom.debug("resolve_recipient_and_build_links() called")
 
     ################################################################################
-    # Fail-fast owner+status precondition, resolve owner id -> email via GET /rest/ph_user, 
-    # collect unique Threat Domain cef.url values, build isolation-wrapped links for 
-    # the container URL + each threat URL, format email subject/body.
+    # Check owner and status, find the owner email, build the isolation links.
     ################################################################################
 
     read_incident_id__incident_id = json.loads(_ if (_ := phantom.get_run_data(key="read_incident_id:incident_id")) != "" else "null")  # pylint: disable=used-before-assignment
@@ -221,12 +184,8 @@ def resolve_recipient_and_build_links(action=None, success=None, container=None,
         )
         return
 
-    # container['owner'] is the username string inside playbook execution
-    # context, NOT the numeric REST-API id the raw GET /rest/container
-    # response shows (confirmed live 2026-08-17, container 1661: REST showed
-    # owner=1/owner_name="soar_local_admin", but this block saw
-    # owner="soar_local_admin") -- filter by username instead of assuming a
-    # path-friendly numeric id.
+    # Inside a playbook container['owner'] is the username, not the numeric id
+    # REST shows: look the user up by username.
     try:
         resp = phantom.requests.get(
             uri=phantom.build_phantom_rest_url("ph_user") + '?_filter_username="{}"&page_size=1'.format(owner_id),
@@ -322,7 +281,7 @@ def send_isolation_email(action=None, success=None, container=None, results=None
     # phantom.debug('Action: {0} {1}'.format(action['name'], ('SUCCEEDED' if success else 'FAILED')))
 
     ################################################################################
-    # Sends the isolation-link email via the smtp asset (phsmtp reference connector).
+    # Send the isolation-link email.
     ################################################################################
 
     resolve_recipient_and_build_links__recipient_email = json.loads(_ if (_ := phantom.get_run_data(key="resolve_recipient_and_build_links:recipient_email")) != "" else "null")  # pylint: disable=used-before-assignment

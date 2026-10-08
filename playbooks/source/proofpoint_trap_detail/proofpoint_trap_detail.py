@@ -1,5 +1,5 @@
 """
-Automation playbook (PB1) for label proofpoint_trap, left inactive: proofpoint_trap_orchestrator runs it first. Fetches the TRAP incident with its events, downloads each event&#39;s original email, and creates the derived artifacts (sender/recipient emails, domains, threat URLs, click IPs, MIME bodies), a detail note linking to the incident in TRAP, and a final Enrichment Complete artifact. Creates no sender or recipient artifact for an address in the custom list proofpoint_trap_excluded_email (enabled rows) nor for an abuse-mailbox report copy when TRAP also gives the reported email (the reporting user becomes a Recipient Email, role reporter), renames a container TRAP gave no summary after its first remaining sender (for a report TRAP gives without the reported email, the sender the X-PhishAlarm-Sender header names, which is also its Sender Email), gives each Sender Email the Received-SPF, DKIM-Signature, In-Reply-To, Received and X-PhishAlarm-Sender headers as fields, turns the attachments TRAP lists for an alert whose original email could not be downloaded into Email Attachment artifacts (name, type, size, MD5, SHA256), and on the incident&#39;s first enrichment comments on the TRAP incident with a link to the SOAR case. A failed fetch or platform write adds an error note and an Enrichment Failed artifact instead, so a later run can retry. Assets are selected in each action block, never in code, so an importer can point them at their own asset names.
+Automation playbook (PB1), left inactive: proofpoint_trap_orchestrator runs it first. Fetches the TRAP incident and its emails, creates the event artifacts, a detail note and Enrichment Complete, and comments on the TRAP incident on its first enrichment.
 """
 
 
@@ -118,12 +118,9 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
     ################################################################################
 
     def _create_enrichment_failure_signal(msg):
-        # Uses the documented "Signal artifact pattern" (playbook-patterns.md)
-        # instead of a raw REST POST -- synchronous, no asset. No explicit
-        # identifier -- SOAR auto-generates one (user decision 2026-08-15,
-        # accepted tradeoff: duplicate artifacts possible on re-run).
-        # Named "Enrichment Failed", not "Enrichment Complete": on_start's
-        # re-entry guard only counts the latter, so a later run can retry.
+        # Synchronous signal artifact (playbook-patterns.md). "Enrichment Failed",
+        # not "Enrichment Complete": check_reentry counts only the latter, so a
+        # later run retries.
         success, message, artifact_id = phantom.add_artifact(
             container=container,
             raw_data={},
@@ -148,10 +145,8 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
         ]
     )
 
-    # incident_id from the container's own native source_data_identifier
-    # field, independent of whether the fetch below succeeded, so the
-    # failure-signal paths still have a real ID for their message/SDI
-    # instead of "unknown".
+    # The incident id from the container, so the failure paths below have it
+    # even when the fetch failed.
     sdi_rows = phantom.collect2(container=container, datapath=["container:source_data_identifier"])
     incident_id = sdi_rows[0][0] if sdi_rows and sdi_rows[0] and sdi_rows[0][0] else "unknown"
 
@@ -181,14 +176,10 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
         _create_enrichment_failure_signal(msg)
         return
 
-    import urllib.parse  # local import — GUI edits recompile/lint each code block in
-                          # isolation, a shared module-level import isn't visible to it
-                          # (see uc2_dev_notes.md)
+    import urllib.parse  # local: a save drops module-level imports outside Global Custom Code
 
-    # Headers is a free-form dict per email (no fixed schema, contents vary
-    # by mail client) -- pull only these specific ones when present, doing a
-    # case-insensitive match since real-world casing varies (vendor sample
-    # shows "MIME-Version", not "Mime-Version").
+    # Headers kept from each email's free-form headers dict, matched without
+    # case (casing varies by mail client).
     _WANTED_HEADERS = [
         "To", "Date", "From", "Subject", "Return-Path", "Content-Type",
         "MIME-Version", "Received-SPF", "DKIM-Signature",
@@ -206,9 +197,8 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
                 result[name] = val
         return result
 
-    # The headers the operator asked for (2026-10-07) also go on the Sender
-    # Email as flat CEF fields: emailHeaders is a nested dict, which the
-    # artifact search and proofpoint_trap_summary do not show.
+    # Also flat fields on the Sender Email: the artifact search and
+    # proofpoint_trap_summary do not show the nested emailHeaders.
     _FLAT_HEADER_FIELDS = (
         ("Received-SPF", "receivedSpf"),
         ("DKIM-Signature", "dkimSignature"),
@@ -235,22 +225,18 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
     import re
 
     def _header_address(value):
-        # X-PhishAlarm-Sender arrives on the appliance as `"Name <addr>`, with an
-        # unclosed quote (operator sample, 2026-10-08). parseaddr then returns the
-        # whole text as the address, so take the address inside the last <...>
-        # first, else parseaddr's, and keep it only if it is one plain address.
+        # On the appliance X-PhishAlarm-Sender reads `"Name <addr>`, with an
+        # unclosed quote, and parseaddr returns the whole text as the address.
+        # Take the address inside the last <...> first, else parseaddr's, and
+        # keep it only if it is one plain address.
         value = str(value or "")
         bracketed = re.findall(r"<([^<>\s]+)>", value)
         candidate = (bracketed[-1] if bracketed else parseaddr(value)[1]).strip().strip("\"'")
         return candidate if re.fullmatch(r"[^@\s<>\"',;]+@[^@\s<>\"',;]+\.[^@\s<>\"',;]+", candidate) else ""
 
     def _stringify_delivery_time(value):
-        # messageDeliveryTime isn't always a plain string — a real captured
-        # response (XSOAR ProofpointThreatResponse test fixture, 2026-08-06)
-        # showed it as a full Joda-time-style object instead:
-        # {"millis": 1617103759000, "zone": {...}, "chronology": {...}, ...}.
-        # Stringifying defensively here avoids putting a raw dict into a CEF
-        # field value.
+        # messageDeliveryTime can be a Joda-time object ({"millis": ..., "zone": ...})
+        # instead of a string; never put a dict into a CEF field.
         if isinstance(value, dict):
             millis = value.get("millis")
             if isinstance(millis, (int, float)):
@@ -262,14 +248,9 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
     events = incident.get("events", [])
     phantom.debug("Processing {} events from incident {}".format(len(events), incident.get("id", "?")))
 
-    # Email addresses the operator wants left out: the custom list
-    # proofpoint_trap_excluded_email, columns email, date, reason, enabled
-    # (e.g. a mailbox present on every incident). A row counts when its email
-    # holds an address and enabled is "yes" (any case); date and reason are
-    # for the operator only. Addresses compare without case. An excluded
-    # address gets no Sender Email or Recipient Email artifact (sender,
-    # recipient or Cc), gives no Sender Domain, and never names the container.
-    # A missing or empty list excludes nothing.
+    # proofpoint_trap_excluded_email (email, date, reason, enabled): an address
+    # in an enabled row gets no Sender/Recipient Email or Sender Domain and never
+    # names the container. Compared without case; a missing list excludes nothing.
     excluded_addresses = set()
     list_ok, list_message, list_rows = phantom.get_list(list_name="proofpoint_trap_excluded_email")
     if list_ok:
@@ -296,22 +277,11 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
     threat_names = []
     artifacts = []
     id_value = container.get("id")
-    # incident_id from the container's own native source_data_identifier
-    # field (set by the connector at ingestion), not re-derived from the
-    # fetched incident's own "id" field -- same value, one fewer redundant
-    # re-parse of the API response.
+    # The incident id the connector set on the container.
     sdi_rows = phantom.collect2(container=container, datapath=["container:source_data_identifier"])
     incident_id_val = sdi_rows[0][0] if sdi_rows and sdi_rows[0] and sdi_rows[0][0] else incident.get("id")
 
-    # Incident-level (not per-event) threat URLs. Moved here 2026-08-18 from
-    # the connector's on_poll, which used to create one "URL Artifact" per
-    # entry in hosts.url directly at ingestion -- this fetch (get_trap_incident,
-    # expand_events=true) also carries hosts, and this is where the rest of
-    # the incident's derived per-item artifacts already get built, so it
-    # joins them here instead of staying connector-side. hosts.attacker /
-    # hosts.forensics were the original (mock/Swimlane-derived) guess for
-    # this object's shape -- CONFIRMED ABSENT 2026-08-06 against real
-    # incident data -- hosts only ever has `url`.
+    # Incident-level threat URLs (on real incidents hosts holds only url).
     hosts = incident.get("hosts") or {}
     for url_val in hosts.get("url") or []:
         artifacts.append({
@@ -323,13 +293,8 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
             "run_automation": False,
         })
 
-    # MIME Body artifacts -- moved here 2026-08-20 from the connector's
-    # on_poll (removed, user decision: connector stays a thin generic API
-    # wrapper, MIME-fetch belongs with the rest of PB1's derived per-item
-    # artifacts, same reasoning as the URL Artifact move above). A failed
-    # or empty download just means fewer MIME Body artifacts, not a hard
-    # failure of this whole extraction -- mirrors how the hosts.url
-    # handling above tolerates a missing/empty field.
+    # MIME Body artifacts from dispatch_mime_download; a failed download only
+    # means fewer of them.
     mime_status_rows = phantom.collect2(
         container=container,
         datapath=["dispatch_mime_download:action_result.status"],
@@ -360,14 +325,8 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
                 "cef": {"vaultId": vault_id, "fileName": file_name},
                 "cef_types": {"vaultId": ["vault id"], "fileName": ["file name"]},
                 "run_automation": False,
-                # Per-event SDI, NOT the shared incident_id_val every other
-                # artifact in this batch uses -- proofpoint_trap_attachments
-                # (PB3) parses "trap-{incident}-mime-{event}" back out of
-                # this exact field to recover event_id (see its own
-                # comment); a shared SDI would degrade every MIME Body's
-                # event_id to "?" there. Format matches the connector's old
-                # (now-removed) _build_mime_artifact() exactly, just built
-                # here now.
+                # Per-event identifier: proofpoint_trap_attachments reads the
+                # event id back out of it.
                 "source_data_identifier": "trap-{}-mime-{}".format(incident_id_val, mime_event_id),
             })
     else:
@@ -380,19 +339,12 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
         event_id = event.get("id", "")
         emails = event.get("emails", [])
         # An abuse-mailbox report lists the email twice: abuseCopy true is the
-        # report (the analyzer forwarding it to the abuse mailbox), abuseCopy
-        # false the reported email itself. The report's sender, recipient and
-        # Cc are the same on every incident, so they get no artifact -- only
-        # when the event also carries the reported email, so nothing is lost
-        # when TRAP gives the report alone. The user who reported it (header
-        # X-PhishAlarm-Reporter) becomes a Recipient Email, role "reporter".
-        # When TRAP gives the report alone and the report carries the header
-        # X-PhishAlarm-Sender (a report sent from a shared mailbox, operator
-        # 2026-10-07), that header names the reported email's sender: it is the
-        # Sender Email, and the report is otherwise handled as a report copy.
-        # The report's own sender is the reporting tool or the shared mailbox,
-        # never the reported email's sender, so no mailbox needs listing in
-        # proofpoint_trap_excluded_email for this.
+        # report, false the reported email. When both are there, the report's
+        # sender, recipient and Cc get no artifact, and X-PhishAlarm-Reporter
+        # becomes a Recipient Email, role "reporter". When TRAP gives the report
+        # alone with an X-PhishAlarm-Sender header (a report from a shared
+        # mailbox), that header names the Sender Email and the report is
+        # otherwise handled as a report copy.
         has_reported_email = any((e or {}).get("abuseCopy") is False for e in emails)
 
         for email in emails:
@@ -499,14 +451,8 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
                     "run_automation": False,
                 })
 
-            # Cc — best-effort from raw headers. A full field-by-field walk of a
-            # real incident payload (2026-08-06) confirmed no structured `cc`
-            # field exists anywhere in the get-incident response -- if a real
-            # tenant ever has cc data, it would only be inside the raw MIME
-            # body (a separate data path: the `download mime body` action /
-            # vault attachment, not this structured response), which is out
-            # of scope for this function. Left as a harmless no-op rather than
-            # removed, in case `headers` ever does carry one on some tenant.
+            # Cc from the structured headers, when a tenant has it (none seen so
+            # far; proofpoint_trap_attachments reads Cc from the email itself).
             cc_raw = "" if treat_as_report else (headers.get("Cc") or headers.get("CC") or headers.get("cc") or "")
             for cc_addr in [a.strip() for a in cc_raw.split(",") if a.strip()]:
                 if cc_addr.lower() in excluded_addresses:
@@ -525,11 +471,7 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
                         "run_automation": False,
                     })
 
-            # Threat URL domains — CONFIRMED (2026-08-06) via the real
-            # ProofpointThreatResponse integration's own source
-            # (get_emails_context: email.get("urls")), not just docs/guesses.
-            # Per-email list, not the flat event-level field this originally
-            # guessed at.
+            # Threat URL domains, from each email's urls list.
             for url_val in email.get("urls") or []:
                 url_domain = urllib.parse.urlparse(url_val).hostname
                 if url_domain and url_domain not in seen_domains:
@@ -546,16 +488,8 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
                         "run_automation": False,
                     })
 
-        # Click IP / event-level threatURL — a full field-by-field walk of a
-        # real "reported by user" incident (2026-08-06) confirmed neither
-        # exists on that source type; `events[]` there is just {id, emails}.
-        # Real TRAP events also come from a richer "email flow" (Proofpoint
-        # TAP) source with additional fields (category/severity/attackers/
-        # etc., per a captured XSOAR integration fixture) that this lab
-        # doesn't ingest -- click/threat data may live there instead, under
-        # `events[].attackers[].location`, unexplored. Both left as harmless
-        # no-ops rather than removed, since a TAP-sourced incident could
-        # arrive here in principle even though none has yet.
+        # Click IP and event-level threatURL: absent from reported-by-user
+        # incidents; kept for incidents from other sources (e.g. Proofpoint TAP).
         threat_url = event.get("threatURL", "")
         if threat_url:
             url_domain = urllib.parse.urlparse(threat_url).hostname
@@ -630,15 +564,9 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
         else:
             phantom.debug("No sender outside proofpoint_trap_excluded_email: name stays {!r}".format(fallback_name))
 
-    # Post only what is not on the container yet. A re-run (proofpoint_trap_recheck
-    # flags a changed incident, usually one that gained alerts) rebuilds the list
-    # from the whole incident; without this it re-posted every artifact each
-    # time, hundreds on a large incident, each one an "add artifact" action that
-    # SOAR then rejected as a duplicate -- or kept twice when the content
-    # differed slightly (MIME Body built by both this playbook and
-    # proofpoint_trap_recheck). An artifact is "already there" when one with the
-    # same name and the same identifying value exists; the same set also drops a
-    # repeat within this run (e.g. a URL listed twice in hosts.url).
+    # Post only what is not on the container yet: a re-run rebuilds the list
+    # from the whole incident. "Already there" = same name and identifying
+    # value; the same set drops a repeat within this run.
     def _artifact_key(name, cef, sdi):
         if name in ("MIME Body", "Email Attachment"):
             return (name, sdi)
@@ -882,17 +810,17 @@ def prepare_detail_note(action=None, success=None, container=None, results=None,
     incident_url = url_rows[0][0] if url_rows and url_rows[0] and url_rows[0][0] else ""
     trap_link = "**Open in TRAP:** [incident {}]({})\n".format(incident_id, incident_url) if incident_url else ""
 
+    summary_line = "**Summary:** {}\n".format(summary) if summary.strip() and summary != "None" else ""
     prepare_detail_note__note_title = "TRAP Detail - Incident {}".format(incident_id)
     prepare_detail_note__note_content = (
         "# TRAP Incident Detail\n"
         "**Incident ID:** {}\n"
         "{}"
-        "**Summary:** {}\n"
+        "{}"
         "**State:** {} | **Score:** {} | **Events:** {}\n"
         "**Alerts processed:** {}\n"
-        "**Artifacts from events:** {} new, {} already on the container\n\n"
-        "Event artifacts (emails, domains, IPs) have been created on this container."
-    ).format(incident_id, trap_link, summary, state, score, event_count,
+        "**Artifacts from events:** {} new, {} already on the container"
+    ).format(incident_id, trap_link, summary_line, state, score, event_count,
              alert_count if alert_count is not None else "?", artifact_count, already_present)
 
     # Also saved as run data: dispatch_detail_note reads these keys.
@@ -960,8 +888,7 @@ def finalize_detail(action=None, success=None, container=None, results=None, han
     phantom.debug("finalize_detail() called")
 
     ################################################################################
-    # Check the event-artifact and note writes; on success build the Enrichment Complete 
-    # artifact, on a failure record it and stop.
+    # Check the writes; build Enrichment Complete, or record the failure and stop.
     ################################################################################
 
     source_data_identifier_value = container.get("source_data_identifier", None)
@@ -1119,14 +1046,9 @@ def dispatch_artifact_list(action=None, success=None, container=None, results=No
     ################################################################################
     ################################################################################
 
-    # The parameters the VPE builds above are ONE set whose every field is a
-    # whole list. "add artifact" has to run once per artifact, so this replaces
-    # them with one set per list item; phantom.act() below then runs one app_run
-    # per set, on whichever asset this block selects. The fan-out lives here,
-    # in this block's custom code, because that is the part a VPE save keeps
-    # verbatim -- the generated code above is rebuilt from the bindings on
-    # every save. It reads the run data directly rather than the generated
-    # variables, so it does not depend on how the VPE names them.
+    # One parameter set per artifact (the VPE builds one set of whole lists).
+    # Here because a save keeps Custom Code; reads the run data, not the
+    # generated variables.
     artifact_names = json.loads(phantom.get_run_data(key="build_artifact_list:name") or "null") or []
     artifact_labels = json.loads(phantom.get_run_data(key="build_artifact_list:label") or "null") or []
     artifact_sdis = json.loads(phantom.get_run_data(key="build_artifact_list:source_data_identifier") or "null") or []
@@ -1267,17 +1189,10 @@ def check_reentry(action=None, success=None, container=None, results=None, handl
     ################################################################################
     ################################################################################
 
-    # proofpoint_trap_orchestrator runs this playbook on every automation
-    # trigger of the container (ingest, each Event Info Update), so this block
-    # decides whether this trigger needs an enrichment run. It is a
-    # code block rather than code in on_start because the VPE regenerates
-    # on_start on every save and would drop it.
-    #
-    # Runs when no "Enrichment Complete" exists yet, or when there are at least
-    # as many "Event Info Update" artifacts (written by proofpoint_trap_recheck
-    # on a changed incident) as "Enrichment Complete" ones. "Enrichment Failed"
-    # is not counted, so a failed run can be retried. scope="all" because the
-    # artifacts that decide this were created by earlier triggers.
+    # The orchestrator runs this playbook on every trigger (ingest, each Event
+    # Info Update). Run when no Enrichment Complete exists yet, or when Event
+    # Info Updates are at least as many; Enrichment Failed is not counted, so a
+    # failed run retries. A code block, not on_start: a save regenerates on_start.
     rows = phantom.collect2(container=container, datapath=["artifact:*.name"], scope="all")
     names = [row[0] for row in (rows or []) if row and row[0]]
     enrichment_complete_count = names.count("Enrichment Complete")
