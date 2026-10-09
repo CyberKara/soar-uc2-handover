@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Paquet de transfert (déploiement air-gapped)
 
-Généré le 2026-10-08 22:35 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
+Généré le 2026-10-09 15:24 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
 
 Ce paquet est autonome — tout ce qu'il faut pour déployer ce cas d'usage manuellement
 dans un environnement sans accès réseau vers ce dépôt ni vers `soar8`.
@@ -67,6 +67,8 @@ d'installation.
 - **X-PhishAlarm-Sender avec un guillemet non fermé (2026-10-08, votre exemple).** Sur votre appliance, l'en-tête a la forme `"Nom <adresse>` : le guillemet avant le nom n'est jamais fermé. Jusqu'au paquet r25, `proofpoint_trap_detail` prenait alors tout le texte comme adresse : le nom du cas et le Sender Email affichaient `Nom <adresse>`, et le Sender Domain se terminait par `>`. Il lit désormais l'adresse entre le dernier `<` et `>` (aussi pour `"Nom" <adresse>`, `Nom <adresse>` et une adresse seule) et ignore une valeur sans adresse valide. Réimportez `proofpoint_trap_detail` (reste inactif). Les cas créés avant gardent leur nom et leurs artefacts.
 
 - **Connecteur 1.0.39 et textes plus courts (2026-10-08).** Installez le connecteur v1.0.39 par-dessus l'app Proofpoint TRAP existante : l'ID d'incident de l'artefact `Event Info` d'un nouveau cas a désormais le type `proofpoint trap incident id`, ce qui propose les actions TRAP sur cet artefact. Réimportez les neuf playbooks : leurs descriptions, notes de blocs et commentaires sont plus courts, ainsi que trois notes. `TRAP Triage - Severity` ne répète plus la table de correspondance (elle est dans la section PB2 du plan d'implémentation), `TRAP Detail` perd sa dernière phrase et une ligne Summary vide, et `Attachment Extraction` tient en une ligne quand aucun e-mail n'a de pièce jointe. Rien d'autre ne change : gardez `proofpoint_trap_orchestrator` et `proofpoint_trap_recheck` actifs et les quatre autres playbooks d'automatisation inactifs. Le plan d'implémentation dans `docs/` ne décrit plus que la conception actuelle.
+
+- **TRAP Summary : Sender Email en deux tableaux (2026-10-09, vos retours).** Le tableau Sender Email retrouve ses six colonnes (Address, Subject, Delivered, Message ID, Body type, Abuse copy). Les champs d'en-tête passent dans un nouveau tableau `Sender Email headers`, qui commence lui aussi par Address pour relier chaque ligne à son expéditeur. Réimportez `proofpoint_trap_summary` (reste inactif). Le résumé d'un cas prend la nouvelle présentation à la prochaine exécution de l'orchestrateur sur ce cas.
 
 ## Ordre d'installation
 

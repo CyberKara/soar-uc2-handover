@@ -119,13 +119,18 @@ def build_summary(action=None, success=None, container=None, results=None, handl
         ]),
         ("Sender Email", ["Sender Email"], [
             ("Address", cef("emailAddress")),
-            ("Address source", cef("senderSource")),
             ("Subject", cef("emailSubject")),
             ("Delivered", cef("deliveryTime")),
             ("Message ID", cef("messageId")),
-            ("In-Reply-To", cef("inReplyTo")),
             ("Body type", cef("bodyType")),
             ("Abuse copy", cef("abuseCopy")),
+        ]),
+        # Split so neither table is too wide; Address ties the rows together
+        # (proofpoint_trap_detail writes one Sender Email per address).
+        ("Sender Email headers", ["Sender Email"], [
+            ("Address", cef("emailAddress")),
+            ("Address source", cef("senderSource")),
+            ("In-Reply-To", cef("inReplyTo")),
             ("X-PhishAlarm-Sender", cef("phishAlarmSender")),
             ("Received-SPF", cef_short("receivedSpf", 80)),
             ("DKIM", dkim_short),

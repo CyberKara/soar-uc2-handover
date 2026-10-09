@@ -146,7 +146,8 @@ run compares against. No writes to TRAP.
 Skips until `Enrichment Complete` or `Enrichment Failed` exists. Writes one `TRAP Summary` note:
 the CLEAR verdict and the alerts' threat names, then a table per artifact type (incident, senders,
 recipients, domains, URLs, click IPs, MIME bodies, attachments, enrichment runs, any other type),
-at most 250 rows each. Later runs rewrite the same note(s) in place; parts no longer needed are
+at most 250 rows each. Sender Email takes two tables, both led by Address (one Sender Email per
+address): the message fields, then `Sender Email headers`. Later runs rewrite the same note(s) in place; parts no longer needed are
 blanked as `TRAP Summary (unused)`, since a playbook cannot delete a note. When the newest
 `Enrichment Complete` says `incidentState: closed`, it closes the case once and adds a
 `Closed in TRAP` note; a case an analyst reopens stays open.
@@ -257,15 +258,18 @@ login; the appliance where noted):
 ## Verification
 
 - **Lab mock:** the TRAP mock (`soar8/migration/mock-backend/mock_api_gateway.py`, kept identical
-  to `soar-connectors/test/`) serves seed incidents 1001-1014. A restart anchors the latest seed's
-  `created_at` at now-30s, so date a new seed after the latest one or the poll never sees it.
+  to `soar-connectors/test/`) serves seed incidents 1001-1015. A restart anchors the latest seed's
+  `created_at` at now-30s, so date a new seed after the latest one or the poll never sees it;
+  restart only once the deploy is confirmed live (new ids), or the old playbooks ingest the seed.
   Admin routes: `GET /_admin/trap/incidents`, `POST /_admin/trap/reset`,
   `POST /_admin/trap/add_event`.
 - **New incident:** one orchestrator run with four successful children; the detail note and the
   artifacts; an Email Content and an Attachment Extraction note; a severity note matching the
   mapping and the case at that severity; one TRAP Summary; a comment on the TRAP incident.
 - **Change:** add an event to an ingested incident (`add_event`) → within one Timer tick an
-  `Event Info Update`, one more orchestrator run, PB1 posting only the new artifacts.
+  `Event Info Update`, one more orchestrator run, PB1 posting only the new artifacts. To skip the
+  wait, poll the Timer asset now: `POST /rest/action_run` with `action: "on poll"`,
+  `type: "ingest"` and target asset `proofpoint_trap_recheck` (Timer app).
 - **Data playbooks:** run each with its inputs over REST (`POST /rest/playbook_run` with
   `inputs`) and read `outputs` back; answer prompts in the GUI.
 - **Logs** on the SOAR host (as `phantom`): `spawn.log` (playbooks), `actiond.log` (actions),

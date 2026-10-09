@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Air-Gapped Handover Package
 
-Generated 2026-10-08 22:35 UTC from `proofpoint_trap` (source env: `soar8`).
+Generated 2026-10-09 15:24 UTC from `proofpoint_trap` (source env: `soar8`).
 
 This package is self-contained — everything needed to deploy this use case by hand
 in an environment with no network access back to this repo or to `soar8`.
@@ -66,6 +66,8 @@ previous package. On a completely fresh target, skip to Install order.
 - **X-PhishAlarm-Sender with an unclosed quote (2026-10-08, your sample).** On your appliance the header reads like `"Name <address>`: the quote before the name is never closed. Up to package r25, `proofpoint_trap_detail` then took the whole text as the address, so the case name and the Sender Email showed `Name <address>` and the Sender Domain ended with `>`. It now reads the address between the last `<` and `>` (also for `"Name" <address>`, `Name <address>` and a bare address) and ignores a value with no valid address. Re-import `proofpoint_trap_detail` (stays inactive). Cases created before keep their name and artifacts.
 
 - **Connector 1.0.39 and shorter texts (2026-10-08).** Install connector v1.0.39 over the existing Proofpoint TRAP app: the incident ID on a new case's `Event Info` artifact is now typed `proofpoint trap incident id`, so the TRAP actions are offered on it. Re-import all nine playbooks: their descriptions, block notes and comments are shorter, and so are three notes. `TRAP Triage - Severity` no longer repeats the mapping (it is in the implementation plan's PB2 section), `TRAP Detail` drops its last sentence and an empty Summary line, and `Attachment Extraction` is one line when no email has an attachment. Nothing else changes: keep `proofpoint_trap_orchestrator` and `proofpoint_trap_recheck` active and the other four automation playbooks inactive. The implementation plan in `docs/` now describes the current design only.
+
+- **TRAP Summary: Sender Email in two tables (2026-10-09, your feedback).** The Sender Email table is back to six columns (Address, Subject, Delivered, Message ID, Body type, Abuse copy). The header fields move to a new `Sender Email headers` table, which also starts with Address so each row matches its sender. Re-import `proofpoint_trap_summary` (stays inactive). A case's summary takes the new layout the next time the orchestrator runs on it.
 
 ## Install order
 
