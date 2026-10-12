@@ -210,15 +210,12 @@
                         },
                         "functionId": 8,
                         "functionName": "prompt_close_reason",
-                        "inputParameters": [
-                            "playbook_input:approver",
-                            "playbook_input:respond_in_mins"
-                        ],
+                        "inputParameters": [],
                         "outputVariables": []
                     },
                     "type": "code",
                     "errors": {},
-                    "userCode": "    ################################################################################\n    ################################################################################\n\n    # The prompt is raised from code, not from a native prompt block: a VPE save\n    # regenerates prompt blocks whole (they have no Custom Code), which would drop\n    # this approver fallback -- TRAP containers never get an owner assigned. The\n    # callback continues the flow; the return below stops the generated call to\n    # process_close_reason from also running right away.\n\n    # Playbook inputs (optional): approver replaces the owner fallback and\n    # respond_in_mins the 30-minute timeout.\n    approver = next((v for v in playbook_input_approver_values if v not in (None, \"\")), None)\n    user = str(approver).strip() if approver else (container.get('owner_name', None) or 'soar_local_admin')\n    respond_in_mins = 30\n    raw_minutes = next((v for v in playbook_input_respond_in_mins_values if v not in (None, \"\")), None)\n    if raw_minutes is not None:\n        try:\n            respond_in_mins = max(1, int(str(raw_minutes).strip()))\n        except ValueError:\n            phantom.debug(\"Ignoring respond_in_mins input {!r}: not a whole number\".format(raw_minutes))\n    role = None\n    message = \"\"\"**TRAP Incident {0}**\nContainer: {1}\n\nClosing this incident will close it in Proofpoint TRAP and post your\nclosure reason as a comment. Provide a closure reason.\"\"\"\n\n    parameters = [\n        \"read_incident_id:custom_function:incident_id\",\n        \"container:name\",\n    ]\n\n    response_types = [\n        {\n            \"prompt\": \"Closure reason\",\n            \"options\": {\n                \"type\": \"message\",\n                \"required\": True,\n            },\n        },\n    ]\n\n    phantom.prompt2(container=container, user=user, role=role, message=message, respond_in_mins=respond_in_mins, name=\"prompt_close_reason\", parameters=parameters, response_types=response_types, callback=process_close_reason)\n\n    return\n\n    ################################################################################\n    ################################################################################\n",
+                    "userCode": "    ################################################################################\n    ################################################################################\n    ################################################################################\n\n    # The prompt is raised from code, not from a native prompt block: a VPE save\n    # regenerates prompt blocks whole (they have no Custom Code), which would drop\n    # this approver fallback -- TRAP containers never get an owner assigned. The\n    # callback continues the flow; the return below stops the generated call to\n    # process_close_reason from also running right away.\n\n    user = container.get('owner_name', None) or 'soar_local_admin'\n    respond_in_mins = 30\n    role = None\n    message = \"\"\"**TRAP Incident {0}**\nContainer: {1}\n\nClosing this incident will close it in Proofpoint TRAP and post your\nclosure reason as a comment. Provide a closure reason.\"\"\"\n\n    parameters = [\n        \"read_incident_id:custom_function:incident_id\",\n        \"container:name\",\n    ]\n\n    response_types = [\n        {\n            \"prompt\": \"Closure reason\",\n            \"options\": {\n                \"type\": \"message\",\n                \"required\": True,\n            },\n        },\n    ]\n\n    phantom.prompt2(container=container, user=user, role=role, message=message, respond_in_mins=respond_in_mins, name=\"prompt_close_reason\", parameters=parameters, response_types=response_types, callback=process_close_reason)\n\n    return\n\n    ################################################################################\n    ################################################################################\n    ################################################################################\n",
                     "warnings": {}
                 },
                 "4": {
@@ -538,20 +535,9 @@
                 }
             },
             "notes": "",
-            "description": "Data playbook (PB5), run by an analyst. Prompts for a closure reason, then closes the TRAP incident and posts the reason as a comment."
+            "description": "Automation playbook (PB5), kept inactive: an analyst runs it from the case with Run Playbook. Prompts for a closure reason, then closes the TRAP incident and posts the reason as a comment."
         },
-        "input_spec": [
-            {
-                "name": "approver",
-                "contains": [],
-                "description": "Optional. SOAR username who answers the prompt; default: the container owner, else soar_local_admin."
-            },
-            {
-                "name": "respond_in_mins",
-                "contains": [],
-                "description": "Optional. Minutes the prompt waits for an answer; default 30."
-            }
-        ],
+        "input_spec": [],
         "output_spec": [
             {
                 "name": "status",
@@ -578,13 +564,13 @@
                 "description": "Closure reason from the prompt."
             }
         ],
-        "playbook_type": "data",
+        "playbook_type": "automation",
         "python_version": "3.13",
         "schema": "5.0.24",
         "version": "8.6.0.530",
         "playbook_trigger": "artifact_created"
     },
-    "create_time": "2026-10-09T15:14:11.207704Z",
+    "create_time": "2026-10-12T14:28:54.186099Z",
     "draft_mode": false,
     "labels": [
         "proofpoint_trap"

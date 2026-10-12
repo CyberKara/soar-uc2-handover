@@ -184,15 +184,12 @@
                         },
                         "functionId": 9,
                         "functionName": "prompt_comment",
-                        "inputParameters": [
-                            "playbook_input:approver",
-                            "playbook_input:respond_in_mins"
-                        ],
+                        "inputParameters": [],
                         "outputVariables": []
                     },
                     "type": "code",
                     "errors": {},
-                    "userCode": "    ################################################################################\n    ################################################################################\n\n    # The prompt is raised from code, not from a native prompt block: a VPE save\n    # regenerates prompt blocks whole (they have no Custom Code), which would drop\n    # this approver fallback -- TRAP containers never get an owner assigned. The\n    # callback continues the flow; the return below stops the generated call to\n    # process_comment from also running right away.\n\n    # Playbook inputs (optional): approver replaces the owner fallback and\n    # respond_in_mins the 30-minute timeout.\n    approver = next((v for v in playbook_input_approver_values if v not in (None, \"\")), None)\n    user = str(approver).strip() if approver else (container.get('owner_name', None) or 'soar_local_admin')\n    respond_in_mins = 30\n    raw_minutes = next((v for v in playbook_input_respond_in_mins_values if v not in (None, \"\")), None)\n    if raw_minutes is not None:\n        try:\n            respond_in_mins = max(1, int(str(raw_minutes).strip()))\n        except ValueError:\n            phantom.debug(\"Ignoring respond_in_mins input {!r}: not a whole number\".format(raw_minutes))\n    role = None\n    message = \"\"\"**TRAP Incident {0}**\nContainer: {1}\n\nAcknowledging this incident will add your comment to the TRAP incident,\nassign it to SOAR, and move its status from new to open.\"\"\"\n\n    parameters = [\n        \"read_incident_id:custom_function:incident_id\",\n        \"container:name\",\n    ]\n\n    response_types = [\n        {\n            \"prompt\": \"Comment\",\n            \"options\": {\n                \"type\": \"message\",\n                \"required\": True,\n            },\n        },\n    ]\n\n    phantom.prompt2(container=container, user=user, role=role, message=message, respond_in_mins=respond_in_mins, name=\"prompt_comment\", parameters=parameters, response_types=response_types, callback=process_comment)\n\n    return\n\n    ################################################################################\n    ################################################################################\n",
+                    "userCode": "    ################################################################################\n    ################################################################################\n\n    # The prompt is raised from code, not from a native prompt block: a VPE save\n    # regenerates prompt blocks whole (they have no Custom Code), which would drop\n    # this approver fallback -- TRAP containers never get an owner assigned. The\n    # callback continues the flow; the return below stops the generated call to\n    # process_comment from also running right away.\n\n    user = container.get('owner_name', None) or 'soar_local_admin'\n    respond_in_mins = 30\n    role = None\n    message = \"\"\"**TRAP Incident {0}**\nContainer: {1}\n\nAcknowledging this incident will add your comment to the TRAP incident,\nassign it to SOAR, and move its status from new to open.\"\"\"\n\n    parameters = [\n        \"read_incident_id:custom_function:incident_id\",\n        \"container:name\",\n    ]\n\n    response_types = [\n        {\n            \"prompt\": \"Comment\",\n            \"options\": {\n                \"type\": \"message\",\n                \"required\": True,\n            },\n        },\n    ]\n\n    phantom.prompt2(container=container, user=user, role=role, message=message, respond_in_mins=respond_in_mins, name=\"prompt_comment\", parameters=parameters, response_types=response_types, callback=process_comment)\n\n    return\n\n    ################################################################################\n    ################################################################################\n",
                     "warnings": {}
                 },
                 "4": {
@@ -498,21 +495,10 @@
                 }
             },
             "notes": "",
-            "description": "Data playbook (PB4), run by an analyst. Prompts for a comment, then assigns the TRAP incident to SOAR, moves it from new to open and posts the comment.",
+            "description": "Automation playbook (PB4), kept inactive: an analyst runs it from the case with Run Playbook. Prompts for a comment, then assigns the TRAP incident to SOAR, moves it from new to open and posts the comment.",
             "globalCustomCode": "################################################################################\n\n\n\nACK_ASSIGNEE = \"SOAR\"\nACK_FALLBACK_COMMENT = \"Acknowledged by SOAR\"\n################################################################################\n"
         },
-        "input_spec": [
-            {
-                "name": "approver",
-                "contains": [],
-                "description": "Optional. SOAR username who answers the prompt; default: the container owner, else soar_local_admin."
-            },
-            {
-                "name": "respond_in_mins",
-                "contains": [],
-                "description": "Optional. Minutes the prompt waits for an answer; default 30."
-            }
-        ],
+        "input_spec": [],
         "output_spec": [
             {
                 "name": "status",
@@ -539,13 +525,13 @@
                 "description": "Acknowledgement comment from the prompt (or the fallback when it expired)."
             }
         ],
-        "playbook_type": "data",
+        "playbook_type": "automation",
         "python_version": "3.13",
         "schema": "5.0.24",
         "version": "8.6.0.530",
         "playbook_trigger": "artifact_created"
     },
-    "create_time": "2026-10-09T15:14:07.866749Z",
+    "create_time": "2026-10-12T14:28:51.123176Z",
     "draft_mode": false,
     "labels": [
         "proofpoint_trap"

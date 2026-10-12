@@ -1,5 +1,5 @@
 """
-Data playbook (PB5), run by an analyst. Prompts for a closure reason, then closes the TRAP incident and posts the reason as a comment.
+Automation playbook (PB5), kept inactive: an analyst runs it from the case with Run Playbook. Prompts for a closure reason, then closes the TRAP incident and posts the reason as a comment.
 """
 
 
@@ -50,12 +50,6 @@ def prompt_close_reason(action=None, success=None, container=None, results=None,
     # Ask the analyst for a closure reason (approver: container owner, else soar_local_admin).
     ################################################################################
 
-    playbook_input_approver = phantom.collect2(container=container, datapath=["playbook_input:approver"])
-    playbook_input_respond_in_mins = phantom.collect2(container=container, datapath=["playbook_input:respond_in_mins"])
-
-    playbook_input_approver_values = [item[0] for item in playbook_input_approver]
-    playbook_input_respond_in_mins_values = [item[0] for item in playbook_input_respond_in_mins]
-
     ################################################################################
     ## Custom Code Start
     ################################################################################
@@ -68,17 +62,8 @@ def prompt_close_reason(action=None, success=None, container=None, results=None,
     # callback continues the flow; the return below stops the generated call to
     # process_close_reason from also running right away.
 
-    # Playbook inputs (optional): approver replaces the owner fallback and
-    # respond_in_mins the 30-minute timeout.
-    approver = next((v for v in playbook_input_approver_values if v not in (None, "")), None)
-    user = str(approver).strip() if approver else (container.get('owner_name', None) or 'soar_local_admin')
+    user = container.get('owner_name', None) or 'soar_local_admin'
     respond_in_mins = 30
-    raw_minutes = next((v for v in playbook_input_respond_in_mins_values if v not in (None, "")), None)
-    if raw_minutes is not None:
-        try:
-            respond_in_mins = max(1, int(str(raw_minutes).strip()))
-        except ValueError:
-            phantom.debug("Ignoring respond_in_mins input {!r}: not a whole number".format(raw_minutes))
     role = None
     message = """**TRAP Incident {0}**
 Container: {1}
@@ -110,9 +95,6 @@ closure reason as a comment. Provide a closure reason."""
     ################################################################################
     ## Custom Code End
     ################################################################################
-
-    phantom.save_block_result(key="prompt_close_reason__inputs:0:playbook_input:approver", value=json.dumps(playbook_input_approver_values))
-    phantom.save_block_result(key="prompt_close_reason__inputs:1:playbook_input:respond_in_mins", value=json.dumps(playbook_input_respond_in_mins_values))
 
     phantom.save_block_result(key="prompt_close_reason_called", value="True")
 

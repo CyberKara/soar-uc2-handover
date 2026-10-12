@@ -23,9 +23,9 @@ not shipped in the handover. Open work: the Splunk project's `docs/next-steps.md
 | PB3 `proofpoint_trap_attachments` | automation | `proofpoint_trap` | no | Email Content notes, attachments, Cc |
 | PB2 `proofpoint_trap_triage` | automation | `proofpoint_trap` | no | Severity, verdict tag, severity note |
 | PB8 `proofpoint_trap_summary` | automation | `proofpoint_trap` | no | TRAP Summary note; closes the case when TRAP has closed the incident |
-| PB4 `proofpoint_trap_acknowledge` | data | `proofpoint_trap` | — | Analyst: comment, assign to SOAR, set open in TRAP |
-| PB5 `proofpoint_trap_close` | data | `proofpoint_trap` | — | Analyst: close in TRAP with a reason |
-| PB6 `proofpoint_trap_isolation_notify` | data | `proofpoint_trap` | — | Analyst: email isolation-browser links |
+| PB4 `proofpoint_trap_acknowledge` | automation | `proofpoint_trap` | no | Analyst: comment, assign to SOAR, set open in TRAP |
+| PB5 `proofpoint_trap_close` | automation | `proofpoint_trap` | no | Analyst: close in TRAP with a reason |
+| PB6 `proofpoint_trap_isolation_notify` | automation | `proofpoint_trap` | no | Analyst: email isolation-browser links |
 | PB7 `proofpoint_trap_recheck` | automation | `proofpoint_trap_recheck` | **yes** | Timer-driven: finds ingested incidents that changed |
 | CF `proofpoint_trap_extract_incident_id` | custom function | — | — | Incident ID + TRAP Severity from the latest Event Info (Update); used by PB2/PB4/PB5/PB6 |
 
@@ -44,10 +44,14 @@ Timer asset (15 min) ─► case on label proofpoint_trap_recheck ─► PB7 rec
          list incidents (new, open, closed; last 168 h) → changed + already ingested →
          MIME Body + Event Info Update on that incident's case → the orchestrator runs again
 
-Analyst ─► PB4 acknowledge │ PB5 close │ PB6 isolation notify
+Analyst ─► Run Playbook on the case ─► PB4 acknowledge │ PB5 close │ PB6 isolation notify
 ```
 
 Rules behind this shape (detail in `docs/vpe-dev/constraints.md`):
+
+- **PB4/PB5/PB6 are inactive automation playbooks.** A case's *Run Playbook* lists automation
+  playbooks only (active or not), never Input ones. Inactive, they run only when an analyst
+  starts them; active, they would run on every new case.
 
 - **One active orchestrator.** Automation playbooks on one label start together on the same
   trigger and race. The four children stay inactive (an active child would also start on its
@@ -56,9 +60,8 @@ Rules behind this shape (detail in `docs/vpe-dev/constraints.md`):
 - **A VPE save never breaks a playbook.** Importers re-point action blocks to their own assets,
   which is a save. All logic sits inside Custom Code (module-level code in Global Custom Code); a
   per-item action rebuilds its `parameters` in its own Custom Code; PB4/PB5 raise their prompts
-  from code blocks; alternative paths have their own blocks (PB5 `add_expired_note`); the data
-  playbooks declare inputs and outputs. A save resets a data playbook's label to `*`, so each one
-  stops cleanly on a case that is not TRAP's.
+  from code blocks; alternative paths have their own blocks (PB5 `add_expired_note`). PB4/PB5/PB6
+  stop cleanly on a case that is not TRAP's.
 - **Severity holds.** A new or updated artifact raises a lower case severity to its own, and
   artifacts default to `medium`. Every REST artifact write carries `"severity": "low"`, and PB2
   runs after the last native artifact write.
@@ -152,25 +155,25 @@ blanked as `TRAP Summary (unused)`, since a playbook cannot delete a note. When 
 `Enrichment Complete` says `incidentState: closed`, it closes the case once and adds a
 `Closed in TRAP` note; a case an analyst reopens stays open.
 
-### PB4 — `proofpoint_trap_acknowledge` (data)
+### PB4 — `proofpoint_trap_acknowledge`
 
-Inputs `approver` (default: the case owner, else `soar_local_admin`) and `respond_in_mins`
-(default 30). Prompts for a comment, then `update team and assignee` (assignee SOAR),
+The prompt goes to the case owner, else `soar_local_admin`, and waits 30 minutes. Prompts for a
+comment, then `update team and assignee` (assignee SOAR),
 `set incident field value` (state open) and `add comment`, and a `TRAP Acknowledge` note. Outputs
 `status` (success / partial / failed), `incident_id`, `comment`. **On hold:** it sends `assignee`
 only while the connector requires `team` too, so SOAR refuses that step on every run.
 
-### PB5 — `proofpoint_trap_close` (data)
+### PB5 — `proofpoint_trap_close`
 
-Same inputs as PB4. Prompts for a reason; approved → `close incident`, `add comment` (says whether
+Same approver and timeout as PB4. Prompts for a reason; approved → `close incident`, `add comment` (says whether
 the close succeeded), a `TRAP Close` note, and the case is closed when TRAP closed. Expired or
 rejected → `add_expired_note` only, no TRAP action. Outputs `status`
 (success / partial / failed / expired), `incident_id`, `reason`.
 
-### PB6 — `proofpoint_trap_isolation_notify` (data)
+### PB6 — `proofpoint_trap_isolation_notify`
 
-Input `isolation_browser_url` (default placeholder `https://www.domain.tld/browser?url=`; set the
-real prefix). Requires the case to have an owner and status `open`; the owner's email comes from
+Prefix `DEFAULT_ISOLATION_BROWSER_URL` in Global Custom Code (placeholder
+`https://www.domain.tld/browser?url=`; set the real prefix). Requires the case to have an owner and status `open`; the owner's email comes from
 `GET /rest/ph_user?_filter_username=` (inside a playbook `container['owner']` is the username).
 One link per target — the case URL and each `Threat Domain` `cef.url` — as prefix +
 `urllib.parse.quote(target, safe="")` (URL encoding, not base64). Sends `TRAP Incident <id> -
@@ -250,7 +253,7 @@ login; the appliance where noted):
      (`yes` applies the row). For addresses on every incident; ships with example rows only.
 5. **Import** the CF (*Import Custom Function*), then the playbooks.
 6. **Activate** `proofpoint_trap_orchestrator` and `proofpoint_trap_recheck`; leave PB1, PB2,
-   PB3 and PB8 inactive. **Run As:** leave the default (the automation user). After any redeploy,
+   PB3, PB4, PB5, PB6 and PB8 inactive. **Run As:** leave the default (the automation user). After any redeploy,
    read the active flags back: a redeploy keeps each playbook's own state.
 7. **SOAR base URL** (Administration > Company Settings) must be the address analysts open: PB1's
    TRAP comment and PB6's case link are built from it.
@@ -270,8 +273,9 @@ login; the appliance where noted):
   `Event Info Update`, one more orchestrator run, PB1 posting only the new artifacts. To skip the
   wait, poll the Timer asset now: `POST /rest/action_run` with `action: "on poll"`,
   `type: "ingest"` and target asset `proofpoint_trap_recheck` (Timer app).
-- **Data playbooks:** run each with its inputs over REST (`POST /rest/playbook_run` with
-  `inputs`) and read `outputs` back; answer prompts in the GUI.
+- **Analyst actions:** on a TRAP case, *Run Playbook* lists PB4/PB5/PB6; run each and answer its
+  prompt. The Run button sends `POST /rest/playbook_run` `{container_id, playbook_id, scope,
+  run}`; read `outputs` back from `GET /rest/playbook_run/<id>`.
 - **Logs** on the SOAR host (as `phantom`): `spawn.log` (playbooks), `actiond.log` (actions),
   `decided.log` (code blocks).
 

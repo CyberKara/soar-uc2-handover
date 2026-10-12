@@ -1,5 +1,5 @@
 """
-Data playbook (PB4), run by an analyst. Prompts for a comment, then assigns the TRAP incident to SOAR, moves it from new to open and posts the comment.
+Automation playbook (PB4), kept inactive: an analyst runs it from the case with Run Playbook. Prompts for a comment, then assigns the TRAP incident to SOAR, moves it from new to open and posts the comment.
 """
 
 
@@ -63,12 +63,6 @@ def prompt_comment(action=None, success=None, container=None, results=None, hand
     # soar_local_admin).
     ################################################################################
 
-    playbook_input_approver = phantom.collect2(container=container, datapath=["playbook_input:approver"])
-    playbook_input_respond_in_mins = phantom.collect2(container=container, datapath=["playbook_input:respond_in_mins"])
-
-    playbook_input_approver_values = [item[0] for item in playbook_input_approver]
-    playbook_input_respond_in_mins_values = [item[0] for item in playbook_input_respond_in_mins]
-
     ################################################################################
     ## Custom Code Start
     ################################################################################
@@ -80,17 +74,8 @@ def prompt_comment(action=None, success=None, container=None, results=None, hand
     # callback continues the flow; the return below stops the generated call to
     # process_comment from also running right away.
 
-    # Playbook inputs (optional): approver replaces the owner fallback and
-    # respond_in_mins the 30-minute timeout.
-    approver = next((v for v in playbook_input_approver_values if v not in (None, "")), None)
-    user = str(approver).strip() if approver else (container.get('owner_name', None) or 'soar_local_admin')
+    user = container.get('owner_name', None) or 'soar_local_admin'
     respond_in_mins = 30
-    raw_minutes = next((v for v in playbook_input_respond_in_mins_values if v not in (None, "")), None)
-    if raw_minutes is not None:
-        try:
-            respond_in_mins = max(1, int(str(raw_minutes).strip()))
-        except ValueError:
-            phantom.debug("Ignoring respond_in_mins input {!r}: not a whole number".format(raw_minutes))
     role = None
     message = """**TRAP Incident {0}**
 Container: {1}

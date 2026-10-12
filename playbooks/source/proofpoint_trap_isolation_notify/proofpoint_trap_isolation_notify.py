@@ -1,5 +1,5 @@
 """
-Data playbook (PB6), run by an analyst. Emails the container owner isolation-browser links for the case URL and every threat URL, and lists them in a note.
+Automation playbook (PB6), kept inactive: an analyst runs it from the case with Run Playbook. Emails the container owner isolation-browser links for the case URL and every threat URL, and lists them in a note.
 """
 
 
@@ -16,6 +16,8 @@ from datetime import datetime, timedelta
 
 import urllib.parse
 
+# Remote-browser-isolation URL prefix: each target URL is URL-encoded and
+# appended. Placeholder -- set the real prefix here.
 DEFAULT_ISOLATION_BROWSER_URL = "https://www.domain.tld/browser?url="
 # The target SOAR shows at most about 22,000 characters of a note, so no note
 # is posted longer than this; a longer one is split by _note_parts().
@@ -208,11 +210,7 @@ def resolve_recipient_and_build_links(action=None, success=None, container=None,
         )
         return
 
-    # playbook_input: must be its own collect2 call -- mixing playbook_input:
-    # datapaths with other datapaths in one collect2 call throws TypeError
-    # (constraints.md).
-    input_rows = phantom.collect2(container=container, datapath=["playbook_input:isolation_browser_url"])
-    isolation_browser_url = (input_rows[0][0] if input_rows and input_rows[0][0] else None) or DEFAULT_ISOLATION_BROWSER_URL
+    isolation_browser_url = DEFAULT_ISOLATION_BROWSER_URL
 
     # Threat Domain artifacts are the only ones with cef.url set -- collect
     # across the whole container (scope="all", required when re-running on

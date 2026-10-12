@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Paquet de transfert (déploiement air-gapped)
 
-Généré le 2026-10-09 15:24 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
+Généré le 2026-10-12 14:37 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
 
 Ce paquet est autonome — tout ce qu'il faut pour déployer ce cas d'usage manuellement
 dans un environnement sans accès réseau vers ce dépôt ni vers `soar8`.
@@ -70,6 +70,8 @@ d'installation.
 
 - **TRAP Summary : Sender Email en deux tableaux (2026-10-09, vos retours).** Le tableau Sender Email retrouve ses six colonnes (Address, Subject, Delivered, Message ID, Body type, Abuse copy). Les champs d'en-tête passent dans un nouveau tableau `Sender Email headers`, qui commence lui aussi par Address pour relier chaque ligne à son expéditeur. Réimportez `proofpoint_trap_summary` (reste inactif). Le résumé d'un cas prend la nouvelle présentation à la prochaine exécution de l'orchestrateur sur ce cas.
 
+- **Acknowledge, close et isolation notify apparaissent désormais dans Run Playbook (2026-10-12).** `proofpoint_trap_acknowledge`, `proofpoint_trap_close` et `proofpoint_trap_isolation_notify` étaient des playbooks d'entrée, que SOAR n'exécute que comme sous-playbooks : le *Run Playbook* d'un cas ne les listait donc jamais. Ce sont maintenant des playbooks d'automatisation : réimportez les trois et **laissez-les inactifs** (actifs, ils se lanceraient sur chaque nouveau cas). Ils n'ont plus d'entrées : le prompt va au propriétaire du cas, sinon à `soar_local_admin`, et attend 30 minutes ; le préfixe du navigateur d'isolation est `DEFAULT_ISOLATION_BROWSER_URL` dans le Global Custom Code de `proofpoint_trap_isolation_notify` — définissez-le là et enregistrez.
+
 ## Ordre d'installation
 
 1. **Installer l'application/les applications connecteur** — Apps > Install App, charger
@@ -133,6 +135,8 @@ d'installation.
    **Laissez-les inactifs :** `proofpoint_trap_detail`, `proofpoint_trap_triage`, `proofpoint_trap_attachments`, `proofpoint_trap_summary` — un playbook orchestrateur ci-dessus les appelle l'un
    après l'autre ; actifs, ils se lanceraient aussi d'eux-mêmes, en même temps que lui.
    Désactivez-les si un paquet précédent les avait activés.
+   **Laissez aussi inactifs :** `proofpoint_trap_acknowledge`, `proofpoint_trap_close`, `proofpoint_trap_isolation_notify` — un analyste lance chacun depuis un cas avec
+   *Run Playbook*. Actifs, ils se lanceraient aussi sur chaque nouveau cas.
 
 ## Listes personnalisées appartenant à ce cas d'usage
 

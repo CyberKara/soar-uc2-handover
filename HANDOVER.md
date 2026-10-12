@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Air-Gapped Handover Package
 
-Generated 2026-10-09 15:24 UTC from `proofpoint_trap` (source env: `soar8`).
+Generated 2026-10-12 14:37 UTC from `proofpoint_trap` (source env: `soar8`).
 
 This package is self-contained — everything needed to deploy this use case by hand
 in an environment with no network access back to this repo or to `soar8`.
@@ -69,6 +69,8 @@ previous package. On a completely fresh target, skip to Install order.
 
 - **TRAP Summary: Sender Email in two tables (2026-10-09, your feedback).** The Sender Email table is back to six columns (Address, Subject, Delivered, Message ID, Body type, Abuse copy). The header fields move to a new `Sender Email headers` table, which also starts with Address so each row matches its sender. Re-import `proofpoint_trap_summary` (stays inactive). A case's summary takes the new layout the next time the orchestrator runs on it.
 
+- **Acknowledge, close and isolation notify now appear in Run Playbook (2026-10-12).** `proofpoint_trap_acknowledge`, `proofpoint_trap_close` and `proofpoint_trap_isolation_notify` were input playbooks, which SOAR runs only as sub-playbooks, so a case's *Run Playbook* never listed them. They are now automation playbooks: re-import all three and **leave them inactive** (active, they would run on every new case). They take no inputs any more: the prompt goes to the case owner, else `soar_local_admin`, and waits 30 minutes; the isolation-browser prefix is `DEFAULT_ISOLATION_BROWSER_URL` in `proofpoint_trap_isolation_notify`'s Global Custom Code — set it there and save.
+
 ## Install order
 
 1. **Install the connector app(s)** — Apps > Install App, upload each file in `connectors/`.
@@ -124,6 +126,8 @@ previous package. On a completely fresh target, skip to Install order.
    **Leave these inactive:** `proofpoint_trap_detail`, `proofpoint_trap_triage`, `proofpoint_trap_attachments`, `proofpoint_trap_summary` — an orchestrator playbook above calls them one after
    another; active, they would also start on their own, alongside it. Deactivate them if an
    earlier package had them active.
+   **Leave these inactive too:** `proofpoint_trap_acknowledge`, `proofpoint_trap_close`, `proofpoint_trap_isolation_notify` — an analyst runs each one from a case with
+   *Run Playbook*. Active, they would also run on every new case.
 
 ## Custom lists this use case owns
 
