@@ -14,8 +14,8 @@ playbooks/source/proofpoint_trap_detail/proofpoint_trap_detail.json:generic-api-
 playbooks/source/proofpoint_trap_detail/proofpoint_trap_detail.json:generic-api-key:508
 playbooks/source/proofpoint_trap_detail/proofpoint_trap_detail.json:generic-api-key:578
 playbooks/source/proofpoint_trap_detail/proofpoint_trap_detail.json:generic-api-key:670
-playbooks/source/proofpoint_trap_isolation_notify/proofpoint_trap_isolation_notify.json:generic-api-key:105
-playbooks/source/proofpoint_trap_isolation_notify/proofpoint_trap_isolation_notify.json:generic-api-key:227
+playbooks/source/proofpoint_trap_isolation_notify/proofpoint_trap_isolation_notify.json:generic-api-key:112
+playbooks/source/proofpoint_trap_isolation_notify/proofpoint_trap_isolation_notify.json:generic-api-key:234
 playbooks/source/proofpoint_trap_recheck/proofpoint_trap_recheck.json:generic-api-key:189
 playbooks/source/proofpoint_trap_recheck/proofpoint_trap_recheck.json:generic-api-key:99
 playbooks/source/proofpoint_trap_triage/proofpoint_trap_triage.json:generic-api-key:84

@@ -11,17 +11,35 @@ from datetime import datetime, timedelta
 ################################################################################
 ## Global Custom Code Start
 ################################################################################
+################################################################################
 
 
 
+import html
 import urllib.parse
 
-# Remote-browser-isolation URL prefix: each target URL is URL-encoded and
-# appended. Placeholder -- set the real prefix here.
-DEFAULT_ISOLATION_BROWSER_URL = "https://www.domain.tld/browser?url="
 # The target SOAR shows at most about 22,000 characters of a note, so no note
 # is posted longer than this; a longer one is split by _note_parts().
 _NOTE_MAX_CHARS = 20000
+
+
+def _unwrap_safelinks(url):
+    """The URL behind Microsoft Safe Links (<region>.safelinks.protection.outlook.com/?url=<encoded>),
+    unwrapped as many times as it was wrapped; any other URL is returned unchanged."""
+    for _ in range(5):
+        parts = urllib.parse.urlsplit(url)
+        if not (parts.hostname or "").lower().endswith(".safelinks.protection.outlook.com"):
+            break
+        inner = urllib.parse.parse_qs(parts.query).get("url")
+        if not inner or not inner[0]:
+            break
+        url = inner[0]
+    return url
+
+
+def _defang(url):
+    """A URL shown as text that no mail client turns into a link."""
+    return url.replace("http", "hxxp", 1).replace(".", "[.]")
 
 
 def _note_parts(title, content, limit=_NOTE_MAX_CHARS):
@@ -45,6 +63,7 @@ def _note_parts(title, content, limit=_NOTE_MAX_CHARS):
     return [("{} ({}/{})".format(title, n, total),
              chunk if n == 1 else "# {} ({}/{}, continued)\n\n{}".format(title, n, total, chunk))
             for n, chunk in enumerate(chunks, 1)]
+################################################################################
 ################################################################################
 ## Global Custom Code End
 ################################################################################
@@ -101,6 +120,7 @@ def read_incident_id(action=None, success=None, container=None, results=None, ha
     ## Custom Code Start
     ################################################################################
     ################################################################################
+    ################################################################################
 
 
     result_rows = phantom.collect2(
@@ -131,6 +151,7 @@ def read_incident_id(action=None, success=None, container=None, results=None, ha
 
     ################################################################################
     ################################################################################
+    ################################################################################
     ## Custom Code End
     ################################################################################
 
@@ -140,7 +161,7 @@ def read_incident_id(action=None, success=None, container=None, results=None, ha
 
     phantom.save_block_result(key="read_incident_id_called", value="True")
 
-    resolve_recipient_and_build_links(container=container)
+    isolation_browser_url(container=container)
 
     return
 
@@ -161,6 +182,7 @@ def resolve_recipient_and_build_links(action=None, success=None, container=None,
 
     ################################################################################
     ## Custom Code Start
+    ################################################################################
     ################################################################################
     ################################################################################
 
@@ -210,31 +232,66 @@ def resolve_recipient_and_build_links(action=None, success=None, container=None,
         )
         return
 
-    isolation_browser_url = DEFAULT_ISOLATION_BROWSER_URL
+    # The prefix lives in the format block isolation_browser_url, where an
+    # operator sets it without touching code.
+    browser_prefix = (phantom.get_format_data(name="isolation_browser_url") or "").strip()
+    if not browser_prefix:
+        msg = "The isolation-browser prefix is empty: set it in the format block 'isolation browser url'."
+        phantom.error(msg)
+        phantom.add_note(
+            container=container,
+            note_type="general",
+            title="TRAP Isolation Notify - Error",
+            content=msg
+        )
+        return
 
     # Threat Domain artifacts are the only ones with cef.url set -- collect
     # across the whole container (scope="all", required when re-running on
     # an existing container per constraints.md) and drop the Nones instead
-    # of also fetching artifact:*.name to filter by.
+    # of also fetching artifact:*.name to filter by. A URL the mail system
+    # already wrapped in Safe Links is unwrapped first, or the isolation
+    # browser would go through Safe Links before reaching it.
     url_rows = phantom.collect2(container=container, datapath=["artifact:*.cef.url"], scope="all")
-    threat_urls = sorted({row[0] for row in url_rows if row and row[0]}) if url_rows else []
+    threat_urls = sorted({_unwrap_safelinks(row[0]) for row in url_rows if row and row[0]}) if url_rows else []
 
+    if not threat_urls:
+        phantom.add_note(
+            container=container,
+            note_type="general",
+            title="TRAP Isolation Notify",
+            content="No threat URL on this case: no email sent.",
+            note_format="markdown",
+        )
+        playbook_output = json.loads(phantom.get_run_data(key="playbook_output") or "{}")
+        playbook_output.update({"status": "skipped", "recipient_email": recipient_email, "link_count": 0})
+        phantom.save_run_data(key="playbook_output", value=json.dumps(playbook_output))
+        return
+
+    # The case link is direct: it is SOAR's own page, not a target to isolate.
     soar_base = phantom.get_base_url() or ""
     container_url = "{}/mission/{}".format(soar_base, container.get("id"))
 
-    targets = [("Container", container_url)] + [("Threat URL", u) for u in threat_urls]
-    link_lines = [
-        "- {}: {}{}".format(label, isolation_browser_url, urllib.parse.quote(target, safe=""))
+    targets = [("Threat URL", u) for u in threat_urls]
+    link_items = [
+        '<li>{}: <code>{}</code> &mdash; <a href="{}">open in the isolation browser</a></li>'.format(
+            label, html.escape(_defang(target)),
+            html.escape(browser_prefix + urllib.parse.quote(target, safe=""), quote=True))
         for label, target in targets
     ]
 
     resolve_recipient_and_build_links__recipient_email = recipient_email
     resolve_recipient_and_build_links__subject = "TRAP Incident {} - Isolation Browser Links".format(incident_id or "unknown")
+    # Must start with <html>: the SMTP app sends HTML (plus a text copy) only then.
+    # The line breaks are what the app's text copy keeps as lines.
     resolve_recipient_and_build_links__body = (
-        "Isolation-browser links for TRAP incident {}.\n\n"
-        "Open these instead of the raw URLs -- each opens in a sandboxed "
-        "browser rather than directly:\n\n{}\n"
-    ).format(incident_id or "unknown", "\n".join(link_lines))
+        "<html><body>\n"
+        '<p>Isolation-browser links for <a href="{}">TRAP incident {}</a>.</p>\n'
+        "<p>Open these instead of the raw URLs -- each opens in a sandboxed "
+        "browser rather than directly:</p>\n"
+        "<ul>\n{}\n</ul>\n"
+        "</body></html>"
+    ).format(html.escape(container_url, quote=True), html.escape(str(incident_id or "unknown")), "\n".join(link_items))
 
     phantom.debug("Resolved recipient {}, {} link(s)".format(recipient_email, len(targets)))
 
@@ -246,7 +303,7 @@ def resolve_recipient_and_build_links(action=None, success=None, container=None,
     phantom.save_run_data(key="resolve_recipient_and_build_links:link_count", value=str(len(targets)))
     # The links themselves, for the container note (add_isolation_note).
     phantom.save_run_data(key="resolve_recipient_and_build_links:links", value=json.dumps([
-        [label, target, "{}{}".format(isolation_browser_url, urllib.parse.quote(target, safe=""))]
+        [label, target, "{}{}".format(browser_prefix, urllib.parse.quote(target, safe=""))]
         for label, target in targets
     ]))
 
@@ -254,6 +311,7 @@ def resolve_recipient_and_build_links(action=None, success=None, container=None,
     playbook_output.update({"recipient_email": recipient_email, "link_count": len(targets)})
     phantom.save_run_data(key="playbook_output", value=json.dumps(playbook_output))
 
+    ################################################################################
     ################################################################################
     ################################################################################
     ## Custom Code End
@@ -338,6 +396,7 @@ def add_isolation_note(action=None, success=None, container=None, results=None, 
     ## Custom Code Start
     ################################################################################
     ################################################################################
+    ################################################################################
 
     incident_id = json.loads(phantom.get_run_data(key="read_incident_id:incident_id") or '""')
     recipient_email = json.loads(phantom.get_run_data(key="resolve_recipient_and_build_links:recipient_email") or 'null')
@@ -385,6 +444,7 @@ def add_isolation_note(action=None, success=None, container=None, results=None, 
 
     ################################################################################
     ################################################################################
+    ################################################################################
     ## Custom Code End
     ################################################################################
 
@@ -399,18 +459,49 @@ def add_isolation_note(action=None, success=None, container=None, results=None, 
 
 
 @phantom.playbook_block()
+def isolation_browser_url(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
+    phantom.debug("isolation_browser_url() called")
+
+    ################################################################################
+    # Isolation-browser URL prefix: set your own; each target URL is appended.
+    ################################################################################
+
+    template = """https://www.domain.tld/browser?url="""
+
+    # parameter list for template variable replacement
+    parameters = []
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+
+    # Write your custom code here...
+
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
+    phantom.format(container=container, template=template, parameters=parameters, name="isolation_browser_url")
+
+    resolve_recipient_and_build_links(container=container)
+
+    return
+
+
+@phantom.playbook_block()
 def on_finish(container, summary):
     phantom.debug("on_finish() called")
 
     output = {
-        "status": None,
-        "incident_id": None,
-        "recipient_email": None,
-        "link_count": None,
+        "status": [],
+        "incident_id": [],
+        "recipient_email": [],
+        "link_count": [],
     }
 
     ################################################################################
     ## Custom Code Start
+    ################################################################################
     ################################################################################
     ################################################################################
 
@@ -429,10 +520,10 @@ def on_finish(container, summary):
 
     ################################################################################
     ################################################################################
+    ################################################################################
     ## Custom Code End
     ################################################################################
 
     phantom.save_playbook_output_data(output=output)
 
     return
-

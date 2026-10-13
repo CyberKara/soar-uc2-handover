@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Paquet de transfert (déploiement air-gapped)
 
-Généré le 2026-10-12 14:37 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
+Généré le 2026-10-13 14:01 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
 
 Ce paquet est autonome — tout ce qu'il faut pour déployer ce cas d'usage manuellement
 dans un environnement sans accès réseau vers ce dépôt ni vers `soar8`.
@@ -71,6 +71,8 @@ d'installation.
 - **TRAP Summary : Sender Email en deux tableaux (2026-10-09, vos retours).** Le tableau Sender Email retrouve ses six colonnes (Address, Subject, Delivered, Message ID, Body type, Abuse copy). Les champs d'en-tête passent dans un nouveau tableau `Sender Email headers`, qui commence lui aussi par Address pour relier chaque ligne à son expéditeur. Réimportez `proofpoint_trap_summary` (reste inactif). Le résumé d'un cas prend la nouvelle présentation à la prochaine exécution de l'orchestrateur sur ce cas.
 
 - **Acknowledge, close et isolation notify apparaissent désormais dans Run Playbook (2026-10-12).** `proofpoint_trap_acknowledge`, `proofpoint_trap_close` et `proofpoint_trap_isolation_notify` étaient des playbooks d'entrée, que SOAR n'exécute que comme sous-playbooks : le *Run Playbook* d'un cas ne les listait donc jamais. Ce sont maintenant des playbooks d'automatisation : réimportez les trois et **laissez-les inactifs** (actifs, ils se lanceraient sur chaque nouveau cas). Ils n'ont plus d'entrées : le prompt va au propriétaire du cas, sinon à `soar_local_admin`, et attend 30 minutes ; le préfixe du navigateur d'isolation est `DEFAULT_ISOLATION_BROWSER_URL` dans le Global Custom Code de `proofpoint_trap_isolation_notify` — définissez-le là et enregistrez.
+
+- **E-mail d'isolation notify (2026-10-13, vos retours).** La première ligne de l'e-mail pointe désormais directement vers le cas SOAR, et le cas ne passe plus par le navigateur d'isolation. Une URL de menace déjà enveloppée par Microsoft Safe Links (`*.safelinks.protection.outlook.com/?url=`) est d'abord dépliée, autant de fois que nécessaire, pour que son lien d'isolation ouvre la vraie cible. Chaque URL de menace est affichée neutralisée (`hxxps://a[.]b`) à côté de son lien. Un cas sans URL de menace reçoit une note et aucun e-mail. **Le préfixe du navigateur d'isolation passe dans un bloc format :** réimportez `proofpoint_trap_isolation_notify` (reste inactif), ouvrez-le dans l'éditeur, mettez votre préfixe comme modèle du bloc `isolation browser url` et enregistrez — aucun code à modifier, et `DEFAULT_ISOLATION_BROWSER_URL` disparaît. **Une redirection reste :** votre Exchange enveloppe les liens de l'e-mail lui-même dans Safe Links à la réception. Seul votre administrateur Microsoft 365 peut l'éviter : dans la stratégie Safe Links, ajoutez l'hôte du navigateur d'isolation et celui de SOAR à *Do not rewrite the following URLs* (p. ex. `https://isolation.example/*`).
 
 ## Ordre d'installation
 

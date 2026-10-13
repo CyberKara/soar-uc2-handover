@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Air-Gapped Handover Package
 
-Generated 2026-10-12 14:37 UTC from `proofpoint_trap` (source env: `soar8`).
+Generated 2026-10-13 14:01 UTC from `proofpoint_trap` (source env: `soar8`).
 
 This package is self-contained — everything needed to deploy this use case by hand
 in an environment with no network access back to this repo or to `soar8`.
@@ -70,6 +70,8 @@ previous package. On a completely fresh target, skip to Install order.
 - **TRAP Summary: Sender Email in two tables (2026-10-09, your feedback).** The Sender Email table is back to six columns (Address, Subject, Delivered, Message ID, Body type, Abuse copy). The header fields move to a new `Sender Email headers` table, which also starts with Address so each row matches its sender. Re-import `proofpoint_trap_summary` (stays inactive). A case's summary takes the new layout the next time the orchestrator runs on it.
 
 - **Acknowledge, close and isolation notify now appear in Run Playbook (2026-10-12).** `proofpoint_trap_acknowledge`, `proofpoint_trap_close` and `proofpoint_trap_isolation_notify` were input playbooks, which SOAR runs only as sub-playbooks, so a case's *Run Playbook* never listed them. They are now automation playbooks: re-import all three and **leave them inactive** (active, they would run on every new case). They take no inputs any more: the prompt goes to the case owner, else `soar_local_admin`, and waits 30 minutes; the isolation-browser prefix is `DEFAULT_ISOLATION_BROWSER_URL` in `proofpoint_trap_isolation_notify`'s Global Custom Code — set it there and save.
+
+- **Isolation notify email (2026-10-13, your feedback).** The email's first line now links directly to the SOAR case, and the case is no longer sent through the isolation browser. A threat URL already wrapped in Microsoft Safe Links (`*.safelinks.protection.outlook.com/?url=`) is unwrapped first, however many times, so its isolation link opens the real target. Each threat URL is shown defanged (`hxxps://a[.]b`) beside its link. A case with no threat URL gets a note and no email. **The isolation-browser prefix moves to a format block:** re-import `proofpoint_trap_isolation_notify` (stays inactive), open it in the editor, set your prefix as the template of the block `isolation browser url` and save — no code to edit, and `DEFAULT_ISOLATION_BROWSER_URL` is gone. **One redirect remains:** your Exchange wraps the links of the email itself in Safe Links on delivery. Only your Microsoft 365 admin can stop that: in the Safe Links policy, add the isolation-browser host and the SOAR host to *Do not rewrite the following URLs* (e.g. `https://isolation.example/*`).
 
 ## Install order
 

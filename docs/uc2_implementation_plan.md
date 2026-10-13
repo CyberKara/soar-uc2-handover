@@ -172,13 +172,18 @@ rejected → `add_expired_note` only, no TRAP action. Outputs `status`
 
 ### PB6 — `proofpoint_trap_isolation_notify`
 
-Prefix `DEFAULT_ISOLATION_BROWSER_URL` in Global Custom Code (placeholder
-`https://www.domain.tld/browser?url=`; set the real prefix). Requires the case to have an owner and status `open`; the owner's email comes from
+Prefix in the native format block `isolation browser url` (placeholder
+`https://www.domain.tld/browser?url=`; set the real prefix there, no code to edit; blank → an error note). Requires the case to have an owner and status `open`; the owner's email comes from
 `GET /rest/ph_user?_filter_username=` (inside a playbook `container['owner']` is the username).
-One link per target — the case URL and each `Threat Domain` `cef.url` — as prefix +
-`urllib.parse.quote(target, safe="")` (URL encoding, not base64). Sends `TRAP Incident <id> -
-Isolation Browser Links` through the `smtp` asset and lists the links in a `TRAP Isolation Notify`
-note. Outputs `status`, `incident_id`, `recipient_email`, `link_count`.
+One link per `Threat Domain` `cef.url`, as prefix + `urllib.parse.quote(target, safe="")` (URL
+encoding, not base64); a Microsoft Safe Links URL (`*.safelinks.protection.outlook.com/?url=`) is
+unwrapped first, however many times it was wrapped. Sends an HTML email `TRAP Incident <id> -
+Isolation Browser Links` through the `smtp` asset: its first line links directly to the SOAR case,
+each threat URL is shown defanged (`hxxps://a[.]b`) beside its isolation link. Lists the links in a
+`TRAP Isolation Notify` note. No threat URL: a note, no email, status `skipped`. Outputs `status`,
+`incident_id`, `recipient_email`, `link_count`. The receiving Exchange still wraps the email's own
+links in Safe Links (one more redirect); only the tenant's Safe Links policy can stop that, by
+listing the isolation-browser and SOAR hosts under "Do not rewrite the following URLs".
 
 ### PB7 — `proofpoint_trap_recheck`
 
