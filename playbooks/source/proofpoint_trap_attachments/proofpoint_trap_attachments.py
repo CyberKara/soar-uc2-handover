@@ -1,5 +1,5 @@
 """
-Automation playbook (PB3), left inactive: proofpoint_trap_orchestrator runs it after proofpoint_trap_detail. For each new MIME Body: an Email Content note, one Email Attachment artifact per file, and an Attachment Extraction note.
+Automation playbook (PB2), left inactive: proofpoint_trap_orchestrator runs it after proofpoint_trap_detail. Downloads the email of every alert that has no MIME Body yet, extracts its attachments and Cc recipients (from TRAP&#39;s own lists when the download fails), writes the Email Content and Attachment Extraction notes in place, and records each downloaded alert&#39;s MIME Body last.
 """
 
 
@@ -31,32 +31,6 @@ _BLOCK_TAGS = {"html", "body", "p", "div", "section", "article", "header", "foot
 _VOID_TAGS = {"br", "img", "hr", "meta", "link", "input", "area", "base", "col", "embed", "source", "track", "wbr", "param"}
 _HIDDEN_STYLE_RE = re.compile(r"display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0(?:px|pt|em|%)?\s*(?:;|$)|opacity\s*:\s*0(?:\.0+)?\s*(?:;|$)", re.I)
 _MAX_BODY_CHARS = 20000
-# The target SOAR shows at most about 22,000 characters of a note, so no note
-# is posted longer than this; a longer one is split by _note_parts().
-_NOTE_MAX_CHARS = 20000
-
-
-def _note_parts(title, content, limit=_NOTE_MAX_CHARS):
-    """[(title, content)] for one note, or numbered parts "title (k/N)" cut at
-    line boundaries when content is longer than limit. A line longer than the
-    limit is cut inside itself. Parts after the first open with a heading."""
-    if len(content) <= limit:
-        return [(title, content)]
-    budget = limit - 300  # room for the heading added to later parts
-    chunks, current, size = [], [], 0
-    for line in content.split("\n"):
-        for piece in [line[i:i + budget] for i in range(0, len(line), budget)] or [""]:
-            if current and size + len(piece) + 1 > budget:
-                chunks.append("\n".join(current))
-                current, size = [], 0
-            current.append(piece)
-            size += len(piece) + 1
-    if current:
-        chunks.append("\n".join(current))
-    total = len(chunks)
-    return [("{} ({}/{})".format(title, n, total),
-             chunk if n == 1 else "# {} ({}/{}, continued)\n\n{}".format(title, n, total, chunk))
-            for n, chunk in enumerate(chunks, 1)]
 
 
 def _defang(url):
@@ -377,392 +351,670 @@ def _email_text_to_markdown(text):
 def on_start(container):
     phantom.debug('on_start() called')
 
-    # call 'extract_attachments' block
-    extract_attachments(container=container)
+    # call 'filter_event_info' block
+    filter_event_info(container=container)
 
     return
 
 @phantom.playbook_block()
-def extract_attachments(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
-    phantom.debug("extract_attachments() called")
+def filter_event_info(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
+    phantom.debug("filter_event_info() called")
 
     ################################################################################
-    # Process each new MIME Body: notes, attachment and Cc artifacts.
+    # Keep only the Event Info artifact, whose cef.incidentId the TRAP actions use.
     ################################################################################
 
-    container_artifact_data = phantom.collect2(container=container, datapath=["artifact:*.name","artifact:*.id","artifact:*.cef.vaultId","artifact:*.cef.fileName"])
+    # collect filtered artifact ids and results for 'if' condition 1
+    matched_artifacts_1, matched_results_1 = phantom.condition(
+        container=container,
+        conditions=[
+            ["artifact:*.name", "==", "Event Info"]
+        ],
+        conditions_dps=[
+            ["artifact:*.name", "==", "Event Info"]
+        ],
+        name="filter_event_info:condition_1",
+        scope="all",
+        delimiter=",")
 
-    container_artifact_header_item_0 = [item[0] for item in container_artifact_data]
-    container_artifact_header_item_1 = [item[1] for item in container_artifact_data]
-    container_artifact_cef_item_2 = [item[2] for item in container_artifact_data]
-    container_artifact_cef_item_3 = [item[3] for item in container_artifact_data]
+    # call connected blocks if filtered artifacts or results
+    if matched_artifacts_1 or matched_results_1:
+        get_trap_incident(action=action, success=success, container=container, results=results, handle=handle, filtered_artifacts=matched_artifacts_1, filtered_results=matched_results_1)
+
+    return
+
+
+@phantom.playbook_block()
+def get_trap_incident(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
+    phantom.debug("get_trap_incident() called")
+
+    # phantom.debug('Action: {0} {1}'.format(action['name'], ('SUCCEEDED' if success else 'FAILED')))
+
+    ################################################################################
+    # Fetch the incident with its alerts: TRAP's attachment list and headers are the 
+    # fallback data.
+    ################################################################################
+
+    filtered_artifact_0_data_filter_event_info = phantom.collect2(container=container, datapath=["filtered-data:filter_event_info:condition_1:artifact:*.cef.incidentId","filtered-data:filter_event_info:condition_1:artifact:*.id"], scope="all")
+
+    parameters = []
+
+    # build parameters list for 'get_trap_incident' call
+    for filtered_artifact_0_item_filter_event_info in filtered_artifact_0_data_filter_event_info:
+        if filtered_artifact_0_item_filter_event_info[0] is not None:
+            parameters.append({
+                "incident_id": filtered_artifact_0_item_filter_event_info[0],
+                "context": {'artifact_id': filtered_artifact_0_item_filter_event_info[1]},
+            })
 
     ################################################################################
     ## Custom Code Start
     ################################################################################
 
-    # Each MIME Body not yet marked processed (data.attachments_extracted;
-    # scope "all": it may come from an earlier trigger): attachments, forwarded
-    # emails included, become Email Attachment artifacts, Cc addresses Recipient
-    # Email (cc), and the email an Email Content note of safe markdown posted
-    # over REST (add_note's HTML sanitizer strips links and tags).
+    # Write your custom code here...
+
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
+    phantom.act("get incident", parameters=parameters, name="get_trap_incident", assets=["proofpoint_trap_mock"], callback=download_mime_body)
+
+    return
+
+
+@phantom.playbook_block()
+def download_mime_body(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
+    phantom.debug("download_mime_body() called")
+
+    # phantom.debug('Action: {0} {1}'.format(action['name'], ('SUCCEEDED' if success else 'FAILED')))
+
+    ################################################################################
+    # Download the email of every alert that has no MIME Body yet.
+    ################################################################################
+
+    filtered_artifact_0_data_filter_event_info = phantom.collect2(container=container, datapath=["filtered-data:filter_event_info:condition_1:artifact:*.cef.incidentId","filtered-data:filter_event_info:condition_1:artifact:*.id"], scope="all")
+
+    parameters = []
+
+    # build parameters list for 'download_mime_body' call
+    for filtered_artifact_0_item_filter_event_info in filtered_artifact_0_data_filter_event_info:
+        if filtered_artifact_0_item_filter_event_info[0] is not None:
+            parameters.append({
+                "incident_id": filtered_artifact_0_item_filter_event_info[0],
+                "context": {'artifact_id': filtered_artifact_0_item_filter_event_info[1]},
+            })
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+    ################################################################################
+
+    # One download per alert that has no MIME Body yet. proofpoint_trap_attachments
+    # writes the MIME Body last, as the alert's "done" mark: a finished alert is
+    # never fetched again, one whose earlier run failed is fetched again.
+    incident_rows = phantom.collect2(container=container, datapath=["get_trap_incident:action_result.data"])
+    records = incident_rows[0][0] if incident_rows and incident_rows[0] else None
+    incident = records[0] if isinstance(records, list) and records else (records if isinstance(records, dict) else {})
+    event_ids = [str(event.get("id")) for event in incident.get("events") or [] if event.get("id")]
+
+    done = set()
+    for row in phantom.collect2(container=container, datapath=["artifact:*.name", "artifact:*.source_data_identifier", "artifact:*.cef.eventId"], scope="all") or []:
+        if row and row[0] == "MIME Body":
+            sdi = str(row[1] or "")
+            done.add(str(row[2]) if row[2] else (sdi.split("-mime-", 1)[1] if "-mime-" in sdi else ""))
+    pending = [event_id for event_id in event_ids if event_id not in done]
+    phantom.save_run_data(key="download_mime_body:pending", value=json.dumps(pending))
+
+    incident_id = parameters[0]["incident_id"] if parameters else None
+    if not pending or not incident_id:
+        phantom.debug("No alert without a MIME Body ({} alert(s), {} done)".format(len(event_ids), len(done)))
+        read_emails(container=container)
+        return
+    try:
+        incident_id = int(incident_id)
+    except (TypeError, ValueError):
+        pass
+    parameters = [{"incident_id": incident_id, "event_id": event_id} for event_id in pending]
+
+    ################################################################################
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
+    phantom.act("download mime body", parameters=parameters, name="download_mime_body", assets=["proofpoint_trap_mock"], callback=read_emails)
+
+    return
+
+
+@phantom.playbook_block()
+def read_emails(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
+    phantom.debug("read_emails() called")
+
+    ################################################################################
+    # Read each downloaded email: attachments to the Vault, Cc, the Email Content 
+    # note; TRAP's lists when the download failed.
+    ################################################################################
+
+    read_emails__name = None
+    read_emails__label = None
+    read_emails__contains = None
+    read_emails__cef_dictionary = None
+    read_emails__source_data_identifier = None
+    read_emails__upgrade_artifact_id = None
+    read_emails__upgrade_cef_json = None
+    read_emails__upgrade_cef_types = None
+    read_emails__note_title = None
+    read_emails__note_content = None
+    read_emails__mime_cef = None
+    read_emails__mime_contains = None
+    read_emails__mime_sdi = None
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+    ################################################################################
 
     # Local imports: a save drops module-level imports outside Global Custom Code.
     import base64
     import hashlib
-    import html
     import mimetypes
     import email
     import email.policy
     from email.utils import getaddresses, parseaddr
 
     container_id = container.get("id")
+    incident_rows = phantom.collect2(container=container, datapath=["get_trap_incident:action_result.data"])
+    records = incident_rows[0][0] if incident_rows and incident_rows[0] else None
+    incident = records[0] if isinstance(records, list) and records else (records if isinstance(records, dict) else {})
+    incident_id = str(incident.get("id") or container.get("source_data_identifier") or "")
+    events = {str(event.get("id")): event for event in incident.get("events") or [] if event.get("id")}
+    pending = json.loads(phantom.get_run_data(key="download_mime_body:pending") or "[]")
 
-    # Addresses the operator wants left out (custom list
-    # proofpoint_trap_excluded_email, same rule as proofpoint_trap_detail): a
-    # row counts when its email column holds an address and enabled is "yes".
-    # Such an address gets no Cc Recipient Email artifact.
-    excluded_addresses = set()
+    # proofpoint_trap_excluded_email (email, date, reason, enabled): an address in
+    # an enabled row gets no Cc Recipient Email. A missing list excludes nothing.
+    excluded = set()
     list_ok, list_message, list_rows = phantom.get_list(list_name="proofpoint_trap_excluded_email")
     if list_ok:
         for row in list_rows or []:
             row = list(row or []) + [None] * 4
             address = str(row[0] or "").strip().lower()
-            enabled = str(row[3] or "").strip().lower()
-            if "@" in address and enabled == "yes":
-                excluded_addresses.add(address)
+            if "@" in address and str(row[3] or "").strip().lower() == "yes":
+                excluded.add(address)
     else:
         phantom.debug("No proofpoint_trap_excluded_email list ({}): every address counts".format(list_message))
 
-    mime_rows = phantom.collect2(
-        container=container,
-        datapath=["artifact:*.name", "artifact:*.id", "artifact:*.cef.vaultId", "artifact:*.cef.fileName"],
-        scope="all",
-    )
+    # What the case already holds, so nothing is posted twice: an attachment by
+    # its identifier (the same on both paths), a Cc by its address.
+    attachments = {}
+    cc_known = set()
+    for row in phantom.collect2(container=container, datapath=[
+            "artifact:*.name", "artifact:*.id", "artifact:*.source_data_identifier", "artifact:*.cef.vaultId",
+            "artifact:*.cef.emailAddress", "artifact:*.cef.emailRole", "artifact:*.cef.fileName",
+            "artifact:*.cef.attachmentSource"], scope="all") or []:
+        if not row:
+            continue
+        if row[0] == "Email Attachment" and row[2]:
+            attachments[row[2]] = {"id": row[1], "vault": row[3], "file": row[6], "source": row[7]}
+        elif row[0] == "Recipient Email" and row[5] == "cc" and row[4]:
+            cc_known.add(str(row[4]).lower())
 
-    mime_artifacts = [
-        {"artifact_id": row[1], "vault_id": row[2], "file_name": row[3]}
-        for row in (mime_rows or [])
-        if row[0] == "MIME Body" and row[2]
-    ]
+    downloaded = {}
+    for row in phantom.collect2(container=container, datapath=[
+            "download_mime_body:action_result.parameter.event_id", "download_mime_body:action_result.status",
+            "download_mime_body:action_result.data"]) or []:
+        if row and row[0] and row[1] == "success":
+            for record in row[2] or []:
+                if isinstance(record, dict) and record.get("vault_id"):
+                    downloaded[str(row[0])] = (record["vault_id"], record.get("file_name") or "trap-{}-{}.eml".format(incident_id, row[0]))
 
-    if not mime_artifacts:
-        phantom.debug("No MIME Body artifacts on this container yet")
-        return
+    def _is_report(event):
+        # An abuse-mailbox report lists the email twice (abuseCopy true = the
+        # report); a report from a shared mailbox comes alone, naming the sender
+        # in X-PhishAlarm-Sender. A report's Cc are the reporter's, not the
+        # reported email's: none is kept (same rule as proofpoint_trap_detail).
+        emails = event.get("emails") or []
+        has_reported_email = any((e or {}).get("abuseCopy") is False for e in emails)
+        for item in emails:
+            headers = (item or {}).get("headers") or {}
+            header_sender = next((str(v) for k, v in headers.items() if str(k).lower() == "x-phishalarm-sender"), "")
+            if (item or {}).get("abuseCopy") is True and has_reported_email:
+                return True
+            if (item or {}).get("abuseCopy") is not False and not has_reported_email and "@" in header_sender:
+                return True
+        return False
 
-    total_extracted = 0
-    per_email_summary = []
+    new_artifacts, upgrades, notes, mime_bodies = [], [], [], []
+    planned = set()
 
-    for mime in mime_artifacts:
-        artifact_id = mime["artifact_id"]
+    def _attachment(event_id, cef, types):
+        sdi = "trap-{}-{}-attachment-{}-{}".format(incident_id, event_id, cef["fileName"], cef["fileHashSha256"][:12])
+        known = attachments.get(sdi)
+        if known:
+            if cef.get("vaultId") and not known["vault"]:
+                upgrades.append({"artifact_id": known["id"], "cef": cef, "types": types})
+            return
+        if sdi in planned:
+            return
+        planned.add(sdi)
+        new_artifacts.append({"name": "Email Attachment", "label": "event", "contains": types, "cef": cef,
+                              "source_data_identifier": sdi})
+        attachments[sdi] = {"id": None, "vault": cef.get("vaultId"), "file": cef["fileName"], "source": cef["attachmentSource"]}
 
-        # Skip artifacts already processed.
-        try:
-            resp = phantom.requests.get(uri=phantom.build_phantom_rest_url("artifact", artifact_id), verify=False).json()
-            current_data = resp.get("data") if isinstance(resp.get("data"), dict) else {}
-        except Exception as e:
-            phantom.debug("Could not read artifact {}: {}".format(artifact_id, str(e)))
+    def _cc(event_id, address):
+        address = (address or "").strip()
+        if not address or address.lower() in excluded or address.lower() in cc_known:
+            return
+        cc_known.add(address.lower())
+        new_artifacts.append({"name": "Recipient Email", "label": "event", "contains": {"emailAddress": ["email"]},
+                              "cef": {"emailAddress": address, "emailRole": "cc"},
+                              "source_data_identifier": "trap-{}-{}-cc-{}".format(incident_id, event_id, address)})
+
+    for event_id in pending:
+        event = events.get(event_id) or {}
+        report = _is_report(event)
+        parsed = None
+        if event_id in downloaded:
+            vault_id, file_name = downloaded[event_id]
+            # The email's bytes over REST, not the vault file's path: the
+            # validator flags any filesystem access in a playbook.
+            try:
+                response = phantom.requests.get(uri=phantom.build_phantom_rest_url("download_attachment"),
+                                                params={"vault_id": vault_id}, verify=False)
+                if response.status_code == 200 and response.content:
+                    parsed = email.message_from_bytes(response.content, policy=email.policy.default)
+                else:
+                    phantom.debug("Vault download for {} returned HTTP {}".format(vault_id, response.status_code))
+            except Exception as err:
+                phantom.debug("Could not read email {} of alert {}: {}".format(vault_id, event_id, err))
+
+        if parsed is None:
+            # No email: TRAP's attachment list (name, type, size, hashes; no
+            # file) and TRAP's Cc header. No MIME Body, so the next run tries
+            # the download again; a later success upgrades these attachments.
+            for item in event.get("emails") or []:
+                for attachment in (item or {}).get("attachments") or []:
+                    real_name = attachment.get("realnamePII")
+                    if isinstance(real_name, dict):
+                        real_name = real_name.get("secret")
+                    file_name = str(real_name or attachment.get("realname") or attachment.get("safename")
+                                    or attachment.get("filename") or "").strip()
+                    sha256 = str(attachment.get("sha256") or "").strip().lower()
+                    if not file_name or not sha256:
+                        continue
+                    cef = {"fileName": file_name, "fileType": attachment.get("contentType") or "", "fileHashSha256": sha256,
+                           "attachmentSource": "TRAP API (original email not available)"}
+                    types = {"fileName": ["file name"], "fileHashSha256": ["sha256"]}
+                    if attachment.get("md5"):
+                        cef["fileHashMd5"] = str(attachment.get("md5")).strip().lower()
+                        types["fileHashMd5"] = ["md5"]
+                    if attachment.get("size") is not None:
+                        cef["fileSize"] = attachment.get("size")
+                    _attachment(event_id, cef, types)
+                if not report:
+                    headers = (item or {}).get("headers") or {}
+                    cc_raw = next((str(v) for k, v in headers.items() if str(k).lower() == "cc"), "")
+                    for _name, address in getaddresses([cc_raw]):
+                        _cc(event_id, address)
             continue
 
-        if current_data.get("attachments_extracted"):
-            continue
-
-        source_file_name = mime["file_name"] or "trap-{}.eml".format(artifact_id)
-        # A MIME Body's identifier is "trap-<incident>-mime-<event>" (proofpoint_trap_detail).
-        sdi = resp.get("source_data_identifier") or ""
-        sdi_parts = sdi.split("-mime-")
-        incident_id = sdi_parts[0].replace("trap-", "", 1) if sdi_parts else "?"
-        event_id = sdi_parts[1] if len(sdi_parts) > 1 else "?"
-
-        # Read the email's bytes over REST (download_attachment by vault id)
-        # rather than opening the vault file's local path: SOAR's validator flags
-        # any filesystem access in a playbook (no-filesystem-access), and the
-        # REST route does not depend on this node holding the file.
-        try:
-            download = phantom.requests.get(
-                uri=phantom.build_phantom_rest_url("download_attachment"),
-                params={"vault_id": mime["vault_id"]},
-                verify=False,
-            )
-        except Exception as e:
-            phantom.debug("Could not download vault file {}: {}".format(mime["vault_id"], str(e)))
-            continue
-        if download.status_code != 200 or not download.content:
-            phantom.debug("Vault download for {} returned HTTP {} ({} bytes)".format(
-                mime["vault_id"], download.status_code, len(download.content or b"")))
-            continue
-
-        try:
-            parsed = email.message_from_bytes(download.content, policy=email.policy.default)
-        except Exception as e:
-            phantom.debug("Failed to parse MIME body {}: {}".format(source_file_name, str(e)))
-            continue
-
-        extracted_this_email = 0
         for part in parsed.walk():
             content_type = part.get_content_type()
             is_forwarded_email = content_type == "message/rfc822"
-
-            # message/rfc822 (a forwarded/embedded email) reports
-            # is_multipart()=True since it wraps one Message object rather
-            # than raw bytes — skip genuine multipart/* container parts, but
-            # not this one.
+            # message/rfc822 wraps one Message, so is_multipart() is True for it:
+            # skip real multipart/* containers only.
             if part.is_multipart() and not is_forwarded_email:
                 continue
-
             filename = part.get_filename()
-            disposition = (part.get_content_disposition() or "").lower()
-            if not filename or disposition != "attachment":
+            if not filename or (part.get_content_disposition() or "").lower() != "attachment":
                 continue
-
-            if is_forwarded_email:
-                try:
-                    embedded = part.get_payload()[0]
-                    payload = embedded.as_bytes()
-                except Exception as e:
-                    phantom.debug("Could not serialize forwarded message {}: {}".format(filename, str(e)))
-                    continue
-            else:
-                payload = part.get_payload(decode=True)
-
+            try:
+                payload = part.get_payload()[0].as_bytes() if is_forwarded_email else part.get_payload(decode=True)
+            except Exception as err:
+                phantom.debug("Could not read attachment {}: {}".format(filename, err))
+                continue
             if not payload:
                 continue
-
-            sha256 = hashlib.sha256(payload).hexdigest()
-
-            guessed_type, _ = mimetypes.guess_type(filename)
-            type_mismatch = bool(guessed_type) and guessed_type != content_type
-
-            # Store the attachment through REST with its content inline
-            # (container_attachment, base64) instead of writing a temp file for
-            # phantom.vault_add(): no filesystem access in the playbook.
+            # Into the Vault through REST with the content inline: no file on disk.
             try:
                 upload = phantom.requests.post(
                     uri=phantom.build_phantom_rest_url("container_attachment"),
-                    data=json.dumps({
-                        "container_id": container_id,
-                        "file_content": base64.b64encode(payload).decode("ascii"),
-                        "file_name": filename,
-                        "metadata": {"contains": ["vault id"]},
-                    }),
+                    data=json.dumps({"container_id": container_id, "file_content": base64.b64encode(payload).decode("ascii"),
+                                     "file_name": filename, "metadata": {"contains": ["vault id"]}}),
                     verify=False,
                 ).json()
-            except Exception as e:
-                phantom.debug("Vault upload failed for {}: {}".format(filename, str(e)))
+            except Exception as err:
+                phantom.debug("Vault upload failed for {}: {}".format(filename, err))
                 continue
-            attachment_vault_id = upload.get("vault_id")
-            if not upload.get("succeeded") or not attachment_vault_id:
+            if not upload.get("succeeded") or not upload.get("vault_id"):
                 phantom.debug("Vault upload failed for {}: {}".format(filename, upload.get("message")))
                 continue
+            guessed_type, _ = mimetypes.guess_type(filename)
+            # MD5 and size as TRAP shows them; usedforsecurity=False: a FIPS host refuses a plain md5().
+            cef = {"vaultId": upload["vault_id"], "fileName": filename, "fileHashSha256": hashlib.sha256(payload).hexdigest(),
+                   "fileHashMd5": hashlib.md5(payload, usedforsecurity=False).hexdigest(), "fileSize": len(payload),
+                   "fileType": content_type, "attachmentSource": "original email"}
+            if guessed_type and guessed_type != content_type:
+                cef["mimeTypeMismatch"] = "declared {}, expected {} from filename".format(content_type, guessed_type)
+            _attachment(event_id, cef, {"vaultId": ["vault id"], "fileHashSha256": ["sha256"], "fileHashMd5": ["md5"],
+                                        "fileName": ["file name"]})
 
-            # MD5 and size as TRAP shows them. usedforsecurity=False: a FIPS host
-            # refuses a plain md5().
-            attachment_cef = {
-                "vaultId": attachment_vault_id,
-                "fileName": filename,
-                "fileHashSha256": sha256,
-                "fileHashMd5": hashlib.md5(payload, usedforsecurity=False).hexdigest(),
-                "fileSize": len(payload),
-                "fileType": content_type,
-                "attachmentSource": "original email",
-            }
-            if type_mismatch:
-                attachment_cef["mimeTypeMismatch"] = "declared {}, expected {} from filename".format(content_type, guessed_type)
+        if not report:
+            for _name, address in getaddresses(parsed.get_all("Cc") or []):
+                _cc(event_id, address)
 
-            attachment_artifact = {
-                "name": "Email Attachment",
-                "description": "{}Attachment '{}' from TRAP incident {} event {}".format(
-                    "Forwarded email " if is_forwarded_email else "", filename, incident_id, event_id
-                ),
-                "source_data_identifier": "trap-{}-{}-attachment-{}-{}".format(incident_id, event_id, filename, sha256[:12]),
-                "label": "event",
-                "cef": attachment_cef,
-                "cef_types": {"vaultId": ["vault id"], "fileHashSha256": ["sha256"], "fileHashMd5": ["md5"],
-                              "fileName": ["file name"]},
-                "container_id": container_id,
-                "run_automation": False,
-                # low: an artifact at the default (medium) raises a lower
-                # container severity.
-                "severity": "low",
-            }
-            try:
-                resp2 = phantom.requests.post(
-                    uri=phantom.build_phantom_rest_url("artifact"),
-                    data=json.dumps(attachment_artifact),
-                    verify=False,
-                ).json()
-                if resp2.get("success") or resp2.get("id"):
-                    extracted_this_email += 1
-                    total_extracted += 1
-                else:
-                    phantom.debug("Failed to create attachment artifact: {}".format(resp2.get("message", "")))
-            except Exception as e:
-                phantom.debug("Error creating attachment artifact: {}".format(str(e)))
-
-        # Cc recipients from the email's own headers.
-        cc_addrs = sorted({addr for _, addr in getaddresses(parsed.get_all("Cc") or [])
-                           if addr and addr.strip().lower() not in excluded_addresses})
-        for cc_addr in cc_addrs:
-            cc_artifact = {
-                "name": "Recipient Email",
-                "description": "Cc recipient from TRAP incident {} event {}".format(incident_id, event_id),
-                "source_data_identifier": "trap-{}-{}-cc-{}".format(incident_id, event_id, cc_addr),
-                "label": "event",
-                "cef": {
-                    "emailAddress": cc_addr,
-                    "emailRole": "cc",
-                },
-                "cef_types": {"emailAddress": ["email"]},
-                "container_id": container_id,
-                "run_automation": False,
-                "severity": "low",  # never raise the container severity, see above
-            }
-            try:
-                phantom.requests.post(
-                    uri=phantom.build_phantom_rest_url("artifact"),
-                    data=json.dumps(cc_artifact),
-                    verify=False,
-                )
-            except Exception as e:
-                phantom.debug("Error creating Cc artifact for {}: {}".format(cc_addr, str(e)))
-
-        # Rendered body + auth/routing headers — only exist in the raw MIME,
-        # not in TRAP's structured "get incident" response.
+        # The body as safe markdown: nothing from the email loads or is
+        # clickable (see _email_html_to_markdown in Global Custom Code).
+        body_md, body_kind = None, None
         try:
             body_part = parsed.get_body(preferencelist=("html", "plain"))
-        except Exception as e:
-            body_part = None
-            phantom.debug("get_body() failed for {}: {}".format(source_file_name, str(e)))
+            body_content = body_part.get_content() if body_part is not None else None
+        except Exception as err:
+            body_part, body_content = None, None
+            phantom.debug("Could not decode the body of {}: {}".format(file_name, err))
+        if body_content:
+            if body_part.get_content_type() == "text/html":
+                body_md = _email_html_to_markdown(body_content)
+                body_kind = "HTML, shown as safe text: links defanged and not clickable, images and scripts removed"
+            else:
+                body_md = _email_text_to_markdown(body_content)
+                body_kind = "plain text, URLs defanged"
 
-        # The body is shown as safe markdown: nothing from the email loads or is
-        # clickable in the analyst's browser (see _email_html_to_markdown in the
-        # Global Custom Code).
-        body_md = None
-        body_kind = None
-        if body_part is not None:
-            try:
-                body_content = body_part.get_content()
-            except Exception as e:
-                body_content = None
-                phantom.debug("Could not decode body for {}: {}".format(source_file_name, str(e)))
-            if body_content:
-                if body_part.get_content_type() == "text/html":
-                    body_md = _email_html_to_markdown(body_content)
-                    body_kind = "HTML, shown as safe text: links defanged and not clickable, images and scripts removed"
-                else:
-                    body_md = _email_text_to_markdown(body_content)
-                    body_kind = "plain text, URLs defanged"
-
-        auth_results = parsed.get_all("Authentication-Results") or []
-        received_chain = parsed.get_all("Received") or []
-        reply_to = parsed.get("Reply-To", "")
-        x_originating_ip = parsed.get("X-Originating-IP", "")
-        # Shown after the others.
-        extra_headers = [(name, parsed.get_all(name) or [])
-                         for name in ("In-Reply-To", "X-PhishAlarm-Sender", "Received-SPF", "DKIM-Signature")]
         return_path = parsed.get("Return-Path", "")
         from_header = parsed.get("From", "")
-
-        _, return_path_addr = parseaddr(return_path)
-        _, from_addr = parseaddr(from_header)
-        return_path_mismatch = bool(return_path_addr) and bool(from_addr) and return_path_addr.lower() != from_addr.lower()
-
-        lines = ["# Email Content — {} (event {})".format(_md_escape(source_file_name), _md_escape(event_id)), ""]
+        return_path_addr, from_addr = parseaddr(return_path)[1], parseaddr(from_header)[1]
+        lines = ["# Email Content — {} (event {})".format(_md_escape(file_name), _md_escape(event_id)), ""]
         for label, value in (("From", from_header), ("To", parsed.get("To", "")),
                              ("Subject", parsed.get("Subject", "")), ("Date", parsed.get("Date", ""))):
             if value:
                 lines.append("**{}:** {}  ".format(label, _md_text(" ".join(str(value).split()))))
         if return_path:
-            mismatch_note = " — **does not match From ({})**".format(_md_text(from_addr)) if return_path_mismatch else ""
-            lines.append("**Return-Path:** {}{}  ".format(_md_text(str(return_path)), mismatch_note))
-        if reply_to:
-            lines.append("**Reply-To:** {}  ".format(_md_text(str(reply_to))))
-        if x_originating_ip:
-            lines.append("**X-Originating-IP:** {}  ".format(_md_text(str(x_originating_ip))))
-        for header_name, header_values in extra_headers:
-            for header_value in header_values:
+            mismatch = (" — **does not match From ({})**".format(_md_text(from_addr))
+                        if return_path_addr and from_addr and return_path_addr.lower() != from_addr.lower() else "")
+            lines.append("**Return-Path:** {}{}  ".format(_md_text(str(return_path)), mismatch))
+        for label in ("Reply-To", "X-Originating-IP"):
+            if parsed.get(label, ""):
+                lines.append("**{}:** {}  ".format(label, _md_text(str(parsed.get(label)))))
+        for header_name in ("In-Reply-To", "X-PhishAlarm-Sender", "Received-SPF", "DKIM-Signature"):
+            for header_value in parsed.get_all(header_name) or []:
                 lines.append("**{}:** {}  ".format(header_name, _md_text(" ".join(str(header_value).split()))))
+        auth_results = parsed.get_all("Authentication-Results") or []
         if auth_results:
             lines += ["", "**Authentication-Results:**", ""]
-            lines += ["- " + _md_text(" ".join(str(ar).split())) for ar in auth_results]
+            lines += ["- " + _md_text(" ".join(str(value).split())) for value in auth_results]
+        received_chain = parsed.get_all("Received") or []
         if received_chain:
             lines += ["", "**Received chain ({} hop(s)):**".format(len(received_chain)), ""]
             lines += ["{}. {}".format(n, _md_text(" ".join(str(hop).split()))) for n, hop in enumerate(received_chain, 1)]
         lines += ["", "---", ""]
-        if body_md:
-            lines += ["**Body** ({})".format(body_kind), "", body_md]
-        else:
-            lines.append("*No readable body part found in this MIME message.*")
+        lines += ["**Body** ({})".format(body_kind), "", body_md] if body_md else ["*No readable body part found in this MIME message.*"]
+        notes.append(["Email Content — {}".format(file_name), "\n".join(lines)])
+        mime_bodies.append({"cef": {"vaultId": vault_id, "fileName": file_name, "eventId": event_id},
+                            "source_data_identifier": "trap-{}-mime-{}".format(incident_id, event_id)})
 
-        # Posted over REST as a markdown note: phantom.add_note()'s HTML
-        # sanitizer mangled real email bodies, and markdown notes render
-        # cleanly (tables included). Split into parts past _NOTE_MAX_CHARS.
-        for part_title, part_content in _note_parts("Email Content — {}".format(source_file_name), "\n".join(lines)):
-            try:
-                note_resp = phantom.requests.post(
-                    uri=phantom.build_phantom_rest_url("note"),
-                    data=json.dumps({
-                        "container_id": container_id,
-                        "title": part_title,
-                        "content": part_content,
-                        "note_type": "general",
-                        "note_format": "markdown",
-                    }),
-                    verify=False,
-                )
-                if note_resp.status_code >= 300:
-                    phantom.debug("Could not add note {!r}: HTTP {} {}".format(
-                        part_title, note_resp.status_code, note_resp.text[:200]))
-            except Exception as e:
-                phantom.debug("Could not add note {!r}: {}".format(part_title, str(e)))
+    # One Attachment Extraction note per case, over every attachment on it, so
+    # it reads the same on a run that adds nothing.
+    rows = []
+    for sdi, item in sorted(attachments.items()):
+        event_part = sdi.split("-attachment-", 1)[0]
+        event_id = event_part[len("trap-{}-".format(incident_id)):] if event_part.startswith("trap-{}-".format(incident_id)) else ""
+        rows.append("| {} | `{}` | {} |".format(event_id, str(item["file"] or "").replace("`", "'").replace("|", "\\|"),
+                                               "file in the Vault" if item["vault"] else item["source"] or ""))
+    if rows or mime_bodies or attachments:
+        content = "# Email Attachment Extraction\n**Attachments on this case:** {}\n\n".format(len(rows))
+        content += "\n".join(["| Event | File | Source |", "|---|---|---|"] + rows) if rows else "No attachment in the emails."
+        notes.append(["Attachment Extraction", content])
 
-        per_email_summary.append("**{}** (event {}): {} attachment(s)".format(source_file_name, event_id, extracted_this_email))
+    read_emails__name = [a["name"] for a in new_artifacts]
+    read_emails__label = [a["label"] for a in new_artifacts]
+    read_emails__contains = [json.dumps(a["contains"]) for a in new_artifacts]
+    read_emails__cef_dictionary = [json.dumps(a["cef"]) for a in new_artifacts]
+    read_emails__source_data_identifier = [a["source_data_identifier"] for a in new_artifacts]
+    read_emails__upgrade_artifact_id = [u["artifact_id"] for u in upgrades]
+    read_emails__upgrade_cef_json = [json.dumps(u["cef"]) for u in upgrades]
+    read_emails__upgrade_cef_types = [json.dumps(u["types"]) for u in upgrades]
+    read_emails__note_title = [n[0] for n in notes]
+    read_emails__note_content = [n[1] for n in notes]
+    read_emails__mime_cef = [json.dumps(m["cef"]) for m in mime_bodies]
+    read_emails__mime_contains = [json.dumps({"vaultId": ["vault id"], "fileName": ["file name"]}) for m in mime_bodies]
+    read_emails__mime_sdi = [m["source_data_identifier"] for m in mime_bodies]
+    for key, value in (("name", read_emails__name), ("label", read_emails__label), ("contains", read_emails__contains),
+                       ("cef_dictionary", read_emails__cef_dictionary), ("source_data_identifier", read_emails__source_data_identifier),
+                       ("upgrade_artifact_id", read_emails__upgrade_artifact_id), ("upgrade_cef_json", read_emails__upgrade_cef_json),
+                       ("upgrade_cef_types", read_emails__upgrade_cef_types), ("note_title", read_emails__note_title),
+                       ("note_content", read_emails__note_content), ("mime_cef", read_emails__mime_cef),
+                       ("mime_contains", read_emails__mime_contains), ("mime_sdi", read_emails__mime_sdi)):
+        phantom.save_run_data(key="read_emails:" + key, value=json.dumps(value))
+    phantom.debug("{} alert(s): {} new artifact(s), {} upgrade(s), {} note(s), {} MIME Body(ies)".format(
+        len(pending), len(new_artifacts), len(upgrades), len(notes), len(mime_bodies)))
 
-        # Mark it processed, at low: updating an artifact re-applies its severity
-        # to the container, like creating one.
-        merged_data = dict(current_data)
-        merged_data["attachments_extracted"] = True
-        merged_data["attachments_extracted_count"] = extracted_this_email
-        try:
-            phantom.requests.post(
-                uri=phantom.build_phantom_rest_url("artifact", artifact_id),
-                data=json.dumps({"data": merged_data, "severity": "low"}),
-                verify=False,
-            )
-        except Exception as e:
-            phantom.debug("Could not mark MIME Body artifact {} as processed: {}".format(artifact_id, str(e)))
-
-    if per_email_summary:
-        if total_extracted:
-            note_content = (
-                "# Email Attachment Extraction\n"
-                "**Total attachments extracted:** {}\n\n"
-                "{}"
-            ).format(total_extracted, "\n".join("- " + line for line in per_email_summary))
-        else:
-            note_content = "# Email Attachment Extraction\nNo attachments in {} email(s).".format(
-                len(per_email_summary))
-        for part_title, part_content in _note_parts("Attachment Extraction", note_content):
-            phantom.add_note(
-                container=container,
-                note_type="general",
-                title=part_title,
-                content=part_content,
-                note_format="markdown",  # the content is markdown; add_note() defaults to html
-            )
-
-    phantom.debug("Attachment extraction complete: {} attachment(s) across {} MIME body/bodies".format(total_extracted, len(mime_artifacts)))
-
+    ################################################################################
     ################################################################################
     ## Custom Code End
     ################################################################################
 
-    phantom.save_block_result(key="extract_attachments__inputs:0:artifact:*.name", value=json.dumps(container_artifact_header_item_0))
-    phantom.save_block_result(key="extract_attachments__inputs:1:artifact:*.id", value=json.dumps(container_artifact_header_item_1))
-    phantom.save_block_result(key="extract_attachments__inputs:2:artifact:*.cef.vaultId", value=json.dumps(container_artifact_cef_item_2))
-    phantom.save_block_result(key="extract_attachments__inputs:3:artifact:*.cef.fileName", value=json.dumps(container_artifact_cef_item_3))
+    phantom.save_block_result(key="read_emails:name", value=json.dumps(read_emails__name))
+    phantom.save_block_result(key="read_emails:label", value=json.dumps(read_emails__label))
+    phantom.save_block_result(key="read_emails:contains", value=json.dumps(read_emails__contains))
+    phantom.save_block_result(key="read_emails:cef_dictionary", value=json.dumps(read_emails__cef_dictionary))
+    phantom.save_block_result(key="read_emails:source_data_identifier", value=json.dumps(read_emails__source_data_identifier))
+    phantom.save_block_result(key="read_emails:upgrade_artifact_id", value=json.dumps(read_emails__upgrade_artifact_id))
+    phantom.save_block_result(key="read_emails:upgrade_cef_json", value=json.dumps(read_emails__upgrade_cef_json))
+    phantom.save_block_result(key="read_emails:upgrade_cef_types", value=json.dumps(read_emails__upgrade_cef_types))
+    phantom.save_block_result(key="read_emails:note_title", value=json.dumps(read_emails__note_title))
+    phantom.save_block_result(key="read_emails:note_content", value=json.dumps(read_emails__note_content))
+    phantom.save_block_result(key="read_emails:mime_cef", value=json.dumps(read_emails__mime_cef))
+    phantom.save_block_result(key="read_emails:mime_contains", value=json.dumps(read_emails__mime_contains))
+    phantom.save_block_result(key="read_emails:mime_sdi", value=json.dumps(read_emails__mime_sdi))
 
-    phantom.save_block_result(key="extract_attachments_called", value="True")
+    phantom.save_block_result(key="read_emails_called", value="True")
+
+    add_attachments_and_cc(container=container)
+
+    return
+
+
+@phantom.playbook_block()
+def add_attachments_and_cc(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
+    phantom.debug("add_attachments_and_cc() called")
+
+    # phantom.debug('Action: {0} {1}'.format(action['name'], ('SUCCEEDED' if success else 'FAILED')))
+
+    ################################################################################
+    # Create the Email Attachment and Cc Recipient Email artifacts.
+    ################################################################################
+
+    id_value = container.get("id", None)
+    read_emails__name = json.loads(_ if (_ := phantom.get_run_data(key="read_emails:name")) != "" else "null")  # pylint: disable=used-before-assignment
+    read_emails__label = json.loads(_ if (_ := phantom.get_run_data(key="read_emails:label")) != "" else "null")  # pylint: disable=used-before-assignment
+    read_emails__contains = json.loads(_ if (_ := phantom.get_run_data(key="read_emails:contains")) != "" else "null")  # pylint: disable=used-before-assignment
+    read_emails__cef_dictionary = json.loads(_ if (_ := phantom.get_run_data(key="read_emails:cef_dictionary")) != "" else "null")  # pylint: disable=used-before-assignment
+    read_emails__source_data_identifier = json.loads(_ if (_ := phantom.get_run_data(key="read_emails:source_data_identifier")) != "" else "null")  # pylint: disable=used-before-assignment
+
+    parameters = []
+
+    if read_emails__source_data_identifier is not None:
+        parameters.append({
+            "name": read_emails__name,
+            "label": read_emails__label,
+            "contains": read_emails__contains,
+            "container_id": id_value,
+            "cef_dictionary": read_emails__cef_dictionary,
+            "source_data_identifier": read_emails__source_data_identifier,
+        })
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+    ################################################################################
+
+    # One parameter set per artifact (the VPE builds one set of whole lists);
+    # reads the run data, not the generated variables. determine_contains
+    # False: every typed field is in contains, the rest stay untyped.
+    names = json.loads(phantom.get_run_data(key="read_emails:name") or "null") or []
+    labels = json.loads(phantom.get_run_data(key="read_emails:label") or "null") or []
+    contains = json.loads(phantom.get_run_data(key="read_emails:contains") or "null") or []
+    cefs = json.loads(phantom.get_run_data(key="read_emails:cef_dictionary") or "null") or []
+    sdis = json.loads(phantom.get_run_data(key="read_emails:source_data_identifier") or "null") or []
+    parameters = [{"name": names[i], "label": labels[i], "contains": contains[i], "determine_contains": False,
+                   "run_automation": False, "container_id": container.get("id"), "cef_dictionary": cefs[i],
+                   "source_data_identifier": sdis[i]} for i in range(len(sdis))]
+    if not parameters:
+        upgrade_attachments(container=container)
+        return
+
+    ################################################################################
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
+    phantom.act("add artifact", parameters=parameters, name="add_attachments_and_cc", assets=["soar8"], callback=upgrade_attachments)
+
+    return
+
+
+@phantom.playbook_block()
+def upgrade_attachments(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
+    phantom.debug("upgrade_attachments() called")
+
+    # phantom.debug('Action: {0} {1}'.format(action['name'], ('SUCCEEDED' if success else 'FAILED')))
+
+    ################################################################################
+    # Give a TRAP-listed attachment its file once a later download succeeds.
+    ################################################################################
+
+    read_emails__upgrade_cef_json = json.loads(_ if (_ := phantom.get_run_data(key="read_emails:upgrade_cef_json")) != "" else "null")  # pylint: disable=used-before-assignment
+    read_emails__upgrade_artifact_id = json.loads(_ if (_ := phantom.get_run_data(key="read_emails:upgrade_artifact_id")) != "" else "null")  # pylint: disable=used-before-assignment
+    read_emails__upgrade_cef_types = json.loads(_ if (_ := phantom.get_run_data(key="read_emails:upgrade_cef_types")) != "" else "null")  # pylint: disable=used-before-assignment
+
+    parameters = []
+
+    if read_emails__upgrade_artifact_id is not None:
+        parameters.append({
+            "cef_json": read_emails__upgrade_cef_json,
+            "severity": "low",
+            "artifact_id": read_emails__upgrade_artifact_id,
+            "cef_types_json": read_emails__upgrade_cef_types,
+        })
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+    ################################################################################
+
+    # One update per attachment; severity low: an update re-applies the
+    # artifact's severity to the case, like creating it.
+    ids = json.loads(phantom.get_run_data(key="read_emails:upgrade_artifact_id") or "null") or []
+    cefs = json.loads(phantom.get_run_data(key="read_emails:upgrade_cef_json") or "null") or []
+    types = json.loads(phantom.get_run_data(key="read_emails:upgrade_cef_types") or "null") or []
+    parameters = [{"artifact_id": ids[i], "severity": "low", "cef_json": cefs[i], "cef_types_json": types[i]}
+                  for i in range(len(ids))]
+    if not parameters:
+        add_notes(container=container)
+        return
+
+    ################################################################################
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
+    phantom.act("update artifact", parameters=parameters, name="upgrade_attachments", assets=["soar8"], callback=add_notes)
+
+    return
+
+
+@phantom.playbook_block()
+def add_notes(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
+    phantom.debug("add_notes() called")
+
+    ################################################################################
+    # Write the Email Content and Attachment Extraction notes in place (shared custom 
+    # function).
+    ################################################################################
+
+    id_value = container.get("id", None)
+    read_emails__note_title = json.loads(_ if (_ := phantom.get_run_data(key="read_emails:note_title")) != "" else "null")  # pylint: disable=used-before-assignment
+    read_emails__note_content = json.loads(_ if (_ := phantom.get_run_data(key="read_emails:note_content")) != "" else "null")  # pylint: disable=used-before-assignment
+
+    parameters = []
+
+    parameters.append({
+        "title": read_emails__note_title,
+        "content": read_emails__note_content,
+        "container_id": id_value,
+    })
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+    ################################################################################
+
+    # One parameter set per note.
+    titles = json.loads(phantom.get_run_data(key="read_emails:note_title") or "null") or []
+    contents = json.loads(phantom.get_run_data(key="read_emails:note_content") or "null") or []
+    parameters = [{"container_id": container.get("id"), "title": titles[i], "content": contents[i]}
+                  for i in range(len(titles))]
+    if not parameters:
+        add_mime_bodies(container=container)
+        return
+
+    ################################################################################
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
+    phantom.custom_function(custom_function="local/proofpoint_trap_note_upsert", parameters=parameters, name="add_notes", callback=add_mime_bodies)
+
+    return
+
+
+@phantom.playbook_block()
+def add_mime_bodies(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
+    phantom.debug("add_mime_bodies() called")
+
+    # phantom.debug('Action: {0} {1}'.format(action['name'], ('SUCCEEDED' if success else 'FAILED')))
+
+    ################################################################################
+    # Record each downloaded alert's MIME Body, its done mark, last.
+    ################################################################################
+
+    id_value = container.get("id", None)
+    read_emails__mime_contains = json.loads(_ if (_ := phantom.get_run_data(key="read_emails:mime_contains")) != "" else "null")  # pylint: disable=used-before-assignment
+    read_emails__mime_cef = json.loads(_ if (_ := phantom.get_run_data(key="read_emails:mime_cef")) != "" else "null")  # pylint: disable=used-before-assignment
+    read_emails__mime_sdi = json.loads(_ if (_ := phantom.get_run_data(key="read_emails:mime_sdi")) != "" else "null")  # pylint: disable=used-before-assignment
+
+    parameters = []
+
+    if read_emails__mime_sdi is not None:
+        parameters.append({
+            "name": "MIME Body",
+            "label": "event",
+            "contains": read_emails__mime_contains,
+            "container_id": id_value,
+            "cef_dictionary": read_emails__mime_cef,
+            "source_data_identifier": read_emails__mime_sdi,
+        })
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+    ################################################################################
+
+    # One MIME Body per downloaded alert, written last: it marks the alert done.
+    cefs = json.loads(phantom.get_run_data(key="read_emails:mime_cef") or "null") or []
+    contains = json.loads(phantom.get_run_data(key="read_emails:mime_contains") or "null") or []
+    sdis = json.loads(phantom.get_run_data(key="read_emails:mime_sdi") or "null") or []
+    parameters = [{"name": "MIME Body", "label": "event", "contains": contains[i], "determine_contains": False,
+                   "run_automation": False, "container_id": container.get("id"), "cef_dictionary": cefs[i],
+                   "source_data_identifier": sdis[i]} for i in range(len(sdis))]
+    if not parameters:
+        return
+
+    ################################################################################
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
+    phantom.act("add artifact", parameters=parameters, name="add_mime_bodies", assets=["soar8"])
 
     return
 
@@ -793,4 +1045,3 @@ def on_finish(container, summary):
     ################################################################################
 
     return
-

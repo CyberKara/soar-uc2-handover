@@ -4,7 +4,7 @@
     "category": "Email Abuse",
     "coa": {
         "data": {
-            "hash": "cc432e8f8a4f5e10331e986bcc4107388176f03b",
+            "hash": "f49cfc36609588a7b07e4da7b43bcd3b7b188cdc",
             "edges": [
                 {
                     "id": "port_0_to_port_2",
@@ -35,9 +35,16 @@
                     "targetPort": "5_in"
                 },
                 {
-                    "id": "port_5_to_port_1",
+                    "id": "port_5_to_port_6",
                     "sourceNode": "5",
                     "sourcePort": "5_out",
+                    "targetNode": "6",
+                    "targetPort": "6_in"
+                },
+                {
+                    "id": "port_6_to_port_1",
+                    "sourceNode": "6",
+                    "sourcePort": "6_out",
                     "targetNode": "1",
                     "targetPort": "1_in"
                 }
@@ -61,7 +68,7 @@
                 },
                 "1": {
                     "x": 190,
-                    "y": 1000,
+                    "y": 900,
                     "id": "1",
                     "data": {
                         "id": "1",
@@ -79,7 +86,7 @@
                 },
                 "2": {
                     "x": 190,
-                    "y": 199.99999999999997,
+                    "y": 149.99999999999997,
                     "id": "2",
                     "data": {
                         "id": "2",
@@ -140,36 +147,32 @@
                 },
                 "3": {
                     "x": 190,
-                    "y": 400,
+                    "y": 300,
                     "id": "3",
                     "data": {
                         "id": "3",
                         "type": "code",
                         "advanced": {
                             "join": [],
-                            "note": "The signature mirrors the connector's Event Info fields; keep both in sync.",
                             "customName": "process incidents",
-                            "description": "Find ingested incidents whose signature changed since the last tick.",
+                            "description": "Find ingested incidents whose signature changed since the last tick (state in a custom list).",
                             "customNameId": 0
                         },
-                        "functionId": 3,
+                        "functionId": 1,
                         "functionName": "process_incidents",
-                        "inputParameters": [
-                            "list_incidents:action_result.status",
-                            "list_incidents:action_result.data"
-                        ],
+                        "inputParameters": [],
                         "outputVariables": [
                             "incident_id"
                         ]
                     },
                     "type": "code",
                     "errors": {},
-                    "userCode": "    ################################################################################\n\n\n    result_data = phantom.collect2(\n        container=container,\n        datapath=[\n            \"list_incidents:action_result.status\",\n            \"list_incidents:action_result.data\",\n        ]\n    )\n\n    # One action result per state listed (new, open, closed). If any of them\n    # failed, skip the cycle: an incident missing from this pass would only\n    # be compared again next time, but a half-listed cycle is not worth acting on.\n    if not result_data or any(row[0] != \"success\" for row in result_data):\n        phantom.error(\"list_incidents failed -- skipping this recheck cycle\")\n        return\n\n    incidents = []\n    seen_ids = set()\n    for row in result_data:\n        for incident in row[1] or []:\n            inc_key = str(incident.get(\"id\", \"\"))\n            if inc_key in seen_ids:\n                continue\n            seen_ids.add(inc_key)\n            incidents.append(incident)\n    phantom.debug(\"Recheck cycle: {} incident(s) in window over {} state listing(s)\".format(len(incidents), len(result_data)))\n\n    # Read prior state. Row 0 is the header (\"incident_id\"): skip it.\n    known_signatures = {}\n    read_success, _read_msg, rows = phantom.get_list(list_name=STATE_LIST_NAME)\n    if read_success and rows:\n        for row in rows:\n            if row and len(row) >= 2 and row[0] != \"incident_id\":\n                known_signatures[row[0]] = row[1]\n\n    to_recheck = []  # [{incident_id, container_id, new_signature, event_info_cef}]\n    new_state = dict(known_signatures)\n\n    if not known_signatures:\n        phantom.debug(\"No prior state -- recording signatures this cycle, nothing to recheck\")\n\n    for incident in incidents:\n        inc_id = str(incident.get(\"id\", \"\"))\n        if not inc_id:\n            continue\n        sig = _incident_signature(incident)\n\n        # An incident this playbook has not seen before is RECORDED, not\n        # rechecked. On the first cycle that is the whole window -- otherwise a\n        # fresh deployment re-runs proofpoint_trap_detail over the entire\n        # backlog on tick one. Afterwards it is an incident on_poll has just\n        # ingested, which proofpoint_trap_detail has already enriched on its\n        # own trigger. Rechecks start when a known incident comes back with a\n        # different signature.\n        if inc_id not in known_signatures:\n            new_state[inc_id] = sig\n            continue\n\n        if known_signatures[inc_id] == sig:\n            continue  # unchanged since last recheck cycle -- nothing to do\n\n        # Only incidents ALREADY ingested (have a container) are this\n        # playbook's job -- first-time ingestion stays on_poll's main pass.\n        # An incident with no container yet is either brand new (on_poll\n        # will pick it up on its own schedule) or outside on_poll's own\n        # filters entirely (not this playbook's call to override that).\n        try:\n            resp = phantom.requests.get(\n                uri=phantom.build_phantom_rest_url(\"container\"),\n                params={\"_filter_source_data_identifier\": '\"{}\"'.format(inc_id), \"page_size\": 1},\n                verify=False,\n            ).json()\n            existing = resp.get(\"data\") or []\n        except Exception as e:\n            phantom.debug(\"Container lookup failed for incident {}: {}\".format(inc_id, str(e)))\n            continue\n\n        if not existing:\n            # Known incident that changed but has no container: nothing to\n            # write the update onto. Leave its recorded signature alone so the\n            # change is still pending the next time round, once on_poll has\n            # ingested it.\n            continue\n\n        container_id = existing[0][\"id\"]\n        to_recheck.append({\n            \"incident_id\": inc_id,\n            \"container_id\": container_id,\n            \"event_info_cef\": _build_event_info_cef(incident),\n        })\n        new_state[inc_id] = sig\n\n    phantom.debug(\"{} incident(s) changed and already have a container\".format(len(to_recheck)))\n\n    phantom.save_run_data(key=\"process_incidents:to_recheck\", value=json.dumps(to_recheck))\n    phantom.save_run_data(key=\"process_incidents:new_state\", value=json.dumps(new_state))\n\n    # The changed incidents' ids, also as the block's output (dispatch_mime_refetch\n    # binds to it for the VPE view; its own Custom Code reads to_recheck).\n    process_incidents__incident_id = [row[\"incident_id\"] for row in to_recheck]\n\n    ################################################################################\n",
+                    "userCode": "    ################################################################################\n\n    result_data = phantom.collect2(container=container, datapath=[\"list_incidents:action_result.status\", \"list_incidents:action_result.data\"])\n    # One action result per state listed (new, open, closed). If any failed,\n    # skip the cycle: a half-listed cycle is not worth acting on.\n    if not result_data or any(row[0] != \"success\" for row in result_data):\n        phantom.error(\"list_incidents failed -- skipping this recheck cycle\")\n        return\n\n    incidents, seen = [], set()\n    for row in result_data:\n        for incident in row[1] or []:\n            key = str(incident.get(\"id\", \"\"))\n            if key and key not in seen:\n                seen.add(key)\n                incidents.append(incident)\n\n    # State: proofpoint_trap_recheck_state (incident_id, signature); row 0 is the header.\n    known = {}\n    ok, _message, rows = phantom.get_list(list_name=STATE_LIST_NAME)\n    for row in (rows or []) if ok else []:\n        if row and len(row) >= 2 and row[0] != \"incident_id\":\n            known[row[0]] = row[1]\n\n    # An incident not seen before is recorded, not rechecked: on the first tick\n    # that is the whole window, afterwards one on_poll has just ingested.\n    new_state, changed = dict(known), []\n    for incident in incidents:\n        inc_id = str(incident.get(\"id\", \"\"))\n        signature = _incident_signature(incident)\n        if inc_id not in known:\n            new_state[inc_id] = signature\n        elif known[inc_id] != signature:\n            changed.append({\"incident_id\": inc_id, \"signature\": signature, \"event_info_cef\": _build_event_info_cef(incident)})\n    phantom.debug(\"Recheck: {} incident(s) in the window, {} changed\".format(len(incidents), len(changed)))\n\n    process_incidents__incident_id = [item[\"incident_id\"] for item in changed]\n    phantom.save_run_data(key=\"process_incidents:changed\", value=json.dumps(changed))\n    phantom.save_run_data(key=\"process_incidents:new_state\", value=json.dumps(new_state))\n    phantom.save_run_data(key=\"process_incidents:incident_id\", value=json.dumps(process_incidents__incident_id))\n\n    ################################################################################\n",
                     "warnings": {}
                 },
                 "4": {
                     "x": 190,
-                    "y": 600,
+                    "y": 450,
                     "id": "4",
                     "data": {
                         "id": "4",
@@ -200,72 +203,141 @@
                             "exitConditionEnabled": false
                         },
                         "type": "action",
-                        "action": "download mime body",
+                        "action": "find artifacts",
                         "advanced": {
                             "join": [],
-                            "note": "Custom Code builds one parameter set per changed incident, so a save keeps the fan-out. event_id omitted: every event; dispatch_updates skips MIME Bodies already on the container.",
-                            "customName": "dispatch mime refetch",
-                            "description": "Re-fetch and vault all MIME bodies for each changed incident.",
+                            "note": "Custom Code: one search per changed incident. Pick your SOAR (Phantom app) asset here after import.",
+                            "customName": "find cases",
+                            "description": "Find the case of each changed incident by its Event Info incidentId.",
                             "customNameId": 0
                         },
-                        "connector": "Proofpoint TRAP",
-                        "actionType": "generic",
-                        "functionId": 4,
+                        "connector": "Phantom",
+                        "actionType": "investigate",
+                        "functionId": 2,
                         "parameters": {
-                            "incident_id": "process_incidents:custom_function:incident_id"
+                            "values": "process_incidents:custom_function:incident_id",
+                            "cef_key": "incidentId"
                         },
-                        "connectorId": "a7c41f8e-3b2d-4e9a-bf56-1d8e9a4c2f7b",
-                        "functionName": "dispatch_mime_refetch",
+                        "connectorId": "deb82aa9-22cc-4675-9cf1-534b8d006eb7",
+                        "functionName": "find_cases",
                         "connectorConfigs": [
-                            "proofpoint_trap_mock"
+                            "soar8"
                         ],
                         "connectorVersion": "v1",
                         "requiredParameters": [
                             {
-                                "field": "incident_id",
+                                "field": "values",
                                 "default": "",
-                                "data_type": "numeric"
+                                "data_type": "string"
                             }
                         ]
                     },
                     "type": "action",
                     "errors": {},
-                    "userCode": "    ################################################################################\n\n    # One \"download mime body\" per changed incident. The VPE builds ONE parameter\n    # set whose incident_id is the whole list; replace it with one set per\n    # incident -- the generated phantom.act() below then runs one app_run per set\n    # on this block's selected asset, and a VPE save keeps this section. Reads the\n    # run data rather than the generated variable, so a regenerated name cannot\n    # break it.\n    to_recheck = json.loads(phantom.get_run_data(key=\"process_incidents:to_recheck\") or \"null\") or []\n    parameters = [{\"incident_id\": row[\"incident_id\"]} for row in to_recheck]\n\n    if not parameters:\n        # Nothing changed this cycle: phantom.act() has nothing to dispatch, so\n        # go straight to the state update.\n        phantom.debug(\"Nothing to recheck this cycle\")\n        dispatch_updates(container=container)\n        return\n\n    ################################################################################\n",
+                    "userCode": "    ################################################################################\n\n    # One search per changed incident; reads the run data, not the generated variables.\n    incident_ids = json.loads(phantom.get_run_data(key=\"process_incidents:incident_id\") or \"null\") or []\n    parameters = [{\"values\": inc_id, \"cef_key\": \"incidentId\", \"exact_match\": True} for inc_id in incident_ids]\n    if not parameters:\n        build_updates(container=container)\n        return\n\n    ################################################################################\n",
                     "warnings": {}
                 },
                 "5": {
                     "x": 190,
-                    "y": 800,
+                    "y": 600,
                     "id": "5",
                     "data": {
                         "id": "5",
                         "type": "code",
                         "advanced": {
                             "join": [],
-                            "note": "Raw REST with container_id: the target is another container (this run's own is the Timer tick's).",
-                            "customName": "dispatch updates",
-                            "description": "Write MIME Body and Event Info Update artifacts, then save the signatures.",
+                            "customName": "build updates",
+                            "description": "Build one Event Info Update per changed incident with a case, then save the signatures.",
                             "customNameId": 0
                         },
-                        "functionId": 5,
-                        "functionName": "dispatch_updates",
-                        "inputParameters": [
-                            "dispatch_mime_refetch:action_result.parameter.incident_id",
-                            "dispatch_mime_refetch:action_result.data.*.event_id",
-                            "dispatch_mime_refetch:action_result.data.*.vault_id",
-                            "dispatch_mime_refetch:action_result.data.*.file_name"
-                        ],
-                        "outputVariables": []
+                        "functionId": 2,
+                        "functionName": "build_updates",
+                        "inputParameters": [],
+                        "outputVariables": [
+                            "container_id",
+                            "cef_dictionary",
+                            "source_data_identifier"
+                        ]
                     },
                     "type": "code",
                     "errors": {},
-                    "userCode": "    ################################################################################\n\n    try:\n        to_recheck = json.loads(phantom.get_run_data(key=\"process_incidents:to_recheck\") or \"[]\")\n    except Exception:\n        to_recheck = []\n\n    # One action result per changed incident; action_result.parameter.incident_id\n    # ties each result to its incident (results are not in dispatch order).\n    mime_rows = phantom.collect2(\n        container=container,\n        datapath=[\n            \"dispatch_mime_refetch:action_result.parameter.incident_id\",\n            \"dispatch_mime_refetch:action_result.data.*.event_id\",\n            \"dispatch_mime_refetch:action_result.data.*.vault_id\",\n            \"dispatch_mime_refetch:action_result.data.*.file_name\",\n        ],\n    )\n\n    mime_by_incident = {}\n    for row in (mime_rows or []):\n        if not row or not row[0]:\n            continue\n        inc_id, event_id, vault_id, file_name = row[0], row[1], row[2], row[3]\n        if not event_id or not vault_id:\n            continue\n        mime_by_incident.setdefault(str(inc_id), []).append((event_id, vault_id, file_name))\n\n    # Raw REST with container_id: the target is another container (this run's\n    # own is the Timer tick's).\n    total_artifacts = 0\n    for row in to_recheck:\n        inc_id = row[\"incident_id\"]\n        container_id = row[\"container_id\"]\n        event_info_cef = row[\"event_info_cef\"]\n\n        # Raw REST does not dedup on source_data_identifier, so skip the MIME\n        # Bodies the container already has (else every recheck adds a copy).\n        existing_mime_sdis = set()\n        try:\n            existing_resp = phantom.requests.get(\n                uri=phantom.build_phantom_rest_url(\"artifact\"),\n                params={\n                    \"_filter_container\": container_id,\n                    \"_filter_name\": '\"MIME Body\"',\n                    \"page_size\": 0,\n                },\n                verify=False,\n            ).json()\n            existing_mime_sdis = {\n                a.get(\"source_data_identifier\") for a in (existing_resp.get(\"data\") or [])\n            }\n        except Exception as e:\n            phantom.debug(\"Could not list existing MIME Body artifacts on container {}: {}\".format(container_id, str(e)))\n\n        for event_id, vault_id, file_name in mime_by_incident.get(inc_id, []):\n            if \"trap-{}-mime-{}\".format(inc_id, event_id) in existing_mime_sdis:\n                phantom.debug(\"MIME Body for incident {} event {} already on container {} -- skipping\".format(inc_id, event_id, container_id))\n                continue\n            mime_artifact = {\n                \"name\": \"MIME Body\",\n                \"source_data_identifier\": \"trap-{}-mime-{}\".format(inc_id, event_id),\n                \"label\": \"event\",\n                \"cef\": {\"vaultId\": vault_id, \"fileName\": file_name},\n                \"cef_types\": {\"vaultId\": [\"vault id\"], \"fileName\": [\"file name\"]},\n                \"container_id\": container_id,\n                \"run_automation\": False,\n                # low: an artifact at the default (medium) raises a lower\n                # container severity.\n                \"severity\": \"low\",\n            }\n            try:\n                resp = phantom.requests.post(\n                    uri=phantom.build_phantom_rest_url(\"artifact\"),\n                    data=json.dumps(mime_artifact),\n                    verify=False,\n                ).json()\n                if not (resp.get(\"success\") or resp.get(\"id\")):\n                    phantom.debug(\"Failed to create MIME Body artifact for incident {} event {}: {}\".format(inc_id, event_id, resp.get(\"message\", \"\")))\n            except Exception as e:\n                phantom.debug(\"Error creating MIME Body artifact for incident {} event {}: {}\".format(inc_id, event_id, str(e)))\n            total_artifacts += 1\n\n        sig_suffix = hashlib.sha256(json.dumps(event_info_cef, sort_keys=True).encode(\"utf-8\")).hexdigest()[:16]\n        update_cef = dict(event_info_cef)\n        update_cef[\"message\"] = \"TRAP incident {} changed since last enrichment\".format(inc_id)\n        update_artifact = {\n            \"name\": \"Event Info Update\",\n            \"source_data_identifier\": \"trap-{}-recheck-{}\".format(inc_id, sig_suffix),\n            \"label\": \"event\",\n            \"cef\": update_cef,\n            # The connector's data type for a TRAP incident id: the TRAP\n            # actions taking incident_id are offered on it from the artifact.\n            \"cef_types\": {\"incidentId\": [\"proofpoint trap incident id\"]},\n            \"container_id\": container_id,\n            \"run_automation\": True,\n            \"severity\": \"low\",  # never raise the container severity, see above\n        }\n        try:\n            resp = phantom.requests.post(\n                uri=phantom.build_phantom_rest_url(\"artifact\"),\n                data=json.dumps(update_artifact),\n                verify=False,\n            ).json()\n            if not (resp.get(\"success\") or resp.get(\"id\")):\n                phantom.debug(\"Failed to create Event Info Update for incident {}: {}\".format(inc_id, resp.get(\"message\", \"\")))\n        except Exception as e:\n            phantom.debug(\"Error creating Event Info Update for incident {}: {}\".format(inc_id, str(e)))\n        total_artifacts += 1\n\n    phantom.debug(\"Created {} artifact(s) across {} rechecked incident(s)\".format(total_artifacts, len(to_recheck)))\n\n    # Update state after the dispatch attempt (best effort: attempted, not\n    # verified).\n    try:\n        new_state = json.loads(phantom.get_run_data(key=\"process_incidents:new_state\") or \"{}\")\n        content = [[\"incident_id\", \"signature\"]] + [[k, v] for k, v in sorted(new_state.items())]\n        phantom.set_list(list_name=STATE_LIST_NAME, values=content)\n    except Exception as e:\n        phantom.debug(\"Failed to update recheck state list: {}\".format(str(e)))\n\n    ################################################################################\n",
+                    "userCode": "    ################################################################################\n\n    # The case of each incident: the container of an Event Info carrying its\n    # incidentId. A changed incident with no case keeps its old signature, so\n    # the change is still pending once on_poll has ingested it.\n    containers = {}\n    for row in phantom.collect2(container=container, datapath=[\n            \"find_cases:action_result.parameter.values\", \"find_cases:action_result.data.*.container\",\n            \"find_cases:action_result.data.*.name\"]) or []:\n        if row and row[0] and row[1] and row[2] in (\"Event Info\", \"Event Info Update\"):\n            containers.setdefault(str(row[0]), row[1])\n\n    changed = json.loads(phantom.get_run_data(key=\"process_incidents:changed\") or \"[]\")\n    new_state = json.loads(phantom.get_run_data(key=\"process_incidents:new_state\") or \"{}\")\n    tick = datetime.utcnow().strftime(\"%Y-%m-%dT%H:%M:%SZ\")\n    updates = []\n    for item in changed:\n        inc_id = item[\"incident_id\"]\n        if inc_id not in containers:\n            continue\n        new_state[inc_id] = item[\"signature\"]\n        cef = dict(item[\"event_info_cef\"])\n        cef[\"message\"] = \"TRAP incident {} changed since last enrichment\".format(inc_id)\n        # The tick time makes each update new content, so an incident that\n        # changes back to an earlier state still runs the orchestrator.\n        cef[\"recheckTime\"] = tick\n        updates.append({\"container_id\": containers[inc_id], \"cef\": cef,\n                        \"source_data_identifier\": \"trap-{}-recheck-{}\".format(inc_id, tick)})\n\n    build_updates__container_id = [u[\"container_id\"] for u in updates]\n    build_updates__cef_dictionary = [json.dumps(u[\"cef\"]) for u in updates]\n    build_updates__source_data_identifier = [u[\"source_data_identifier\"] for u in updates]\n    for key, value in ((\"container_id\", build_updates__container_id), (\"cef_dictionary\", build_updates__cef_dictionary),\n                       (\"source_data_identifier\", build_updates__source_data_identifier)):\n        phantom.save_run_data(key=\"build_updates:\" + key, value=json.dumps(value))\n    phantom.debug(\"{} Event Info Update(s) to create\".format(len(updates)))\n\n    # Saved now, for the updates about to be created (attempted, not verified).\n    content = [[\"incident_id\", \"signature\"]] + [[k, v] for k, v in sorted(new_state.items())]\n    phantom.set_list(list_name=STATE_LIST_NAME, values=content)\n\n    ################################################################################\n",
+                    "warnings": {}
+                },
+                "6": {
+                    "x": 190,
+                    "y": 750,
+                    "id": "6",
+                    "data": {
+                        "id": "6",
+                        "tab": "byConnector",
+                        "loop": {
+                            "enabled": false,
+                            "pauseUnit": "m",
+                            "conditions": [
+                                {
+                                    "type": "if",
+                                    "logic": "and",
+                                    "comparisons": [
+                                        {
+                                            "op": "==",
+                                            "param": "",
+                                            "value": "",
+                                            "comparisonKey": "comparison_key_0"
+                                        }
+                                    ],
+                                    "conditionKey": "condition_key_0",
+                                    "conditionIndex": 0
+                                }
+                            ],
+                            "pauseValue": 2,
+                            "exitAfterUnit": "m",
+                            "exitLoopAfter": 2,
+                            "exitAfterValue": 10,
+                            "exitConditionEnabled": false
+                        },
+                        "type": "action",
+                        "action": "add artifact",
+                        "advanced": {
+                            "join": [],
+                            "note": "Custom Code: one update per incident, run_automation on. Pick your SOAR (Phantom app) asset here after import.",
+                            "customName": "add event info updates",
+                            "description": "Create the Event Info Update artifacts; each starts the orchestrator on its case.",
+                            "customNameId": 0
+                        },
+                        "connector": "Phantom",
+                        "actionType": "generic",
+                        "functionId": 3,
+                        "parameters": {
+                            "name": "Event Info Update",
+                            "label": "event",
+                            "container_id": "build_updates:custom_function:container_id",
+                            "cef_dictionary": "build_updates:custom_function:cef_dictionary",
+                            "source_data_identifier": "build_updates:custom_function:source_data_identifier"
+                        },
+                        "connectorId": "deb82aa9-22cc-4675-9cf1-534b8d006eb7",
+                        "functionName": "add_event_info_updates",
+                        "connectorConfigs": [
+                            "soar8"
+                        ],
+                        "connectorVersion": "v1",
+                        "requiredParameters": [
+                            {
+                                "field": "source_data_identifier",
+                                "default": "",
+                                "data_type": "string"
+                            }
+                        ]
+                    },
+                    "type": "action",
+                    "errors": {},
+                    "userCode": "    ################################################################################\n\n    # One update per changed incident, on its own case; run_automation starts\n    # the orchestrator there. The connector's data type for a TRAP incident id\n    # lets the TRAP actions be offered on the artifact.\n    containers = json.loads(phantom.get_run_data(key=\"build_updates:container_id\") or \"null\") or []\n    cefs = json.loads(phantom.get_run_data(key=\"build_updates:cef_dictionary\") or \"null\") or []\n    sdis = json.loads(phantom.get_run_data(key=\"build_updates:source_data_identifier\") or \"null\") or []\n    parameters = [{\"name\": \"Event Info Update\", \"label\": \"event\", \"contains\": json.dumps({\"incidentId\": [\"proofpoint trap incident id\"]}),\n                   \"determine_contains\": False, \"run_automation\": True, \"container_id\": containers[i],\n                   \"cef_dictionary\": cefs[i], \"source_data_identifier\": sdis[i]} for i in range(len(sdis))]\n    if not parameters:\n        return\n\n    ################################################################################\n",
                     "warnings": {}
                 }
             },
             "notes": "",
-            "description": "Automation playbook (PB7) for label proofpoint_trap_recheck, run by its Timer asset. Finds ingested TRAP incidents that changed and adds an Event Info Update to their containers, which runs proofpoint_trap_orchestrator again.",
-            "globalCustomCode": "################################################################################\n\n\n\nimport hashlib\n\nSTATE_LIST_NAME = \"proofpoint_trap_recheck_state\"\nDEFAULT_LOOKBACK_HOURS = 168  # 7 days\n\n\ndef _get_field_value(incident, field_name):\n    for field in incident.get(\"incident_field_values\", []) or []:\n        if field.get(\"name\") == field_name:\n            return field.get(\"value\", \"\")\n    return \"\"\n\n\ndef _build_event_info_cef(incident):\n    # Same fields as the connector's _build_event_info_cef; keep both in sync.\n    inc_id = incident.get(\"id\", \"\")\n    disposition = _get_field_value(incident, \"Abuse Disposition\")\n    sub_disposition = _get_field_value(incident, \"Sub Disposition\")\n    classification = _get_field_value(incident, \"Classification\")\n    trap_severity = _get_field_value(incident, \"Severity\")\n    score = incident.get(\"score\", 0)\n    message = incident.get(\"summary\") or incident.get(\"description\") or \"\"\n    event_ids = \",\".join(str(x) for x in (incident.get(\"event_ids\") or []))\n\n    return {\n        \"abuseDisposition\": disposition,\n        \"classification\": classification,\n        \"subDisposition\": sub_disposition,\n        \"threatScore\": score,\n        \"incidentId\": str(inc_id),\n        \"eventIds\": event_ids,\n        \"trapSeverity\": trap_severity,\n        \"message\": message,\n    }\n\n\ndef _incident_signature(incident):\n    state = incident.get(\"state\", \"\")\n    event_info = _build_event_info_cef(incident)\n    payload = json.dumps({\"state\": state, \"event_info\": event_info}, sort_keys=True)\n    return hashlib.sha256(payload.encode(\"utf-8\")).hexdigest()\n################################################################################\n"
+            "description": "Automation playbook (PB9) for label proofpoint_trap_recheck, run by its Timer asset. Finds ingested TRAP incidents that changed and adds an Event Info Update to their case, which runs proofpoint_trap_orchestrator again. Never closes a case and writes no note.",
+            "globalCustomCode": "\n\n\nimport hashlib\n\nSTATE_LIST_NAME = \"proofpoint_trap_recheck_state\"\nDEFAULT_LOOKBACK_HOURS = 168  # 7 days\n\n\ndef _get_field_value(incident, field_name):\n    for field in incident.get(\"incident_field_values\", []) or []:\n        if field.get(\"name\") == field_name:\n            return field.get(\"value\", \"\")\n    return \"\"\n\n\ndef _build_event_info_cef(incident):\n    # Same fields as the connector's _build_event_info_cef; keep both in sync.\n    inc_id = incident.get(\"id\", \"\")\n    disposition = _get_field_value(incident, \"Abuse Disposition\")\n    sub_disposition = _get_field_value(incident, \"Sub Disposition\")\n    classification = _get_field_value(incident, \"Classification\")\n    trap_severity = _get_field_value(incident, \"Severity\")\n    score = incident.get(\"score\", 0)\n    message = incident.get(\"summary\") or incident.get(\"description\") or \"\"\n    event_ids = \",\".join(str(x) for x in (incident.get(\"event_ids\") or []))\n\n    return {\n        \"abuseDisposition\": disposition,\n        \"classification\": classification,\n        \"subDisposition\": sub_disposition,\n        \"threatScore\": score,\n        \"incidentId\": str(inc_id),\n        \"eventIds\": event_ids,\n        \"trapSeverity\": trap_severity,\n        \"message\": message,\n    }\n\n\ndef _incident_signature(incident):\n    state = incident.get(\"state\", \"\")\n    event_info = _build_event_info_cef(incident)\n    payload = json.dumps({\"state\": state, \"event_info\": event_info}, sort_keys=True)\n    return hashlib.sha256(payload.encode(\"utf-8\")).hexdigest()\n"
         },
         "input_spec": [],
         "output_spec": [],
@@ -275,7 +347,7 @@
         "version": "8.6.0.530",
         "playbook_trigger": "artifact_created"
     },
-    "create_time": "2026-10-13T12:03:14.483807Z",
+    "create_time": "2026-10-15T14:59:33.711717Z",
     "draft_mode": false,
     "labels": [
         "proofpoint_trap_recheck"

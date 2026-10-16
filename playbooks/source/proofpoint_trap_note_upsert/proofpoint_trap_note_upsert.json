@@ -1,0 +1,49 @@
+{
+    "name": "proofpoint_trap_note_upsert",
+    "custom_function_id": "6ae3213fae1a0b4bcece10b242c9f8a6002e7f3e",
+    "description": "Write a case note by title, updated in place: nothing when the content is unchanged, an update when it changed, a new note when none exists. Content over 20,000 characters is split into parts \"title (k/N)\"; parts left over from a longer earlier version are blanked as \"title (unused)\".",
+    "draft_mode": false,
+    "inputs": [
+        {
+            "name": "container_id",
+            "description": "Case to write the note on.",
+            "placeholder": "container:id",
+            "contains": [],
+            "required": false
+        },
+        {
+            "name": "title",
+            "description": "Note title; identifies the note on the case.",
+            "placeholder": "TRAP Summary",
+            "contains": [],
+            "required": false
+        },
+        {
+            "name": "content",
+            "description": "Note content, markdown.",
+            "placeholder": "format_note:formatted_data",
+            "contains": [],
+            "required": false
+        }
+    ],
+    "outputs": [
+        {
+            "data_path": "changed",
+            "description": "True when a note was created, updated or blanked.",
+            "contains_type": []
+        },
+        {
+            "data_path": "note_ids",
+            "description": "Ids of the notes holding the content, in part order.",
+            "contains_type": []
+        },
+        {
+            "data_path": "parts",
+            "description": "Number of notes the content takes.",
+            "contains_type": []
+        }
+    ],
+    "outputs_type": "item",
+    "platform_version": "8.6.0.530",
+    "python_version": "3.13"
+}

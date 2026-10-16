@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Air-Gapped Handover Package
 
-Generated 2026-10-13 14:01 UTC from `proofpoint_trap` (source env: `soar8`).
+Generated 2026-10-15 15:03 UTC from `proofpoint_trap` (source env: `soar8`).
 
 This package is self-contained — everything needed to deploy this use case by hand
 in an environment with no network access back to this repo or to `soar8`.
@@ -13,8 +13,8 @@ in an environment with no network access back to this repo or to `soar8`.
 |------|------|
 | `connectors/` | Connector app package(s): proofpoint_trap-v1.0.39.tgz |
 | `connectors/source/` | Same connector(s), extracted — for reading, not for import |
-| `playbooks/*.tgz` (CFs) | proofpoint_trap_extract_incident_id |
-| `playbooks/*.tgz` (PBs) | proofpoint_trap_detail, proofpoint_trap_triage, proofpoint_trap_attachments, proofpoint_trap_acknowledge, proofpoint_trap_close, proofpoint_trap_isolation_notify, proofpoint_trap_recheck, proofpoint_trap_summary, proofpoint_trap_orchestrator |
+| `playbooks/*.tgz` (CFs) | proofpoint_trap_extract_incident_id, proofpoint_trap_note_upsert, container_update |
+| `playbooks/*.tgz` (PBs) | proofpoint_trap_detail, proofpoint_trap_triage, proofpoint_trap_attachments, proofpoint_trap_acknowledge, proofpoint_trap_close, proofpoint_trap_isolation_notify, proofpoint_trap_recheck, proofpoint_trap_summary, proofpoint_trap_comment_add_link_to_soar_case, proofpoint_trap_orchestrator |
 | `playbooks/source/` | Same CFs/playbooks, extracted — for reading, not for import |
 | `assets/*.json` | Asset config templates (credentials redacted — see below) |
 | `custom_lists/*.json` | Custom lists — the rows this package defines, never the source's data rows (see the custom-list section below) |
@@ -73,6 +73,8 @@ previous package. On a completely fresh target, skip to Install order.
 
 - **Isolation notify email (2026-10-13, your feedback).** The email's first line now links directly to the SOAR case, and the case is no longer sent through the isolation browser. A threat URL already wrapped in Microsoft Safe Links (`*.safelinks.protection.outlook.com/?url=`) is unwrapped first, however many times, so its isolation link opens the real target. Each threat URL is shown defanged (`hxxps://a[.]b`) beside its link. A case with no threat URL gets a note and no email. **The isolation-browser prefix moves to a format block:** re-import `proofpoint_trap_isolation_notify` (stays inactive), open it in the editor, set your prefix as the template of the block `isolation browser url` and save — no code to edit, and `DEFAULT_ISOLATION_BROWSER_URL` is gone. **One redirect remains:** your Exchange wraps the links of the email itself in Safe Links on delivery. Only your Microsoft 365 admin can stop that: in the Safe Links policy, add the isolation-browser host and the SOAR host to *Do not rewrite the following URLs* (e.g. `https://isolation.example/*`).
 
+- **UC2 rework (2026-10-15): no duplicate notes or artifacts, one email download per alert.** Every run now handles every alert of the incident and posts only what is new; recurring notes (TRAP Detail, Email Content, Attachment Extraction, TRAP Triage - Severity, TRAP Summary) are updated in place instead of added again. What moved: `proofpoint_trap_attachments` downloads each alert's email once (the MIME Body, written last, marks the alert done; when the download fails, TRAP's own attachment list and Cc are used and upgraded by a later download); `proofpoint_trap_triage` sets severity and tags in one step, keeping your analysts' tags; the TRAP comment linking the case is a new playbook, `proofpoint_trap_comment_add_link_to_soar_case`, posted once (a `TRAP Run State` artifact records it); `proofpoint_trap_recheck` finds cases with *find artifacts*; `proofpoint_trap_close` and `proofpoint_trap_acknowledge` ask the analyst who launched them (30 minutes; an unanswered prompt does nothing; this replaces the case owner / `soar_local_admin` rule of 2026-10-12): close closes the case only once TRAP closed the incident, acknowledge still cannot assign the incident to SOAR (the connector also needs a team, so that step fails while the others run); `proofpoint_trap_isolation_notify` adds no note (the send action is the record). **To upgrade:** 1. import the two new custom functions `proofpoint_trap_note_upsert` and `container_update` (keep `proofpoint_trap_extract_incident_id`); 2. re-import every UC2 playbook, and import `proofpoint_trap_comment_add_link_to_soar_case`; 3. activate only `proofpoint_trap_orchestrator` and `proofpoint_trap_recheck`, leave all others inactive; 4. if your SOAR (Phantom app), TRAP or SMTP assets have other names, re-point the action blocks and save. Your isolation-browser prefix in the format block `isolation browser url` must be set again after the re-import.
+
 ## Install order
 
 1. **Install the connector app(s)** — Apps > Install App, upload each file in `connectors/`.
@@ -101,9 +103,9 @@ previous package. On a completely fresh target, skip to Install order.
 
    | Asset name | App | Used by | Template |
    |---|---|---|---|
-   | `proofpoint_trap_mock` | Proofpoint TRAP | `proofpoint_trap_acknowledge`, `proofpoint_trap_close`, `proofpoint_trap_detail`, `proofpoint_trap_recheck` | `assets/proofpoint_trap_mock.json` |
+   | `proofpoint_trap_mock` | Proofpoint TRAP | `proofpoint_trap_acknowledge`, `proofpoint_trap_attachments`, `proofpoint_trap_close`, `proofpoint_trap_comment_add_link_to_soar_case`, `proofpoint_trap_detail`, `proofpoint_trap_recheck` | `assets/proofpoint_trap_mock.json` |
    | `smtp` | SMTP | `proofpoint_trap_isolation_notify` | `assets/smtp.json` |
-   | `soar8` | Phantom | `proofpoint_trap_detail` | `assets/soar8.json` |
+   | `soar8` | Phantom | `proofpoint_trap_acknowledge`, `proofpoint_trap_attachments`, `proofpoint_trap_close`, `proofpoint_trap_comment_add_link_to_soar_case`, `proofpoint_trap_detail`, `proofpoint_trap_recheck` | `assets/soar8.json` |
 
 3. **Create the custom list(s)** from `custom_lists/*.json` — each file has the exact
    `content` array (the rows this package defines — never the source's data rows) to POST to `/rest/decided_list`:
@@ -116,7 +118,7 @@ previous package. On a completely fresh target, skip to Install order.
    payload directly.)
 4. **Import the custom functions, then the playbooks** (in that order — playbooks reference
    CFs). `playbooks/` holds both kinds, and each goes through its own importer:
-   - **Custom functions** — `playbooks/proofpoint_trap_extract_incident_id.tgz`: on the Custom Functions tab of the Playbooks
+   - **Custom functions** — `playbooks/proofpoint_trap_extract_incident_id.tgz`, `playbooks/proofpoint_trap_note_upsert.tgz`, `playbooks/container_update.tgz`: on the Custom Functions tab of the Playbooks
      page, the upload button whose tooltip reads *Import Custom Function*. The playbook
      importer rejects a CF archive ("failed to identify the import as a playbook").
      If the CF shows as a draft afterwards, open it in the editor and save it.
@@ -125,7 +127,7 @@ previous package. On a completely fresh target, skip to Install order.
    the GUI needs the `.tgz`.)
 5. **Activate automation playbooks** (`proofpoint_trap_recheck`, `proofpoint_trap_orchestrator`) and set their **Run As** user per the
    implementation plan doc's Setup Guide (see `docs/`).
-   **Leave these inactive:** `proofpoint_trap_detail`, `proofpoint_trap_triage`, `proofpoint_trap_attachments`, `proofpoint_trap_summary` — an orchestrator playbook above calls them one after
+   **Leave these inactive:** `proofpoint_trap_detail`, `proofpoint_trap_triage`, `proofpoint_trap_attachments`, `proofpoint_trap_summary`, `proofpoint_trap_comment_add_link_to_soar_case` — an orchestrator playbook above calls them one after
    another; active, they would also start on their own, alongside it. Deactivate them if an
    earlier package had them active.
    **Leave these inactive too:** `proofpoint_trap_acknowledge`, `proofpoint_trap_close`, `proofpoint_trap_isolation_notify` — an analyst runs each one from a case with

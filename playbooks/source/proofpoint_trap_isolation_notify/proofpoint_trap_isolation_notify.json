@@ -4,7 +4,7 @@
     "category": "Email Abuse",
     "coa": {
         "data": {
-            "hash": "84b1e4f76b9c34a90a68e23b16db677d0b287d21",
+            "hash": "6faedc0988fe7af5405dbf28e68234fbee82db7e",
             "edges": [
                 {
                     "id": "port_0_to_port_2",
@@ -14,16 +14,9 @@
                     "targetPort": "2_in"
                 },
                 {
-                    "id": "port_2_to_port_3",
+                    "id": "port_2_to_port_7",
                     "sourceNode": "2",
                     "sourcePort": "2_out",
-                    "targetNode": "3",
-                    "targetPort": "3_in"
-                },
-                {
-                    "id": "port_3_to_port_7",
-                    "sourceNode": "3",
-                    "sourcePort": "3_out",
                     "targetNode": "7",
                     "targetPort": "7_in"
                 },
@@ -42,16 +35,9 @@
                     "targetPort": "5_in"
                 },
                 {
-                    "id": "port_5_to_port_6",
+                    "id": "port_5_to_port_1",
                     "sourceNode": "5",
                     "sourcePort": "5_out",
-                    "targetNode": "6",
-                    "targetPort": "6_in"
-                },
-                {
-                    "id": "port_6_to_port_1",
-                    "sourceNode": "6",
-                    "sourcePort": "6_out",
                     "targetNode": "1",
                     "targetPort": "1_in"
                 }
@@ -75,7 +61,7 @@
                 },
                 "1": {
                     "x": 920,
-                    "y": 1310,
+                    "y": 750,
                     "id": "1",
                     "data": {
                         "id": "1",
@@ -88,7 +74,7 @@
                     },
                     "type": "end",
                     "errors": {},
-                    "userCode": "    ################################################################################\n    ################################################################################\n\n    # Populate the generated `output` dict; the save after Custom Code End emits it.\n    # No block recorded an outcome (e.g. the run stopped early): report failed.\n    raw_output = phantom.get_run_data(key=\"playbook_output\")\n    if raw_output:\n        output.update(json.loads(raw_output))\n    # The 8.6 VPE initialises every output above to [] (8.5 wrote None), so an\n    # output no block set is normalised to null here, whichever form a save wrote.\n    for key, value in output.items():\n        if value == []:\n            output[key] = None\n    if output[\"status\"] is None:\n        output[\"status\"] = \"failed\"\n\n    ################################################################################\n    ################################################################################\n",
+                    "userCode": "    ################################################################################\n\n    # Populate the generated `output` dict; the save after Custom Code End emits\n    # it. status follows the send action's result: success only when it sent.\n    raw_output = phantom.get_run_data(key=\"playbook_output\")\n    if raw_output:\n        output.update(json.loads(raw_output))\n    sent = phantom.collect2(container=container, datapath=[\"send_isolation_email:action_result.status\"])\n    if sent and sent[0] and sent[0][0]:\n        output[\"status\"] = \"success\" if sent[0][0] == \"success\" else \"failed\"\n    # The 8.6 VPE initialises every output above to [] (8.5 wrote None), so an\n    # output no block set is normalised to null here, whichever form a save wrote.\n    for key, value in output.items():\n        if value == []:\n            output[key] = None\n    if output[\"status\"] is None:\n        output[\"status\"] = \"failed\"\n\n    ################################################################################\n",
                     "warnings": {}
                 },
                 "2": {
@@ -154,37 +140,9 @@
                     "errors": {},
                     "warnings": {}
                 },
-                "3": {
-                    "x": 900,
-                    "y": 496,
-                    "id": "3",
-                    "data": {
-                        "id": "3",
-                        "type": "code",
-                        "advanced": {
-                            "join": [],
-                            "note": "Reads incident_id from the extract_incident_id CF result.",
-                            "customName": "read incident id",
-                            "description": "Read the incident ID from the custom function result.",
-                            "customNameId": 0
-                        },
-                        "functionId": 2,
-                        "functionName": "read_incident_id",
-                        "inputParameters": [
-                            "extract_incident_id:custom_function_result.data.incident_id"
-                        ],
-                        "outputVariables": [
-                            "incident_id"
-                        ]
-                    },
-                    "type": "code",
-                    "errors": {},
-                    "userCode": "    ################################################################################\n    ################################################################################\n\n\n    result_rows = phantom.collect2(\n        container=container,\n        datapath=[\"extract_incident_id:custom_function_result.data.incident_id\"],\n    )\n    incident_id_val = result_rows[0][0] if result_rows else None\n\n    if not incident_id_val:\n        phantom.error(\"Could not find Incident ID (cef.incidentId) on the 'Event Info' artifact\")\n        phantom.add_note(\n            container=container,\n            note_type=\"general\",\n            title=\"TRAP Isolation Notify - Error\",\n            content=\"Could not find Incident ID on the 'Event Info' artifact\"\n        )\n        return\n\n    read_incident_id__incident_id = str(incident_id_val)\n    phantom.debug(\"Extracted incident ID: {}\".format(read_incident_id__incident_id))\n\n    # Also saved as run data: later blocks read this key in their own Custom Code.\n    phantom.save_run_data(key=\"read_incident_id:incident_id\", value=json.dumps(read_incident_id__incident_id))\n\n    # Playbook outputs, read by on_finish (status stays failed until the email is sent).\n    playbook_output = {\"status\": \"failed\", \"incident_id\": read_incident_id__incident_id}\n    phantom.save_run_data(key=\"playbook_output\", value=json.dumps(playbook_output))\n\n    ################################################################################\n    ################################################################################\n",
-                    "warnings": {}
-                },
                 "4": {
-                    "x": 900,
-                    "y": 821,
+                    "x": 190,
+                    "y": 450,
                     "id": "4",
                     "data": {
                         "id": "4",
@@ -192,15 +150,13 @@
                         "advanced": {
                             "join": [],
                             "note": "No email unless the container has an owner with an email address and status open.",
-                            "customName": "resolve recipient and build links",
+                            "customName": "build links",
                             "description": "Check owner and status, find the owner email, build the isolation links.",
                             "customNameId": 0
                         },
                         "functionId": 3,
-                        "functionName": "resolve_recipient_and_build_links",
-                        "inputParameters": [
-                            "read_incident_id:custom_function:incident_id"
-                        ],
+                        "functionName": "build_links",
+                        "inputParameters": [],
                         "outputVariables": [
                             "recipient_email",
                             "subject",
@@ -209,12 +165,12 @@
                     },
                     "type": "code",
                     "errors": {},
-                    "userCode": "    ################################################################################\n    ################################################################################\n\n\n    incident_id = json.loads(phantom.get_run_data(key=\"read_incident_id:incident_id\") or '\"\"')\n\n    owner_id = container.get(\"owner\")\n    status = container.get(\"status\")\n\n    if not owner_id or status != \"open\":\n        msg = (\n            \"Container has no assigned owner or is not status 'open' \"\n            \"(owner={}, status={}) -- self-assign this container as owner \"\n            \"and set its status to Open in the SOAR UI first, so a real \"\n            \"recipient can be resolved.\".format(owner_id, status)\n        )\n        phantom.error(msg)\n        phantom.add_note(\n            container=container,\n            note_type=\"general\",\n            title=\"TRAP Isolation Notify - Error\",\n            content=msg\n        )\n        return\n\n    # Inside a playbook container['owner'] is the username, not the numeric id\n    # REST shows: look the user up by username.\n    try:\n        resp = phantom.requests.get(\n            uri=phantom.build_phantom_rest_url(\"ph_user\") + '?_filter_username=\"{}\"&page_size=1'.format(owner_id),\n            verify=False,\n        ).json()\n        rows = resp.get(\"data\") or []\n        recipient_email = rows[0].get(\"email\") if rows else None\n    except Exception as e:\n        recipient_email = None\n        phantom.debug(\"Could not fetch ph_user for owner '{}': {}\".format(owner_id, str(e)))\n\n    if not recipient_email:\n        msg = \"Could not resolve an email address for owner user id {}\".format(owner_id)\n        phantom.error(msg)\n        phantom.add_note(\n            container=container,\n            note_type=\"general\",\n            title=\"TRAP Isolation Notify - Error\",\n            content=msg\n        )\n        return\n\n    # The prefix lives in the format block isolation_browser_url, where an\n    # operator sets it without touching code.\n    browser_prefix = (phantom.get_format_data(name=\"isolation_browser_url\") or \"\").strip()\n    if not browser_prefix:\n        msg = \"The isolation-browser prefix is empty: set it in the format block 'isolation browser url'.\"\n        phantom.error(msg)\n        phantom.add_note(\n            container=container,\n            note_type=\"general\",\n            title=\"TRAP Isolation Notify - Error\",\n            content=msg\n        )\n        return\n\n    # Threat Domain artifacts are the only ones with cef.url set -- collect\n    # across the whole container (scope=\"all\", required when re-running on\n    # an existing container per constraints.md) and drop the Nones instead\n    # of also fetching artifact:*.name to filter by. A URL the mail system\n    # already wrapped in Safe Links is unwrapped first, or the isolation\n    # browser would go through Safe Links before reaching it.\n    url_rows = phantom.collect2(container=container, datapath=[\"artifact:*.cef.url\"], scope=\"all\")\n    threat_urls = sorted({_unwrap_safelinks(row[0]) for row in url_rows if row and row[0]}) if url_rows else []\n\n    if not threat_urls:\n        phantom.add_note(\n            container=container,\n            note_type=\"general\",\n            title=\"TRAP Isolation Notify\",\n            content=\"No threat URL on this case: no email sent.\",\n            note_format=\"markdown\",\n        )\n        playbook_output = json.loads(phantom.get_run_data(key=\"playbook_output\") or \"{}\")\n        playbook_output.update({\"status\": \"skipped\", \"recipient_email\": recipient_email, \"link_count\": 0})\n        phantom.save_run_data(key=\"playbook_output\", value=json.dumps(playbook_output))\n        return\n\n    # The case link is direct: it is SOAR's own page, not a target to isolate.\n    soar_base = phantom.get_base_url() or \"\"\n    container_url = \"{}/mission/{}\".format(soar_base, container.get(\"id\"))\n\n    targets = [(\"Threat URL\", u) for u in threat_urls]\n    link_items = [\n        '<li>{}: <code>{}</code> &mdash; <a href=\"{}\">open in the isolation browser</a></li>'.format(\n            label, html.escape(_defang(target)),\n            html.escape(browser_prefix + urllib.parse.quote(target, safe=\"\"), quote=True))\n        for label, target in targets\n    ]\n\n    resolve_recipient_and_build_links__recipient_email = recipient_email\n    resolve_recipient_and_build_links__subject = \"TRAP Incident {} - Isolation Browser Links\".format(incident_id or \"unknown\")\n    # Must start with <html>: the SMTP app sends HTML (plus a text copy) only then.\n    # The line breaks are what the app's text copy keeps as lines.\n    resolve_recipient_and_build_links__body = (\n        \"<html><body>\\n\"\n        '<p>Isolation-browser links for <a href=\"{}\">TRAP incident {}</a>.</p>\\n'\n        \"<p>Open these instead of the raw URLs -- each opens in a sandboxed \"\n        \"browser rather than directly:</p>\\n\"\n        \"<ul>\\n{}\\n</ul>\\n\"\n        \"</body></html>\"\n    ).format(html.escape(container_url, quote=True), html.escape(str(incident_id or \"unknown\")), \"\\n\".join(link_items))\n\n    phantom.debug(\"Resolved recipient {}, {} link(s)\".format(recipient_email, len(targets)))\n\n    # Also saved as run data: send_isolation_email and add_isolation_note read\n    # these keys in their own Custom Code (link_count is not a block output).\n    phantom.save_run_data(key=\"resolve_recipient_and_build_links:recipient_email\", value=json.dumps(resolve_recipient_and_build_links__recipient_email))\n    phantom.save_run_data(key=\"resolve_recipient_and_build_links:subject\", value=json.dumps(resolve_recipient_and_build_links__subject))\n    phantom.save_run_data(key=\"resolve_recipient_and_build_links:body\", value=json.dumps(resolve_recipient_and_build_links__body))\n    phantom.save_run_data(key=\"resolve_recipient_and_build_links:link_count\", value=str(len(targets)))\n    # The links themselves, for the container note (add_isolation_note).\n    phantom.save_run_data(key=\"resolve_recipient_and_build_links:links\", value=json.dumps([\n        [label, target, \"{}{}\".format(browser_prefix, urllib.parse.quote(target, safe=\"\"))]\n        for label, target in targets\n    ]))\n\n    playbook_output = json.loads(phantom.get_run_data(key=\"playbook_output\") or \"{}\")\n    playbook_output.update({\"recipient_email\": recipient_email, \"link_count\": len(targets)})\n    phantom.save_run_data(key=\"playbook_output\", value=json.dumps(playbook_output))\n\n    ################################################################################\n    ################################################################################\n",
+                    "userCode": "    ################################################################################\n\n\n    rows = phantom.collect2(container=container, datapath=[\"extract_incident_id:custom_function_result.data.incident_id\"])\n    incident_id = str(rows[0][0]) if rows and rows[0] and rows[0][0] else \"\"\n    phantom.save_run_data(key=\"playbook_output\", value=json.dumps({\"status\": \"failed\", \"incident_id\": incident_id}))\n\n    owner_id = container.get(\"owner\")\n    status = container.get(\"status\")\n\n    if not owner_id or status != \"open\":\n        msg = (\n            \"Container has no assigned owner or is not status 'open' \"\n            \"(owner={}, status={}) -- self-assign this container as owner \"\n            \"and set its status to Open in the SOAR UI first, so a real \"\n            \"recipient can be resolved.\".format(owner_id, status)\n        )\n        phantom.error(msg)\n        phantom.add_note(\n            container=container,\n            note_type=\"general\",\n            title=\"TRAP Isolation Notify - Error\",\n            content=msg\n        )\n        return\n\n    # Inside a playbook container['owner'] is the username, not the numeric id\n    # REST shows: look the user up by username.\n    try:\n        resp = phantom.requests.get(\n            uri=phantom.build_phantom_rest_url(\"ph_user\") + '?_filter_username=\"{}\"&page_size=1'.format(owner_id),\n            verify=False,\n        ).json()\n        rows = resp.get(\"data\") or []\n        recipient_email = rows[0].get(\"email\") if rows else None\n    except Exception as e:\n        recipient_email = None\n        phantom.debug(\"Could not fetch ph_user for owner '{}': {}\".format(owner_id, str(e)))\n\n    if not recipient_email:\n        msg = \"Could not resolve an email address for owner user id {}\".format(owner_id)\n        phantom.error(msg)\n        phantom.add_note(\n            container=container,\n            note_type=\"general\",\n            title=\"TRAP Isolation Notify - Error\",\n            content=msg\n        )\n        return\n\n    # The prefix lives in the format block isolation_browser_url, where an\n    # operator sets it without touching code.\n    browser_prefix = (phantom.get_format_data(name=\"isolation_browser_url\") or \"\").strip()\n    if not browser_prefix:\n        msg = \"The isolation-browser prefix is empty: set it in the format block 'isolation browser url'.\"\n        phantom.error(msg)\n        phantom.add_note(\n            container=container,\n            note_type=\"general\",\n            title=\"TRAP Isolation Notify - Error\",\n            content=msg\n        )\n        return\n\n    # Threat Domain artifacts are the only ones with cef.url set -- collect\n    # across the whole container (scope=\"all\", required when re-running on\n    # an existing container per constraints.md) and drop the Nones instead\n    # of also fetching artifact:*.name to filter by. A URL the mail system\n    # already wrapped in Safe Links is unwrapped first, or the isolation\n    # browser would go through Safe Links before reaching it.\n    url_rows = phantom.collect2(container=container, datapath=[\"artifact:*.cef.url\"], scope=\"all\")\n    threat_urls = sorted({_unwrap_safelinks(row[0]) for row in url_rows if row and row[0]}) if url_rows else []\n\n    if not threat_urls:\n        phantom.add_note(\n            container=container,\n            note_type=\"general\",\n            title=\"TRAP Isolation Notify\",\n            content=\"No threat URL on this case: no email sent.\",\n            note_format=\"markdown\",\n        )\n        playbook_output = json.loads(phantom.get_run_data(key=\"playbook_output\") or \"{}\")\n        playbook_output.update({\"status\": \"skipped\", \"recipient_email\": recipient_email, \"link_count\": 0})\n        phantom.save_run_data(key=\"playbook_output\", value=json.dumps(playbook_output))\n        return\n\n    # The case link is direct: it is SOAR's own page, not a target to isolate.\n    soar_base = phantom.get_base_url() or \"\"\n    container_url = \"{}/mission/{}\".format(soar_base, container.get(\"id\"))\n\n    targets = [(\"Threat URL\", u) for u in threat_urls]\n    link_items = [\n        '<li>{}: <code>{}</code> &mdash; <a href=\"{}\">open in the isolation browser</a></li>'.format(\n            label, html.escape(_defang(target)),\n            html.escape(browser_prefix + urllib.parse.quote(target, safe=\"\"), quote=True))\n        for label, target in targets\n    ]\n\n    build_links__recipient_email = recipient_email\n    build_links__subject = \"TRAP Incident {} - Isolation Browser Links\".format(incident_id or \"unknown\")\n    # Must start with <html>: the SMTP app sends HTML (plus a text copy) only then.\n    # The line breaks are what the app's text copy keeps as lines.\n    build_links__body = (\n        \"<html><body>\\n\"\n        '<p>Isolation-browser links for <a href=\"{}\">TRAP incident {}</a>.</p>\\n'\n        \"<p>Open these instead of the raw URLs -- each opens in a sandboxed \"\n        \"browser rather than directly:</p>\\n\"\n        \"<ul>\\n{}\\n</ul>\\n\"\n        \"</body></html>\"\n    ).format(html.escape(container_url, quote=True), html.escape(str(incident_id or \"unknown\")), \"\\n\".join(link_items))\n\n    phantom.debug(\"Resolved recipient {}, {} link(s)\".format(recipient_email, len(targets)))\n\n    # Also saved as run data: send_isolation_email reads these keys.\n    phantom.save_run_data(key=\"build_links:recipient_email\", value=json.dumps(build_links__recipient_email))\n    phantom.save_run_data(key=\"build_links:subject\", value=json.dumps(build_links__subject))\n    phantom.save_run_data(key=\"build_links:body\", value=json.dumps(build_links__body))\n\n    playbook_output = json.loads(phantom.get_run_data(key=\"playbook_output\") or \"{}\")\n    playbook_output.update({\"recipient_email\": recipient_email, \"link_count\": len(targets)})\n    phantom.save_run_data(key=\"playbook_output\", value=json.dumps(playbook_output))\n\n    ################################################################################\n    ################################################################################\n    ################################################################################\n",
                     "warnings": {}
                 },
                 "5": {
-                    "x": 900,
-                    "y": 1014,
+                    "x": 190,
+                    "y": 600,
                     "id": "5",
                     "data": {
                         "id": "5",
@@ -249,16 +205,16 @@
                         "advanced": {
                             "join": [],
                             "customName": "send isolation email",
-                            "description": "Send the isolation-link email.",
+                            "description": "Send the isolation-link email; its result is the record on the case.",
                             "customNameId": 0
                         },
                         "connector": "SMTP",
                         "actionType": "generic",
                         "functionId": 4,
                         "parameters": {
-                            "to": "resolve_recipient_and_build_links:custom_function:recipient_email",
-                            "body": "resolve_recipient_and_build_links:custom_function:body",
-                            "subject": "resolve_recipient_and_build_links:custom_function:subject"
+                            "to": "build_links:custom_function:recipient_email",
+                            "body": "build_links:custom_function:body",
+                            "subject": "build_links:custom_function:subject"
                         },
                         "connectorId": "45bb6f37-4478-499b-b4a3-51ecfa62b78c",
                         "functionName": "send_isolation_email",
@@ -281,40 +237,12 @@
                     },
                     "type": "action",
                     "errors": {},
-                    "userCode": "    ################################################################################\n\n    # Built from the run data resolve_recipient_and_build_links saved, so the\n    # send does not depend on how the VPE names its generated variables.\n    parameters = [{\n        \"to\": json.loads(phantom.get_run_data(key=\"resolve_recipient_and_build_links:recipient_email\") or \"null\"),\n        \"subject\": json.loads(phantom.get_run_data(key=\"resolve_recipient_and_build_links:subject\") or \"null\"),\n        \"body\": json.loads(phantom.get_run_data(key=\"resolve_recipient_and_build_links:body\") or \"null\"),\n    }]\n\n    ################################################################################\n",
-                    "warnings": {}
-                },
-                "6": {
-                    "x": 900,
-                    "y": 1162,
-                    "id": "6",
-                    "data": {
-                        "id": "6",
-                        "type": "code",
-                        "advanced": {
-                            "join": [],
-                            "customName": "add isolation note",
-                            "description": "Add a summary note recording who the links were sent to and whether the send succeeded.",
-                            "customNameId": 0
-                        },
-                        "functionId": 5,
-                        "functionName": "add_isolation_note",
-                        "inputParameters": [
-                            "read_incident_id:custom_function:incident_id",
-                            "resolve_recipient_and_build_links:custom_function:recipient_email",
-                            "send_isolation_email:action_result.status",
-                            "send_isolation_email:action_result.message"
-                        ],
-                        "outputVariables": []
-                    },
-                    "type": "code",
-                    "errors": {},
-                    "userCode": "    ################################################################################\n    ################################################################################\n\n    incident_id = json.loads(phantom.get_run_data(key=\"read_incident_id:incident_id\") or '\"\"')\n    recipient_email = json.loads(phantom.get_run_data(key=\"resolve_recipient_and_build_links:recipient_email\") or 'null')\n    link_count = phantom.get_run_data(key=\"resolve_recipient_and_build_links:link_count\") or \"0\"\n\n    # The send is dispatched unconditionally, so a missing action_result is a\n    # failure, not a skipped step: when SOAR refuses to dispatch an action (a\n    # manifest-required parameter missing) no app_run is created and collect2\n    # finds nothing, while the playbook run records the attempt as failed.\n    send_data = phantom.collect2(container=container, datapath=[\"send_isolation_email:action_result.status\", \"send_isolation_email:action_result.message\"])\n    send_status = send_data[0][0] if send_data and send_data[0][0] else \"failed - not dispatched (reason in the playbook run's actions)\"\n    send_message = send_data[0][1] if send_data and len(send_data[0]) > 1 and send_data[0][1] else \"\"\n\n    playbook_output = json.loads(phantom.get_run_data(key=\"playbook_output\") or \"{}\")\n    playbook_output[\"status\"] = \"success\" if send_status == \"success\" else \"failed\"\n    phantom.save_run_data(key=\"playbook_output\", value=json.dumps(playbook_output))\n\n    note_lines = [\n        \"# TRAP Isolation Notify\",\n        \"**Incident ID:** {}\".format(incident_id),\n        \"**Recipient:** {}\".format(recipient_email),\n        \"**Links sent:** {}\".format(link_count),\n        \"**Send status:** {}\".format(send_status),\n        \"**Send message:** {}\".format(send_message),\n    ]\n    # The same links the email carries. Only the isolation-browser link is\n    # clickable; the target (a threat URL) is shown as code so it cannot be\n    # clicked directly.\n    links = json.loads(phantom.get_run_data(key=\"resolve_recipient_and_build_links:links\") or \"[]\")\n    if links:\n        note_lines += [\"\", \"## Isolation-browser links\", \"\"]\n        note_lines += [\"- **{}** `{}` \u2014 [open in the isolation browser]({})\".format(\n            label, str(target).replace(\"`\", \"'\"), isolation_link) for label, target, isolation_link in links]\n\n    for part_title, part_content in _note_parts(\"TRAP Isolation Notify\", \"\\n\".join(note_lines)):\n        phantom.add_note(\n            container=container,\n            note_type=\"general\",\n            title=part_title,\n            content=part_content,\n            note_format=\"markdown\",  # the content is markdown; add_note() defaults to html\n        )\n\n    phantom.debug(\"Isolation notify note added\")\n\n    ################################################################################\n    ################################################################################\n",
+                    "userCode": "    ################################################################################\n\n    # Built from the run data build_links saved, so the send does not depend\n    # on how the VPE names its generated variables.\n    parameters = [{\n        \"to\": json.loads(phantom.get_run_data(key=\"build_links:recipient_email\") or \"null\"),\n        \"subject\": json.loads(phantom.get_run_data(key=\"build_links:subject\") or \"null\"),\n        \"body\": json.loads(phantom.get_run_data(key=\"build_links:body\") or \"null\"),\n    }]\n\n    ################################################################################\n",
                     "warnings": {}
                 },
                 "7": {
-                    "x": 900,
-                    "y": 673,
+                    "x": 190,
+                    "y": 300,
                     "id": "7",
                     "data": {
                         "id": "7",
@@ -336,8 +264,8 @@
                 }
             },
             "notes": "",
-            "description": "Automation playbook (PB6), kept inactive: an analyst runs it from the case with Run Playbook. Emails the container owner isolation-browser links for the case URL and every threat URL, and lists them in a note.",
-            "globalCustomCode": "################################################################################\n\n\n\nimport html\nimport urllib.parse\n\n# The target SOAR shows at most about 22,000 characters of a note, so no note\n# is posted longer than this; a longer one is split by _note_parts().\n_NOTE_MAX_CHARS = 20000\n\n\ndef _unwrap_safelinks(url):\n    \"\"\"The URL behind Microsoft Safe Links (<region>.safelinks.protection.outlook.com/?url=<encoded>),\n    unwrapped as many times as it was wrapped; any other URL is returned unchanged.\"\"\"\n    for _ in range(5):\n        parts = urllib.parse.urlsplit(url)\n        if not (parts.hostname or \"\").lower().endswith(\".safelinks.protection.outlook.com\"):\n            break\n        inner = urllib.parse.parse_qs(parts.query).get(\"url\")\n        if not inner or not inner[0]:\n            break\n        url = inner[0]\n    return url\n\n\ndef _defang(url):\n    \"\"\"A URL shown as text that no mail client turns into a link.\"\"\"\n    return url.replace(\"http\", \"hxxp\", 1).replace(\".\", \"[.]\")\n\n\ndef _note_parts(title, content, limit=_NOTE_MAX_CHARS):\n    \"\"\"[(title, content)] for one note, or numbered parts \"title (k/N)\" cut at\n    line boundaries when content is longer than limit. A line longer than the\n    limit is cut inside itself. Parts after the first open with a heading.\"\"\"\n    if len(content) <= limit:\n        return [(title, content)]\n    budget = limit - 300  # room for the heading added to later parts\n    chunks, current, size = [], [], 0\n    for line in content.split(\"\\n\"):\n        for piece in [line[i:i + budget] for i in range(0, len(line), budget)] or [\"\"]:\n            if current and size + len(piece) + 1 > budget:\n                chunks.append(\"\\n\".join(current))\n                current, size = [], 0\n            current.append(piece)\n            size += len(piece) + 1\n    if current:\n        chunks.append(\"\\n\".join(current))\n    total = len(chunks)\n    return [(\"{} ({}/{})\".format(title, n, total),\n             chunk if n == 1 else \"# {} ({}/{}, continued)\\n\\n{}\".format(title, n, total, chunk))\n            for n, chunk in enumerate(chunks, 1)]\n################################################################################\n"
+            "description": "Automation playbook (PB5), kept inactive: an analyst runs it from the case with Run Playbook. Emails the case owner one isolation-browser link per threat URL on the case; the send action's result is the record on the case.",
+            "globalCustomCode": "################################################################################\n\n\n\nimport html\nimport urllib.parse\n\ndef _unwrap_safelinks(url):\n    \"\"\"The URL behind Microsoft Safe Links (<region>.safelinks.protection.outlook.com/?url=<encoded>),\n    unwrapped as many times as it was wrapped; any other URL is returned unchanged.\"\"\"\n    for _ in range(5):\n        parts = urllib.parse.urlsplit(url)\n        if not (parts.hostname or \"\").lower().endswith(\".safelinks.protection.outlook.com\"):\n            break\n        inner = urllib.parse.parse_qs(parts.query).get(\"url\")\n        if not inner or not inner[0]:\n            break\n        url = inner[0]\n    return url\n\n\ndef _defang(url):\n    \"\"\"A URL shown as text that no mail client turns into a link.\"\"\"\n    return url.replace(\"http\", \"hxxp\", 1).replace(\".\", \"[.]\")\n"
         },
         "input_spec": [],
         "output_spec": [
@@ -380,7 +308,7 @@
         "version": "8.6.0.530",
         "playbook_trigger": "artifact_created"
     },
-    "create_time": "2026-10-13T12:03:11.337680Z",
+    "create_time": "2026-10-15T14:59:30.768061Z",
     "draft_mode": false,
     "labels": [
         "proofpoint_trap"

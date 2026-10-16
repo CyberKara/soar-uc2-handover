@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Paquet de transfert (déploiement air-gapped)
 
-Généré le 2026-10-13 14:01 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
+Généré le 2026-10-15 15:03 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
 
 Ce paquet est autonome — tout ce qu'il faut pour déployer ce cas d'usage manuellement
 dans un environnement sans accès réseau vers ce dépôt ni vers `soar8`.
@@ -13,8 +13,8 @@ dans un environnement sans accès réseau vers ce dépôt ni vers `soar8`.
 |--------|---------|
 | `connectors/` | Paquet(s) applicatif(s) connecteur : proofpoint_trap-v1.0.39.tgz |
 | `connectors/source/` | Même(s) connecteur(s), extrait(s) — pour lecture, pas pour import |
-| `playbooks/*.tgz` (CF) | proofpoint_trap_extract_incident_id |
-| `playbooks/*.tgz` (PB) | proofpoint_trap_detail, proofpoint_trap_triage, proofpoint_trap_attachments, proofpoint_trap_acknowledge, proofpoint_trap_close, proofpoint_trap_isolation_notify, proofpoint_trap_recheck, proofpoint_trap_summary, proofpoint_trap_orchestrator |
+| `playbooks/*.tgz` (CF) | proofpoint_trap_extract_incident_id, proofpoint_trap_note_upsert, container_update |
+| `playbooks/*.tgz` (PB) | proofpoint_trap_detail, proofpoint_trap_triage, proofpoint_trap_attachments, proofpoint_trap_acknowledge, proofpoint_trap_close, proofpoint_trap_isolation_notify, proofpoint_trap_recheck, proofpoint_trap_summary, proofpoint_trap_comment_add_link_to_soar_case, proofpoint_trap_orchestrator |
 | `playbooks/source/` | Mêmes CF/playbooks, extraits — pour lecture, pas pour import |
 | `assets/*.json` | Modèles de configuration d'assets (identifiants masqués — voir ci-dessous) |
 | `custom_lists/*.json` | Liste(s) personnalisée(s) — les lignes définies par ce paquet, jamais les lignes de données de la source (voir la section dédiée ci-dessous) |
@@ -74,6 +74,8 @@ d'installation.
 
 - **E-mail d'isolation notify (2026-10-13, vos retours).** La première ligne de l'e-mail pointe désormais directement vers le cas SOAR, et le cas ne passe plus par le navigateur d'isolation. Une URL de menace déjà enveloppée par Microsoft Safe Links (`*.safelinks.protection.outlook.com/?url=`) est d'abord dépliée, autant de fois que nécessaire, pour que son lien d'isolation ouvre la vraie cible. Chaque URL de menace est affichée neutralisée (`hxxps://a[.]b`) à côté de son lien. Un cas sans URL de menace reçoit une note et aucun e-mail. **Le préfixe du navigateur d'isolation passe dans un bloc format :** réimportez `proofpoint_trap_isolation_notify` (reste inactif), ouvrez-le dans l'éditeur, mettez votre préfixe comme modèle du bloc `isolation browser url` et enregistrez — aucun code à modifier, et `DEFAULT_ISOLATION_BROWSER_URL` disparaît. **Une redirection reste :** votre Exchange enveloppe les liens de l'e-mail lui-même dans Safe Links à la réception. Seul votre administrateur Microsoft 365 peut l'éviter : dans la stratégie Safe Links, ajoutez l'hôte du navigateur d'isolation et celui de SOAR à *Do not rewrite the following URLs* (p. ex. `https://isolation.example/*`).
 
+- **Refonte UC2 (2026-10-15) : plus de notes ni d'artefacts en double, un téléchargement d'e-mail par alerte.** Chaque exécution traite toutes les alertes de l'incident et ne publie que ce qui est nouveau ; les notes récurrentes (TRAP Detail, Email Content, Attachment Extraction, TRAP Triage - Severity, TRAP Summary) sont mises à jour sur place au lieu d'être ajoutées à nouveau. Ce qui change : `proofpoint_trap_attachments` télécharge l'e-mail de chaque alerte une seule fois (le MIME Body, écrit en dernier, marque l'alerte comme traitée ; si le téléchargement échoue, la liste de pièces jointes et le Cc de TRAP sont utilisés, puis complétés par un téléchargement ultérieur) ; `proofpoint_trap_triage` fixe sévérité et tags en une étape, en gardant les tags de vos analystes ; le commentaire TRAP qui pointe vers le cas est un nouveau playbook, `proofpoint_trap_comment_add_link_to_soar_case`, publié une seule fois (un artefact `TRAP Run State` l'enregistre) ; `proofpoint_trap_recheck` retrouve les cas avec *find artifacts* ; `proofpoint_trap_close` et `proofpoint_trap_acknowledge` interrogent l'analyste qui les a lancés (30 minutes ; un prompt sans réponse ne fait rien ; cela remplace la règle propriétaire du cas / `soar_local_admin` du 2026-10-12) : close ne ferme le cas qu'une fois l'incident fermé dans TRAP, acknowledge ne peut toujours pas assigner l'incident à SOAR (le connecteur exige aussi une équipe : cette étape échoue, les autres s'exécutent) ; `proofpoint_trap_isolation_notify` n'ajoute plus de note (l'action d'envoi fait foi). **Pour mettre à jour :** 1. importez les deux nouvelles custom functions `proofpoint_trap_note_upsert` et `container_update` (gardez `proofpoint_trap_extract_incident_id`) ; 2. réimportez tous les playbooks UC2, et importez `proofpoint_trap_comment_add_link_to_soar_case` ; 3. activez uniquement `proofpoint_trap_orchestrator` et `proofpoint_trap_recheck`, laissez tous les autres inactifs ; 4. si vos assets SOAR (app Phantom), TRAP ou SMTP portent d'autres noms, refaites pointer les blocs d'action et enregistrez. Votre préfixe du navigateur d'isolation dans le bloc format `isolation browser url` est à redéfinir après la réimportation.
+
 ## Ordre d'installation
 
 1. **Installer l'application/les applications connecteur** — Apps > Install App, charger
@@ -106,9 +108,9 @@ d'installation.
 
    | Nom de l'asset | Application | Utilisé par | Modèle |
    |---|---|---|---|
-   | `proofpoint_trap_mock` | Proofpoint TRAP | `proofpoint_trap_acknowledge`, `proofpoint_trap_close`, `proofpoint_trap_detail`, `proofpoint_trap_recheck` | `assets/proofpoint_trap_mock.json` |
+   | `proofpoint_trap_mock` | Proofpoint TRAP | `proofpoint_trap_acknowledge`, `proofpoint_trap_attachments`, `proofpoint_trap_close`, `proofpoint_trap_comment_add_link_to_soar_case`, `proofpoint_trap_detail`, `proofpoint_trap_recheck` | `assets/proofpoint_trap_mock.json` |
    | `smtp` | SMTP | `proofpoint_trap_isolation_notify` | `assets/smtp.json` |
-   | `soar8` | Phantom | `proofpoint_trap_detail` | `assets/soar8.json` |
+   | `soar8` | Phantom | `proofpoint_trap_acknowledge`, `proofpoint_trap_attachments`, `proofpoint_trap_close`, `proofpoint_trap_comment_add_link_to_soar_case`, `proofpoint_trap_detail`, `proofpoint_trap_recheck` | `assets/soar8.json` |
 
 3. **Créer la/les liste(s) personnalisée(s)** à partir de `custom_lists/*.json` — chaque
    fichier contient le tableau `content` exact (les lignes définies par ce paquet, jamais les lignes de données de la source) à
@@ -123,7 +125,7 @@ d'installation.
 4. **Importer les fonctions personnalisées, puis les playbooks** (dans cet ordre — les
    playbooks référencent les CF). `playbooks/` contient les deux, et chacun passe par son
    propre import :
-   - **Fonctions personnalisées** — `playbooks/proofpoint_trap_extract_incident_id.tgz` : dans l'onglet Custom Functions de la
+   - **Fonctions personnalisées** — `playbooks/proofpoint_trap_extract_incident_id.tgz`, `playbooks/proofpoint_trap_note_upsert.tgz`, `playbooks/container_update.tgz` : dans l'onglet Custom Functions de la
      page Playbooks, le bouton d'envoi dont l'infobulle indique *Import Custom Function*.
      L'import de playbook refuse une archive de CF (« failed to identify the import as a
      playbook »). Si la CF apparaît ensuite en brouillon, ouvrez-la dans l'éditeur et
@@ -134,7 +136,7 @@ d'installation.
 5. **Activer les playbooks d'automatisation** (`proofpoint_trap_recheck`, `proofpoint_trap_orchestrator`) et définir leur utilisateur
    **Run As** selon le guide d'installation du document de plan d'implémentation
    (voir `docs/`).
-   **Laissez-les inactifs :** `proofpoint_trap_detail`, `proofpoint_trap_triage`, `proofpoint_trap_attachments`, `proofpoint_trap_summary` — un playbook orchestrateur ci-dessus les appelle l'un
+   **Laissez-les inactifs :** `proofpoint_trap_detail`, `proofpoint_trap_triage`, `proofpoint_trap_attachments`, `proofpoint_trap_summary`, `proofpoint_trap_comment_add_link_to_soar_case` — un playbook orchestrateur ci-dessus les appelle l'un
    après l'autre ; actifs, ils se lanceraient aussi d'eux-mêmes, en même temps que lui.
    Désactivez-les si un paquet précédent les avait activés.
    **Laissez aussi inactifs :** `proofpoint_trap_acknowledge`, `proofpoint_trap_close`, `proofpoint_trap_isolation_notify` — un analyste lance chacun depuis un cas avec

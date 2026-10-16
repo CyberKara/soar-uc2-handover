@@ -1,5 +1,5 @@
 """
-Automation playbook for label proofpoint_trap, the only UC2 playbook active at ingest. Runs proofpoint_trap_detail, proofpoint_trap_attachments, proofpoint_trap_triage and proofpoint_trap_summary in turn, each after the previous one finishes; those four stay inactive.
+Automation playbook for label proofpoint_trap, the only UC2 playbook active at ingest. Runs proofpoint_trap_detail, proofpoint_trap_attachments, proofpoint_trap_triage, proofpoint_trap_summary and proofpoint_trap_comment_add_link_to_soar_case in turn, each after the previous one finishes; those five stay inactive.
 """
 
 
@@ -22,7 +22,8 @@ def run_detail(action=None, success=None, container=None, results=None, handle=N
     phantom.debug("run_detail() called")
 
     ################################################################################
-    # Fetch the TRAP incident, download its emails and create the event artifacts, the detail note and Enrichment Complete.
+    # Fetch the TRAP incident, create the incident-level artifacts, Enrichment Complete 
+    # and the detail note.
     ################################################################################
 
     ################################################################################
@@ -46,7 +47,8 @@ def run_attachments(action=None, success=None, container=None, results=None, han
     phantom.debug("run_attachments() called")
 
     ################################################################################
-    # Extract attachments, Cc recipients and the Email Content note from each email detail downloaded.
+    # Download each new alert's email: attachments, Cc, the Email Content and Attachment 
+    # Extraction notes.
     ################################################################################
 
     ################################################################################
@@ -70,7 +72,7 @@ def run_triage(action=None, success=None, container=None, results=None, handle=N
     phantom.debug("run_triage() called")
 
     ################################################################################
-    # Set the container severity from TRAP, after every artifact has been written.
+    # Set the case severity and verdict tag, after every artifact has been written.
     ################################################################################
 
     ################################################################################
@@ -94,7 +96,7 @@ def run_summary(action=None, success=None, container=None, results=None, handle=
     phantom.debug("run_summary() called")
 
     ################################################################################
-    # Write or rewrite the TRAP Summary note from every artifact on the container.
+    # Write the TRAP Summary in place.
     ################################################################################
 
     ################################################################################
@@ -108,14 +110,38 @@ def run_summary(action=None, success=None, container=None, results=None, handle=
     ################################################################################
 
     # call playbook "local/proofpoint_trap_summary", returns the playbook_run_id
-    playbook_run_id = phantom.playbook("local/proofpoint_trap_summary", container=container, name="run_summary", callback=run_summary_callback)
+    playbook_run_id = phantom.playbook("local/proofpoint_trap_summary", container=container, name="run_summary", callback=run_comment_link)
 
     return
 
 
 @phantom.playbook_block()
-def run_summary_callback(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
-    phantom.debug("run_summary_callback() called")
+def run_comment_link(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
+    phantom.debug("run_comment_link() called")
+
+    ################################################################################
+    # Comment on the TRAP incident with a link to this case, once.
+    ################################################################################
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+
+    # Write your custom code here...
+
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
+    # call playbook "local/proofpoint_trap_comment_add_link_to_soar_case", returns the playbook_run_id
+    playbook_run_id = phantom.playbook("local/proofpoint_trap_comment_add_link_to_soar_case", container=container, name="run_comment_link", callback=run_comment_link_callback)
+
+    return
+
+
+@phantom.playbook_block()
+def run_comment_link_callback(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
+    phantom.debug("run_comment_link_callback() called")
 
     
     # Downstream End block cannot be called directly, since execution will call on_finish automatically.
@@ -151,4 +177,3 @@ def on_finish(container, summary):
     ################################################################################
 
     return
-

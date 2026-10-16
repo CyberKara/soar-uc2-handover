@@ -4,7 +4,7 @@
     "category": "Email Abuse",
     "coa": {
         "data": {
-            "hash": "7052eb2b5fc8294b8623cd4fc53b0516241344e9",
+            "hash": "ae7c70c89c06e4a8ba0f53a5a18ab43a669deb09",
             "edges": [
                 {
                     "id": "port_0_to_port_2",
@@ -14,11 +14,11 @@
                     "targetPort": "2_in"
                 },
                 {
-                    "id": "port_2_to_port_8",
+                    "id": "port_2_to_port_3",
                     "sourceNode": "2",
                     "sourcePort": "2_out",
-                    "targetNode": "8",
-                    "targetPort": "8_in"
+                    "targetNode": "3",
+                    "targetPort": "3_in"
                 },
                 {
                     "id": "port_3_to_port_4",
@@ -28,11 +28,17 @@
                     "targetPort": "4_in"
                 },
                 {
-                    "id": "port_4_to_port_9",
+                    "id": "port_4_to_port_5",
+                    "conditions": [
+                        {
+                            "index": 0,
+                            "conditionKey": "condition_key_1"
+                        }
+                    ],
                     "sourceNode": "4",
                     "sourcePort": "4_out",
-                    "targetNode": "9",
-                    "targetPort": "9_in"
+                    "targetNode": "5",
+                    "targetPort": "5_in"
                 },
                 {
                     "id": "port_5_to_port_6",
@@ -49,57 +55,30 @@
                     "targetPort": "7_in"
                 },
                 {
-                    "id": "port_7_to_port_1",
-                    "sourceNode": "7",
-                    "sourcePort": "7_out",
-                    "targetNode": "1",
-                    "targetPort": "1_in"
-                },
-                {
-                    "id": "port_8_to_port_3",
-                    "sourceNode": "8",
-                    "sourcePort": "8_out",
-                    "targetNode": "3",
-                    "targetPort": "3_in"
-                },
-                {
-                    "id": "port_9_to_port_5",
+                    "id": "port_7_to_port_8",
                     "conditions": [
                         {
                             "index": 0,
                             "conditionKey": "condition_key_1"
                         }
                     ],
-                    "sourceNode": "9",
-                    "sourcePort": "9_out",
-                    "targetNode": "5",
-                    "targetPort": "5_in"
+                    "sourceNode": "7",
+                    "sourcePort": "7_out",
+                    "targetNode": "8",
+                    "targetPort": "8_in"
                 },
                 {
-                    "id": "port_9_to_port_10",
-                    "conditions": [
-                        {
-                            "index": 1,
-                            "conditionKey": "condition_key_2"
-                        }
-                    ],
-                    "sourceNode": "9",
-                    "sourcePort": "9_out",
-                    "targetNode": "10",
-                    "targetPort": "10_in"
-                },
-                {
-                    "id": "port_10_to_port_1",
-                    "sourceNode": "10",
-                    "sourcePort": "10_out",
+                    "id": "port_8_to_port_1",
+                    "sourceNode": "8",
+                    "sourcePort": "8_out",
                     "targetNode": "1",
                     "targetPort": "1_in"
                 }
             ],
             "nodes": {
                 "0": {
-                    "x": 1090,
-                    "y": 200,
+                    "x": 190,
+                    "y": -6.394884621840902e-14,
                     "id": "0",
                     "data": {
                         "id": "0",
@@ -114,8 +93,8 @@
                     "warnings": {}
                 },
                 "1": {
-                    "x": 1090,
-                    "y": 1738,
+                    "x": 190,
+                    "y": 1300,
                     "id": "1",
                     "data": {
                         "id": "1",
@@ -128,12 +107,12 @@
                     },
                     "type": "end",
                     "errors": {},
-                    "userCode": "    ################################################################################\n    ################################################################################\n\n    # Populate the generated `output` dict; the save after Custom Code End emits it.\n    # No block recorded an outcome (e.g. the run stopped early): report failed.\n    raw_output = phantom.get_run_data(key=\"playbook_output\")\n    if raw_output:\n        output.update(json.loads(raw_output))\n    # The 8.6 VPE initialises every output above to [] (8.5 wrote None), so an\n    # output no block set is normalised to null here, whichever form a save wrote.\n    for key, value in output.items():\n        if value == []:\n            output[key] = None\n    if output[\"status\"] is None:\n        output[\"status\"] = \"failed\"\n\n    ################################################################################\n    ################################################################################\n",
+                    "userCode": "    ################################################################################\n\n    # This function is called after all actions are completed.\n    # summary of all the action and/or all details of actions\n    # can be collected here.\n\n    # summary_json = phantom.get_summary()\n    # if 'result' in summary_json:\n        # for action_result in summary_json['result']:\n            # if 'action_run_id' in action_result:\n                # action_results = phantom.get_action_results(action_run_id=action_result['action_run_id'], result_data=False, flatten=False)\n                # phantom.debug(action_results)\n\n    ################################################################################\n",
                     "warnings": {}
                 },
                 "2": {
-                    "x": 1070,
-                    "y": 348,
+                    "x": 190,
+                    "y": 100,
                     "id": "2",
                     "data": {
                         "id": "2",
@@ -169,7 +148,7 @@
                         "advanced": {
                             "join": [],
                             "customName": "extract incident id",
-                            "description": "Read the TRAP incident ID and severity (shared custom function).",
+                            "description": "Read the TRAP incident ID (shared custom function).",
                             "customNameId": 0
                         },
                         "utilities": {
@@ -195,59 +174,83 @@
                     "warnings": {}
                 },
                 "3": {
-                    "x": 1070,
-                    "y": 673,
+                    "x": 190,
+                    "y": 250,
                     "id": "3",
                     "data": {
                         "id": "3",
-                        "type": "code",
+                        "type": "prompt",
+                        "message": "**TRAP incident {0}**\n\nYour reason closes this incident in TRAP and is posted as its close detail; the case is closed once TRAP has closed it.",
                         "advanced": {
                             "join": [],
-                            "note": "Code block, not a prompt block: a VPE save would drop the approver fallback (owner, else soar_local_admin).",
                             "customName": "prompt close reason",
-                            "description": "Ask the analyst for a closure reason (approver: container owner, else soar_local_admin).",
+                            "description": "Ask the analyst who launched the playbook for the close reason (30 minutes).",
                             "customNameId": 0
                         },
-                        "functionId": 8,
+                        "approver": {
+                            "type": "user",
+                            "value": "launching_user"
+                        },
+                        "responses": [
+                            {
+                                "required": true,
+                                "responseType": "message",
+                                "responsePrompt": "Close reason"
+                            }
+                        ],
+                        "functionId": 1,
+                        "parameters": [
+                            "extract_incident_id:custom_function_result.data.incident_id"
+                        ],
                         "functionName": "prompt_close_reason",
-                        "inputParameters": [],
-                        "outputVariables": []
+                        "responseTime": 30
                     },
-                    "type": "code",
+                    "type": "prompt",
                     "errors": {},
-                    "userCode": "    ################################################################################\n    ################################################################################\n\n    # The prompt is raised from code, not from a native prompt block: a VPE save\n    # regenerates prompt blocks whole (they have no Custom Code), which would drop\n    # this approver fallback -- TRAP containers never get an owner assigned. The\n    # callback continues the flow; the return below stops the generated call to\n    # process_close_reason from also running right away.\n\n    user = container.get('owner_name', None) or 'soar_local_admin'\n    respond_in_mins = 30\n    role = None\n    message = \"\"\"**TRAP Incident {0}**\nContainer: {1}\n\nClosing this incident will close it in Proofpoint TRAP and post your\nclosure reason as a comment. Provide a closure reason.\"\"\"\n\n    parameters = [\n        \"read_incident_id:custom_function:incident_id\",\n        \"container:name\",\n    ]\n\n    response_types = [\n        {\n            \"prompt\": \"Closure reason\",\n            \"options\": {\n                \"type\": \"message\",\n                \"required\": True,\n            },\n        },\n    ]\n\n    phantom.prompt2(container=container, user=user, role=role, message=message, respond_in_mins=respond_in_mins, name=\"prompt_close_reason\", parameters=parameters, response_types=response_types, callback=process_close_reason)\n\n    return\n\n    ################################################################################\n    ################################################################################\n",
                     "warnings": {}
                 },
                 "4": {
-                    "x": 1070,
-                    "y": 850,
+                    "x": 190,
+                    "y": 400,
                     "id": "4",
                     "data": {
                         "id": "4",
-                        "type": "code",
+                        "type": "decision",
                         "advanced": {
                             "join": [],
-                            "note": "Reads the answer over REST (GET /rest/approval). Without approval, check_prompt_status goes to add_expired_note.",
-                            "customName": "process close reason",
-                            "description": "Read analyst's prompt response.",
-                            "customNameId": 0
+                            "delimiter": ",",
+                            "customName": "approved",
+                            "customNameId": 0,
+                            "delimiter_enabled": true
                         },
-                        "functionId": 3,
-                        "functionName": "process_close_reason",
-                        "inputParameters": [],
-                        "outputVariables": [
-                            "reason",
-                            "prompt_status"
-                        ]
+                        "conditions": [
+                            {
+                                "type": "if",
+                                "logic": "and",
+                                "display": "If",
+                                "customName": "answered",
+                                "comparisons": [
+                                    {
+                                        "op": "==",
+                                        "param": "prompt_close_reason:action_result.status",
+                                        "value": "success",
+                                        "conditionIndex": 0
+                                    }
+                                ],
+                                "conditionKey": "condition_key_1",
+                                "conditionIndex": 0
+                            }
+                        ],
+                        "functionId": 1,
+                        "functionName": "approved"
                     },
-                    "type": "code",
+                    "type": "decision",
                     "errors": {},
-                    "userCode": "    ################################################################################\n\n\n    run_id = phantom.get_playbook_run_id_()\n\n    reason = \"No reason provided\"\n    prompt_status = \"expired\"\n\n    try:\n        approval_url = phantom.build_phantom_rest_url(\"approval\") + \\\n            \"?_filter_playbook_run={}&_filter_name=\\\"prompt_close_reason\\\"&sort=id&order=desc&page_size=1\".format(run_id)\n        approvals = phantom.requests.get(uri=approval_url, verify=False).json().get(\"data\") or []\n    except Exception as e:\n        phantom.error(\"Could not fetch approval record for playbook_run {}: {}\".format(run_id, str(e)))\n        approvals = []\n\n    if approvals:\n        approval = approvals[0]\n        responses = approval.get(\"responses\") or []\n        if approval.get(\"status\") == \"approved\" and responses and responses[0]:\n            reason = responses[0]\n            prompt_status = \"success\"\n        else:\n            phantom.debug(\"Approval status '{}' for playbook_run {} -- treating as expired/no response\".format(approval.get(\"status\"), run_id))\n    else:\n        phantom.error(\"No approval record found for playbook_run {}\".format(run_id))\n\n    phantom.debug(\"Closure reason: '{}', status: {}\".format(reason, prompt_status))\n\n    process_close_reason__reason = reason\n    process_close_reason__prompt_status = prompt_status\n\n    # Also saved as run data: the blocks after the decision read these keys.\n    phantom.save_run_data(key=\"process_close_reason:reason\", value=json.dumps(process_close_reason__reason))\n    phantom.save_run_data(key=\"process_close_reason:prompt_status\", value=json.dumps(process_close_reason__prompt_status))\n\n    ################################################################################\n",
                     "warnings": {}
                 },
                 "5": {
-                    "x": 900,
-                    "y": 1207,
+                    "x": 190,
+                    "y": 550,
                     "id": "5",
                     "data": {
                         "id": "5",
@@ -281,18 +284,18 @@
                         "action": "close incident",
                         "advanced": {
                             "join": [],
-                            "note": "Close the incident in Proofpoint TRAP.",
+                            "note": "Pick your Proofpoint TRAP asset here after import.",
                             "customName": "close trap incident",
-                            "description": "Run close_incident action on Proofpoint TRAP.",
+                            "description": "Close the TRAP incident; the reason goes as its detail (TRAP requires summary and detail).",
                             "customNameId": 0
                         },
                         "connector": "Proofpoint TRAP",
                         "actionType": "generic",
-                        "functionId": 4,
+                        "functionId": 1,
                         "parameters": {
-                            "detail": "process_close_reason:custom_function:reason",
+                            "detail": "prompt_close_reason:action_result.summary.responses.0",
                             "summary": "Closed by SOAR analyst",
-                            "incident_id": "read_incident_id:custom_function:incident_id"
+                            "incident_id": "extract_incident_id:custom_function_result.data.incident_id"
                         },
                         "connectorId": "a7c41f8e-3b2d-4e9a-bf56-1d8e9a4c2f7b",
                         "functionName": "close_trap_incident",
@@ -302,9 +305,9 @@
                         "connectorVersion": "v1",
                         "requiredParameters": [
                             {
-                                "field": "incident_id",
+                                "field": "detail",
                                 "default": "",
-                                "data_type": "numeric"
+                                "data_type": "string"
                             },
                             {
                                 "field": "summary",
@@ -312,20 +315,20 @@
                                 "data_type": "string"
                             },
                             {
-                                "field": "detail",
+                                "field": "incident_id",
                                 "default": "",
-                                "data_type": "string"
+                                "data_type": "numeric"
                             }
                         ]
                     },
                     "type": "action",
                     "errors": {},
-                    "userCode": "    ################################################################################\n\n    # Built from run data, so the call does not depend on how the VPE names its\n    # generated variables.\n    read_incident_id__incident_id = json.loads(phantom.get_run_data(key=\"read_incident_id:incident_id\") or \"null\")\n    reason = json.loads(phantom.get_run_data(key=\"process_close_reason:reason\") or '\"\"')\n\n    parameters = [{\n        \"incident_id\": read_incident_id__incident_id,\n        \"summary\": \"Closed by SOAR analyst\",\n        \"detail\": reason,\n    }]\n\n    ################################################################################\n",
+                    "userCode": "    ################################################################################\n\n    # One close, built from the custom function and the prompt's answer.\n    incident = phantom.collect2(container=container, datapath=[\"extract_incident_id:custom_function_result.data.incident_id\"])\n    answer = phantom.collect2(container=container, datapath=[\"prompt_close_reason:action_result.summary.responses.0\"])\n    parameters = [{\n        \"incident_id\": incident[0][0] if incident and incident[0] else None,\n        \"summary\": \"Closed by SOAR analyst\",\n        \"detail\": answer[0][0] if answer and answer[0] else \"\",\n    }]\n\n    ################################################################################\n",
                     "warnings": {}
                 },
                 "6": {
-                    "x": 900,
-                    "y": 1384,
+                    "x": 190,
+                    "y": 850,
                     "id": "6",
                     "data": {
                         "id": "6",
@@ -356,36 +359,30 @@
                             "exitConditionEnabled": false
                         },
                         "type": "action",
-                        "action": "add comment",
+                        "action": "add note",
                         "advanced": {
                             "join": [],
-                            "note": "Add closure comment to TRAP incident with analyst reason and close status.",
-                            "customName": "add trap comment",
-                            "description": "Add closure comment to TRAP incident.",
+                            "note": "Custom Code builds the content. Pick your SOAR (Phantom app) asset here after import.",
+                            "customName": "add note",
+                            "description": "Add the close note: the reason and TRAP's result.",
                             "customNameId": 0
                         },
-                        "connector": "Proofpoint TRAP",
+                        "connector": "Phantom",
                         "actionType": "generic",
-                        "functionId": 5,
+                        "functionId": 2,
                         "parameters": {
-                            "detail": "process_close_reason:custom_function:reason",
-                            "summary": "SOAR Closure Comment",
-                            "incident_id": "read_incident_id:custom_function:incident_id"
+                            "title": "TRAP Close",
+                            "container_id": "container:id"
                         },
-                        "connectorId": "a7c41f8e-3b2d-4e9a-bf56-1d8e9a4c2f7b",
-                        "functionName": "add_trap_comment",
+                        "connectorId": "deb82aa9-22cc-4675-9cf1-534b8d006eb7",
+                        "functionName": "add_note",
                         "connectorConfigs": [
-                            "proofpoint_trap_mock"
+                            "soar8"
                         ],
                         "connectorVersion": "v1",
                         "requiredParameters": [
                             {
-                                "field": "incident_id",
-                                "default": "",
-                                "data_type": "numeric"
-                            },
-                            {
-                                "field": "summary",
+                                "field": "title",
                                 "default": "",
                                 "data_type": "string"
                             }
@@ -393,76 +390,20 @@
                     },
                     "type": "action",
                     "errors": {},
-                    "userCode": "    ################################################################################\n\n    # The comment says whether the TRAP close succeeded, so it is built here from\n    # close_trap_incident's result rather than bound directly.\n    read_incident_id__incident_id = json.loads(phantom.get_run_data(key=\"read_incident_id:incident_id\") or \"null\")\n    reason = json.loads(phantom.get_run_data(key=\"process_close_reason:reason\") or '\"\"')\n\n    close_data = phantom.collect2(container=container, datapath=[\"close_trap_incident:action_result.status\"])\n    close_status = close_data[0][0] if close_data and close_data[0][0] else \"unknown\"\n\n    if close_status == \"success\":\n        comment_text = \"Incident closed by SOAR analyst.\\nReason: {}\\nClose status: {}\".format(reason, close_status)\n    else:\n        comment_text = \"SOAR analyst attempted to close this incident but close_incident did not succeed (status: {}).\\nReason: {}\".format(close_status, reason)\n\n    phantom.save_run_data(key=\"add_trap_comment:comment_text\", value=json.dumps(comment_text))\n\n    parameters = [{\n        \"incident_id\": read_incident_id__incident_id,\n        \"summary\": \"SOAR Closure Comment\",\n        \"detail\": comment_text,\n    }]\n\n    ################################################################################\n",
+                    "userCode": "    ################################################################################\n\n    # A missing action result is a failure, not a skipped step: SOAR refusing to\n    # dispatch creates no app_run, and the playbook run records it as failed.\n    answer = phantom.collect2(container=container, datapath=[\"prompt_close_reason:action_result.summary.responses.0\"])\n    closed = phantom.collect2(container=container, datapath=[\"close_trap_incident:action_result.status\"])\n    incident = phantom.collect2(container=container, datapath=[\"extract_incident_id:custom_function_result.data.incident_id\"])\n    status = closed[0][0] if closed and closed[0] and closed[0][0] else \"failed - not dispatched (reason in the playbook run's actions)\"\n    lines = [\"# TRAP Closure\",\n             \"**Incident ID:** {}\".format(incident[0][0] if incident and incident[0] else \"?\"),\n             \"**Reason:** {}\".format(answer[0][0] if answer and answer[0] else \"\"),\n             \"**TRAP close incident:** {}\".format(status),\n             \"**Case:** {}\".format(\"closed\" if status == \"success\" else \"left open\")]\n    parameters = [{\"title\": \"TRAP Close\", \"content\": \"\\n\".join(lines), \"container_id\": container.get(\"id\")}]\n\n    ################################################################################\n",
                     "warnings": {}
                 },
                 "7": {
-                    "x": 900,
-                    "y": 1561,
+                    "x": 190,
+                    "y": 1000,
                     "id": "7",
                     "data": {
                         "id": "7",
-                        "type": "code",
-                        "advanced": {
-                            "join": [],
-                            "note": "Summary note with reason and action results. Sets container status=closed on a successful TRAP close.",
-                            "customName": "add close note",
-                            "description": "Add closure summary note to container.",
-                            "customNameId": 0
-                        },
-                        "functionId": 6,
-                        "functionName": "add_close_note",
-                        "inputParameters": [
-                            "process_close_reason:custom_function:reason",
-                            "close_trap_incident:action_result.status",
-                            "add_trap_comment:action_result.status"
-                        ],
-                        "outputVariables": []
-                    },
-                    "type": "code",
-                    "errors": {},
-                    "userCode": "    ################################################################################\n    ################################################################################\n\n    incident_id = json.loads(phantom.get_run_data(key=\"read_incident_id:incident_id\"))\n    reason = json.loads(phantom.get_run_data(key=\"process_close_reason:reason\") or '\"\"')\n    prompt_status = json.loads(phantom.get_run_data(key=\"process_close_reason:prompt_status\") or '\"\"')\n\n    note_lines = [\n        \"# TRAP Closure\",\n        \"**Incident ID:** {}\".format(incident_id),\n        \"**Reason:** {}\".format(reason),\n        \"**Prompt status:** {}\".format(prompt_status),\n        \"**Time:** {}\".format(datetime.now().strftime(\"%Y-%m-%d %H:%M:%S\")),\n    ]\n\n    if prompt_status == \"success\":\n        # Both actions were dispatched on this branch, so a missing\n        # action_result is a failure, not a skipped step: when SOAR refuses to\n        # dispatch an action (a manifest-required parameter missing) no app_run\n        # is created and collect2 finds nothing, while the playbook run records\n        # the attempt as failed.\n        NO_RESULT = \"failed - not dispatched (reason in the playbook run's actions)\"\n\n        close_data = phantom.collect2(container=container, datapath=[\"close_trap_incident:action_result.status\"])\n        close_status = close_data[0][0] if close_data and close_data[0][0] else NO_RESULT\n\n        comment_data = phantom.collect2(container=container, datapath=[\"add_trap_comment:action_result.status\"])\n        comment_status = comment_data[0][0] if comment_data and comment_data[0][0] else NO_RESULT\n\n        note_lines.append(\"\")\n        note_lines.append(\"## TRAP Actions\")\n        note_lines.append(\"**close_incident:** {}\".format(close_status))\n        note_lines.append(\"**add_comment:** {}\".format(comment_status))\n\n        if close_status == \"success\":\n            phantom.set_status(container=container, status=\"closed\")\n            note_lines.append(\"\")\n            note_lines.append(\"Container status set to **closed**.\")\n\n        succeeded = [close_status, comment_status].count(\"success\")\n        outcome = \"success\" if succeeded == 2 else (\"partial\" if succeeded else \"failed\")\n    else:\n        note_lines.append(\"\")\n        note_lines.append(\"Analyst prompt expired without response. No TRAP action taken.\")\n        outcome = \"expired\"\n\n    note_content = \"\\n\".join(note_lines)\n\n    phantom.add_note(\n        container=container,\n        note_type=\"general\",\n        title=\"TRAP Close - {}\".format(datetime.now().strftime(\"%Y-%m-%d %H:%M\")),\n        content=note_content,\n        note_format=\"markdown\",  # the content is markdown; add_note() defaults to html\n    )\n\n    phantom.debug(\"Close note added\")\n\n    # Playbook outputs, read by on_finish.\n    playbook_output = {\"status\": outcome, \"incident_id\": incident_id, \"reason\": reason}\n    phantom.save_run_data(key=\"playbook_output\", value=json.dumps(playbook_output))\n\n    ################################################################################\n    ################################################################################\n",
-                    "warnings": {}
-                },
-                "8": {
-                    "x": 1070,
-                    "y": 496,
-                    "id": "8",
-                    "data": {
-                        "id": "8",
-                        "type": "code",
-                        "advanced": {
-                            "join": [],
-                            "note": "Reads incident_id (+ trap_severity where used) from the extract_incident_id CF result.",
-                            "customName": "read incident id",
-                            "description": "Read the incident ID from the custom function result.",
-                            "customNameId": 0
-                        },
-                        "functionId": 7,
-                        "functionName": "read_incident_id",
-                        "inputParameters": [
-                            "extract_incident_id:custom_function_result.data.incident_id"
-                        ],
-                        "outputVariables": [
-                            "incident_id"
-                        ]
-                    },
-                    "type": "code",
-                    "errors": {},
-                    "userCode": "    ################################################################################\n\n\n    result_rows = phantom.collect2(\n        container=container,\n        datapath=[\"extract_incident_id:custom_function_result.data.incident_id\"],\n    )\n    incident_id_val = result_rows[0][0] if result_rows else None\n\n    if not incident_id_val:\n        phantom.error(\"Could not find Incident ID (cef.incidentId) on the 'Event Info' artifact\")\n        phantom.add_note(\n            container=container,\n            note_type=\"general\",\n            title=\"TRAP Close - Error\",\n            content=\"Could not find Incident ID on the 'Event Info' artifact\"\n        )\n        return\n\n    read_incident_id__incident_id = str(incident_id_val)\n    phantom.debug(\"Extracted incident ID: {}\".format(read_incident_id__incident_id))\n\n    # Also saved as run data: later blocks read this key in their own Custom Code.\n    phantom.save_run_data(key=\"read_incident_id:incident_id\", value=json.dumps(read_incident_id__incident_id))\n\n    ################################################################################\n",
-                    "warnings": {}
-                },
-                "9": {
-                    "x": 1150,
-                    "y": 1027,
-                    "id": "9",
-                    "data": {
-                        "id": "9",
                         "type": "decision",
                         "advanced": {
                             "join": [],
                             "delimiter": ",",
-                            "customName": "check prompt status",
+                            "customName": "trap closed",
                             "customNameId": 0,
                             "delimiter_enabled": true
                         },
@@ -471,106 +412,126 @@
                                 "type": "if",
                                 "logic": "and",
                                 "display": "If",
-                                "customName": "prompt succeeded",
+                                "customName": "closed in TRAP",
                                 "comparisons": [
                                     {
                                         "op": "==",
-                                        "param": "process_close_reason:custom_function:prompt_status",
+                                        "param": "close_trap_incident:action_result.status",
                                         "value": "success",
-                                        "comparisonKey": "comparison_key_841de57c-6561-4f83-8cfb-393ef9c8c236",
                                         "conditionIndex": 0
                                     }
                                 ],
                                 "conditionKey": "condition_key_1",
                                 "conditionIndex": 0
-                            },
-                            {
-                                "type": "else",
-                                "logic": "and",
-                                "display": "Else",
-                                "customName": "prompt not answered",
-                                "comparisons": [
-                                    {
-                                        "op": "==",
-                                        "param": "",
-                                        "value": "",
-                                        "comparisonKey": "comparison_key_40726815-ab6f-4e7f-be2a-ce479d4e41a7",
-                                        "conditionIndex": 1
-                                    }
-                                ],
-                                "conditionKey": "condition_key_2",
-                                "conditionIndex": 1
                             }
                         ],
-                        "functionId": 8,
-                        "functionName": "check_prompt_status"
+                        "functionId": 2,
+                        "functionName": "trap_closed"
                     },
                     "type": "decision",
                     "errors": {},
                     "warnings": {}
                 },
-                "10": {
-                    "x": 1240,
-                    "y": 1561,
-                    "id": "10",
+                "8": {
+                    "x": 190,
+                    "y": 1150,
+                    "id": "8",
                     "data": {
-                        "id": "10",
-                        "type": "code",
+                        "id": "8",
+                        "tab": "apis",
+                        "loop": {
+                            "enabled": false,
+                            "pauseUnit": "m",
+                            "conditions": [
+                                {
+                                    "type": "if",
+                                    "logic": "and",
+                                    "comparisons": [
+                                        {
+                                            "op": "==",
+                                            "param": "",
+                                            "value": "",
+                                            "comparisonKey": "comparison_key_0"
+                                        }
+                                    ],
+                                    "conditionKey": "condition_key_0",
+                                    "conditionIndex": 0
+                                }
+                            ],
+                            "pauseValue": 2,
+                            "exitAfterUnit": "m",
+                            "exitLoopAfter": 2,
+                            "exitAfterValue": 10,
+                            "exitConditionEnabled": false
+                        },
+                        "type": "utility",
+                        "values": {
+                            "set_status": {
+                                "status": "closed",
+                                "_internal": [
+                                    "container",
+                                    "trace"
+                                ]
+                            }
+                        },
                         "advanced": {
                             "join": [],
-                            "note": "Expired or rejected prompt: closure note only, no TRAP action. Own block so add_close_note keeps a single input (no generated join).",
-                            "customName": "add expired note",
-                            "description": "Add a closure note when the prompt got no approval: no TRAP action taken.",
-                            "customNameId": 0
+                            "customName": "set status",
+                            "description": "Close the case.",
+                            "customNameId": 0,
+                            "refreshNotableData": true
                         },
-                        "functionId": 9,
-                        "functionName": "add_expired_note",
-                        "inputParameters": [],
-                        "outputVariables": []
+                        "utilities": {
+                            "set_status": {
+                                "name": "set_status",
+                                "label": "set status",
+                                "fields": [
+                                    {
+                                        "name": "status",
+                                        "label": "status",
+                                        "choices": "notableStatus",
+                                        "required": true,
+                                        "renderType": "dropdown",
+                                        "description": "",
+                                        "placeholder": "Select status"
+                                    },
+                                    {
+                                        "name": "container",
+                                        "hidden": true,
+                                        "required": false
+                                    },
+                                    {
+                                        "name": "trace",
+                                        "hidden": true,
+                                        "required": false
+                                    }
+                                ],
+                                "description": "",
+                                "refreshNotableData": true
+                            }
+                        },
+                        "functionId": 2,
+                        "selectMore": false,
+                        "utilityType": "api",
+                        "functionName": "set_status"
                     },
-                    "type": "code",
+                    "type": "utility",
                     "errors": {},
-                    "userCode": "    ################################################################################\n    ################################################################################\n\n\n    # The prompt got no approval (expired or rejected): no TRAP action ran.\n    # Its own block, not a second input into add_close_note: the 8.6 VPE\n    # regenerates a join over two inputs that waits for BOTH paths, ignoring\n    # notRequiredJoins, so this path would end without a note after a save.\n    incident_id = json.loads(phantom.get_run_data(key=\"read_incident_id:incident_id\"))\n    reason = json.loads(phantom.get_run_data(key=\"process_close_reason:reason\") or '\"\"')\n    prompt_status = json.loads(phantom.get_run_data(key=\"process_close_reason:prompt_status\") or '\"\"')\n\n    note_lines = [\n        \"# TRAP Closure\",\n        \"**Incident ID:** {}\".format(incident_id),\n        \"**Reason:** {}\".format(reason),\n        \"**Prompt status:** {}\".format(prompt_status),\n        \"**Time:** {}\".format(datetime.now().strftime(\"%Y-%m-%d %H:%M:%S\")),\n        \"\",\n        \"Analyst prompt expired without response. No TRAP action taken.\",\n    ]\n\n    phantom.add_note(\n        container=container,\n        note_type=\"general\",\n        title=\"TRAP Close - {}\".format(datetime.now().strftime(\"%Y-%m-%d %H:%M\")),\n        content=\"\\n\".join(note_lines),\n        note_format=\"markdown\",  # the content is markdown; add_note() defaults to html\n    )\n\n    phantom.debug(\"Expired-prompt note added\")\n\n    # Playbook outputs, read by on_finish.\n    playbook_output = {\"status\": \"expired\", \"incident_id\": incident_id, \"reason\": reason}\n    phantom.save_run_data(key=\"playbook_output\", value=json.dumps(playbook_output))\n\n    ################################################################################\n    ################################################################################\n",
                     "warnings": {}
                 }
             },
             "notes": "",
-            "description": "Automation playbook (PB5), kept inactive: an analyst runs it from the case with Run Playbook. Prompts for a closure reason, then closes the TRAP incident and posts the reason as a comment."
+            "description": "Automation playbook (PB8), kept inactive: an analyst runs it from the case with Run Playbook. Asks the analyst who launched it for a close reason, closes the TRAP incident with it, adds a close note and closes the case once TRAP has closed the incident. An unanswered prompt does nothing."
         },
         "input_spec": [],
-        "output_spec": [
-            {
-                "name": "status",
-                "contains": [],
-                "metadata": {},
-                "datapaths": [],
-                "deduplicate": false,
-                "description": "success when the TRAP incident was closed and commented, partial when one of the two failed, failed when both did, expired when the prompt got no answer."
-            },
-            {
-                "name": "incident_id",
-                "contains": [],
-                "metadata": {},
-                "datapaths": [],
-                "deduplicate": false,
-                "description": "TRAP incident ID of this container."
-            },
-            {
-                "name": "reason",
-                "contains": [],
-                "metadata": {},
-                "datapaths": [],
-                "deduplicate": false,
-                "description": "Closure reason from the prompt."
-            }
-        ],
+        "output_spec": [],
         "playbook_type": "automation",
         "python_version": "3.13",
         "schema": "5.0.24",
         "version": "8.6.0.530",
         "playbook_trigger": "artifact_created"
     },
-    "create_time": "2026-10-13T12:03:08.449418Z",
+    "create_time": "2026-10-15T14:59:28.284613Z",
     "draft_mode": false,
     "labels": [
         "proofpoint_trap"

@@ -1,0 +1,455 @@
+{
+    "blockly": false,
+    "blockly_xml": "<xml></xml>",
+    "category": "Email Abuse",
+    "coa": {
+        "data": {
+            "hash": "4d9fc53fe0a008ca57a7b0079d2cda66decacde5",
+            "edges": [
+                {
+                    "id": "port_0_to_port_2",
+                    "sourceNode": "0",
+                    "sourcePort": "0_out",
+                    "targetNode": "2",
+                    "targetPort": "2_in"
+                },
+                {
+                    "id": "port_2_to_port_3",
+                    "sourceNode": "2",
+                    "sourcePort": "2_out",
+                    "targetNode": "3",
+                    "targetPort": "3_in"
+                },
+                {
+                    "id": "port_3_to_port_4",
+                    "conditions": [
+                        {
+                            "index": 0,
+                            "conditionKey": "condition_key_1"
+                        }
+                    ],
+                    "sourceNode": "3",
+                    "sourcePort": "3_out",
+                    "targetNode": "4",
+                    "targetPort": "4_in"
+                },
+                {
+                    "id": "port_4_to_port_5",
+                    "conditions": [
+                        {
+                            "index": 0,
+                            "conditionKey": "condition_key_1"
+                        }
+                    ],
+                    "sourceNode": "4",
+                    "sourcePort": "4_out",
+                    "targetNode": "5",
+                    "targetPort": "5_in"
+                },
+                {
+                    "id": "port_5_to_port_6",
+                    "sourceNode": "5",
+                    "sourcePort": "5_out",
+                    "targetNode": "6",
+                    "targetPort": "6_in"
+                },
+                {
+                    "id": "port_6_to_port_7",
+                    "conditions": [
+                        {
+                            "index": 0,
+                            "conditionKey": "condition_key_1"
+                        }
+                    ],
+                    "sourceNode": "6",
+                    "sourcePort": "6_out",
+                    "targetNode": "7",
+                    "targetPort": "7_in"
+                },
+                {
+                    "id": "port_7_to_port_1",
+                    "sourceNode": "7",
+                    "sourcePort": "7_out",
+                    "targetNode": "1",
+                    "targetPort": "1_in"
+                }
+            ],
+            "nodes": {
+                "0": {
+                    "x": 190,
+                    "y": -6.394884621840902e-14,
+                    "id": "0",
+                    "data": {
+                        "id": "0",
+                        "type": "start",
+                        "advanced": {
+                            "join": []
+                        },
+                        "functionName": "on_start"
+                    },
+                    "type": "start",
+                    "errors": {},
+                    "warnings": {}
+                },
+                "1": {
+                    "x": 190,
+                    "y": 1050,
+                    "id": "1",
+                    "data": {
+                        "id": "1",
+                        "type": "end",
+                        "advanced": {
+                            "join": []
+                        },
+                        "functionId": 1,
+                        "functionName": "on_finish"
+                    },
+                    "type": "end",
+                    "errors": {},
+                    "userCode": "    ################################################################################\n\n    # This function is called after all actions are completed.\n    # summary of all the action and/or all details of actions\n    # can be collected here.\n\n    # summary_json = phantom.get_summary()\n    # if 'result' in summary_json:\n        # for action_result in summary_json['result']:\n            # if 'action_run_id' in action_result:\n                # action_results = phantom.get_action_results(action_run_id=action_result['action_run_id'], result_data=False, flatten=False)\n                # phantom.debug(action_results)\n\n    ################################################################################\n",
+                    "warnings": {}
+                },
+                "2": {
+                    "x": 190,
+                    "y": 100,
+                    "id": "2",
+                    "data": {
+                        "id": "2",
+                        "loop": {
+                            "enabled": false,
+                            "pauseUnit": "m",
+                            "conditions": [
+                                {
+                                    "type": "if",
+                                    "logic": "and",
+                                    "comparisons": [
+                                        {
+                                            "op": "==",
+                                            "param": "",
+                                            "value": "",
+                                            "comparisonKey": "comparison_key_0"
+                                        }
+                                    ],
+                                    "conditionKey": "condition_key_0",
+                                    "conditionIndex": 0
+                                }
+                            ],
+                            "pauseValue": 2,
+                            "exitAfterUnit": "m",
+                            "exitLoopAfter": 2,
+                            "exitAfterValue": 10,
+                            "exitConditionEnabled": false
+                        },
+                        "type": "utility",
+                        "values": {
+                            "proofpoint_trap_extract_incident_id": {}
+                        },
+                        "advanced": {
+                            "join": [],
+                            "customName": "extract incident id",
+                            "description": "Read the TRAP incident ID (shared custom function).",
+                            "customNameId": 0
+                        },
+                        "utilities": {
+                            "proofpoint_trap_extract_incident_id": {
+                                "name": "proofpoint_trap_extract_incident_id",
+                                "label": "proofpoint_trap_extract_incident_id",
+                                "fields": [],
+                                "description": "Read the TRAP incident ID and raw TRAP Severity off the container's Event Info/Event Info Update artifacts."
+                            }
+                        },
+                        "functionId": 1,
+                        "selectMore": false,
+                        "utilityType": "custom_function",
+                        "functionName": "extract_incident_id",
+                        "customFunction": {
+                            "name": "proofpoint_trap_extract_incident_id",
+                            "repoName": "local",
+                            "draftMode": false
+                        }
+                    },
+                    "type": "utility",
+                    "errors": {},
+                    "warnings": {}
+                },
+                "3": {
+                    "x": 190,
+                    "y": 250,
+                    "id": "3",
+                    "data": {
+                        "id": "3",
+                        "type": "filter",
+                        "advanced": {
+                            "join": [],
+                            "scope": "all",
+                            "delimiter": ",",
+                            "customName": "run state",
+                            "description": "Keep only the TRAP Run State artifact.",
+                            "customNameId": 0,
+                            "delimiter_enabled": true
+                        },
+                        "conditions": [
+                            {
+                                "logic": "and",
+                                "customName": "TRAP Run State",
+                                "comparisons": [
+                                    {
+                                        "op": "==",
+                                        "param": "artifact:*.name",
+                                        "value": "TRAP Run State",
+                                        "conditionIndex": 0
+                                    }
+                                ],
+                                "conditionKey": "condition_key_1",
+                                "conditionIndex": 0
+                            }
+                        ],
+                        "functionId": 1,
+                        "functionName": "run_state"
+                    },
+                    "type": "filter",
+                    "errors": {},
+                    "warnings": {}
+                },
+                "4": {
+                    "x": 190,
+                    "y": 400,
+                    "id": "4",
+                    "data": {
+                        "id": "4",
+                        "type": "decision",
+                        "advanced": {
+                            "join": [],
+                            "scope": "all",
+                            "delimiter": ",",
+                            "customName": "not posted",
+                            "customNameId": 0,
+                            "delimiter_enabled": true
+                        },
+                        "conditions": [
+                            {
+                                "type": "if",
+                                "logic": "and",
+                                "display": "If",
+                                "customName": "not posted",
+                                "comparisons": [
+                                    {
+                                        "op": "!=",
+                                        "param": "filtered-data:run_state:condition_1:artifact:*.cef.linkComment",
+                                        "value": "posted",
+                                        "conditionIndex": 0
+                                    }
+                                ],
+                                "conditionKey": "condition_key_1",
+                                "conditionIndex": 0
+                            }
+                        ],
+                        "functionId": 1,
+                        "functionName": "not_posted"
+                    },
+                    "type": "decision",
+                    "errors": {},
+                    "warnings": {}
+                },
+                "5": {
+                    "x": 190,
+                    "y": 550,
+                    "id": "5",
+                    "data": {
+                        "id": "5",
+                        "tab": "byConnector",
+                        "loop": {
+                            "enabled": false,
+                            "pauseUnit": "m",
+                            "conditions": [
+                                {
+                                    "type": "if",
+                                    "logic": "and",
+                                    "comparisons": [
+                                        {
+                                            "op": "==",
+                                            "param": "",
+                                            "value": "",
+                                            "comparisonKey": "comparison_key_0"
+                                        }
+                                    ],
+                                    "conditionKey": "condition_key_0",
+                                    "conditionIndex": 0
+                                }
+                            ],
+                            "pauseValue": 2,
+                            "exitAfterUnit": "m",
+                            "exitLoopAfter": 2,
+                            "exitAfterValue": 10,
+                            "exitConditionEnabled": false
+                        },
+                        "type": "action",
+                        "action": "add comment",
+                        "advanced": {
+                            "join": [],
+                            "note": "Custom Code adds the detail with the case link. Pick your Proofpoint TRAP asset here after import.",
+                            "customName": "add comment",
+                            "description": "Comment on the TRAP incident with a link to this SOAR case.",
+                            "customNameId": 0
+                        },
+                        "connector": "Proofpoint TRAP",
+                        "actionType": "generic",
+                        "functionId": 1,
+                        "parameters": {
+                            "summary": "Extracted by SOAR automation",
+                            "incident_id": "extract_incident_id:custom_function_result.data.incident_id"
+                        },
+                        "connectorId": "a7c41f8e-3b2d-4e9a-bf56-1d8e9a4c2f7b",
+                        "functionName": "add_comment",
+                        "connectorConfigs": [
+                            "proofpoint_trap_mock"
+                        ],
+                        "connectorVersion": "v1",
+                        "requiredParameters": [
+                            {
+                                "field": "summary",
+                                "default": "",
+                                "data_type": "string"
+                            },
+                            {
+                                "field": "incident_id",
+                                "default": "",
+                                "data_type": "numeric"
+                            }
+                        ]
+                    },
+                    "type": "action",
+                    "errors": {},
+                    "userCode": "    ################################################################################\n\n    # The link is SOAR's configured base URL (Administration > Company Settings)\n    # plus /mission/<container id>, the case page. TRAP needs detail even though\n    # its API doc marks it optional: a comment without it fails \"Null detail\".\n    base_url = (phantom.get_base_url() or \"\").rstrip(\"/\")\n    case_link = \"{}/mission/{}\".format(base_url, container.get(\"id\")) if base_url else \"case {}\".format(container.get(\"id\"))\n    for params in parameters:\n        params[\"detail\"] = \"This incident has been extracted by SOAR automation, please review it in SOAR: {}\".format(case_link)\n\n    ################################################################################\n",
+                    "warnings": {}
+                },
+                "6": {
+                    "x": 190,
+                    "y": 700,
+                    "id": "6",
+                    "data": {
+                        "id": "6",
+                        "type": "decision",
+                        "advanced": {
+                            "join": [],
+                            "delimiter": ",",
+                            "customName": "comment ok",
+                            "customNameId": 0,
+                            "delimiter_enabled": true
+                        },
+                        "conditions": [
+                            {
+                                "type": "if",
+                                "logic": "and",
+                                "display": "If",
+                                "customName": "posted",
+                                "comparisons": [
+                                    {
+                                        "op": "==",
+                                        "param": "add_comment:action_result.status",
+                                        "value": "success",
+                                        "conditionIndex": 0
+                                    }
+                                ],
+                                "conditionKey": "condition_key_1",
+                                "conditionIndex": 0
+                            }
+                        ],
+                        "functionId": 2,
+                        "functionName": "comment_ok"
+                    },
+                    "type": "decision",
+                    "errors": {},
+                    "warnings": {}
+                },
+                "7": {
+                    "x": 190,
+                    "y": 850,
+                    "id": "7",
+                    "data": {
+                        "id": "7",
+                        "tab": "byConnector",
+                        "loop": {
+                            "enabled": false,
+                            "pauseUnit": "m",
+                            "conditions": [
+                                {
+                                    "type": "if",
+                                    "logic": "and",
+                                    "comparisons": [
+                                        {
+                                            "op": "==",
+                                            "param": "",
+                                            "value": "",
+                                            "comparisonKey": "comparison_key_0"
+                                        }
+                                    ],
+                                    "conditionKey": "condition_key_0",
+                                    "conditionIndex": 0
+                                }
+                            ],
+                            "pauseValue": 2,
+                            "exitAfterUnit": "m",
+                            "exitLoopAfter": 2,
+                            "exitAfterValue": 10,
+                            "exitConditionEnabled": false
+                        },
+                        "type": "action",
+                        "action": "update artifact",
+                        "advanced": {
+                            "join": [],
+                            "note": "Custom Code sets cef_json linkComment = posted. Pick your SOAR (Phantom app) asset here after import.",
+                            "scope": "all",
+                            "customName": "update state",
+                            "description": "Record the posted comment on TRAP Run State (linkComment = posted).",
+                            "customNameId": 0
+                        },
+                        "connector": "Phantom",
+                        "actionType": "generic",
+                        "functionId": 2,
+                        "parameters": {
+                            "severity": "low",
+                            "artifact_id": "filtered-data:run_state:condition_1:artifact:*.id"
+                        },
+                        "connectorId": "deb82aa9-22cc-4675-9cf1-534b8d006eb7",
+                        "functionName": "update_state",
+                        "connectorConfigs": [
+                            "soar8"
+                        ],
+                        "connectorVersion": "v1",
+                        "requiredParameters": [
+                            {
+                                "field": "artifact_id",
+                                "default": "",
+                                "data_type": "string"
+                            }
+                        ]
+                    },
+                    "type": "action",
+                    "errors": {},
+                    "userCode": "    ################################################################################\n\n    # Severity low: an update re-applies the artifact's severity to the case.\n    for params in parameters:\n        params[\"cef_json\"] = json.dumps({\"linkComment\": \"posted\"})\n\n    ################################################################################\n",
+                    "warnings": {}
+                }
+            },
+            "notes": "",
+            "description": "Automation playbook (PB6), left inactive: proofpoint_trap_orchestrator runs it last. Comments on the TRAP incident with a link to this SOAR case, once: TRAP Run State's linkComment records it, and a failed comment is retried on the next run."
+        },
+        "input_spec": [],
+        "output_spec": [],
+        "playbook_type": "automation",
+        "python_version": "3.13",
+        "schema": "5.0.24",
+        "version": "8.6.0.530",
+        "playbook_trigger": "artifact_created"
+    },
+    "create_time": "2026-10-15T14:59:39.278007Z",
+    "draft_mode": false,
+    "labels": [
+        "proofpoint_trap"
+    ],
+    "tags": [
+        "proofpoint_trap",
+        "email-abuse",
+        "comment"
+    ]
+}

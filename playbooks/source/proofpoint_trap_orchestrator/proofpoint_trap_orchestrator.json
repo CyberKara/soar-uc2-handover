@@ -4,7 +4,7 @@
     "category": "Email Abuse",
     "coa": {
         "data": {
-            "hash": "c86830a6f3931f08a3e93c67b54ef9fa7c5a9c0e",
+            "hash": "c449a30716037705fe634e45409e8450dc583ac1",
             "edges": [
                 {
                     "id": "port_0_to_port_2",
@@ -35,9 +35,16 @@
                     "targetPort": "5_in"
                 },
                 {
-                    "id": "port_5_to_port_1",
+                    "id": "port_5_to_port_6",
                     "sourceNode": "5",
                     "sourcePort": "5_out",
+                    "targetNode": "6",
+                    "targetPort": "6_in"
+                },
+                {
+                    "id": "port_6_to_port_1",
+                    "sourceNode": "6",
+                    "sourcePort": "6_out",
                     "targetNode": "1",
                     "targetPort": "1_in"
                 }
@@ -45,7 +52,7 @@
             "nodes": {
                 "0": {
                     "x": 190,
-                    "y": 0,
+                    "y": -6.394884621840902e-14,
                     "id": "0",
                     "data": {
                         "id": "0",
@@ -61,7 +68,7 @@
                 },
                 "1": {
                     "x": 190,
-                    "y": 750,
+                    "y": 900,
                     "id": "1",
                     "data": {
                         "id": "1",
@@ -83,12 +90,37 @@
                     "id": "2",
                     "data": {
                         "id": "2",
+                        "loop": {
+                            "enabled": false,
+                            "pauseUnit": "m",
+                            "conditions": [
+                                {
+                                    "type": "if",
+                                    "logic": "and",
+                                    "comparisons": [
+                                        {
+                                            "op": "==",
+                                            "param": "",
+                                            "value": "",
+                                            "comparisonKey": "comparison_key_0"
+                                        }
+                                    ],
+                                    "conditionKey": "condition_key_0",
+                                    "conditionIndex": 0
+                                }
+                            ],
+                            "pauseValue": 2,
+                            "exitAfterUnit": "m",
+                            "exitLoopAfter": 2,
+                            "exitAfterValue": 10,
+                            "exitConditionEnabled": false
+                        },
                         "type": "playbook",
                         "inputs": {},
                         "advanced": {
                             "join": [],
                             "customName": "run detail",
-                            "description": "Fetch the TRAP incident, download its emails and create the event artifacts, the detail note and Enrichment Complete.",
+                            "description": "Fetch the TRAP incident, create the incident-level artifacts, Enrichment Complete and the detail note.",
                             "customNameId": 0
                         },
                         "functionId": 1,
@@ -109,15 +141,40 @@
                     "id": "3",
                     "data": {
                         "id": "3",
+                        "loop": {
+                            "enabled": false,
+                            "pauseUnit": "m",
+                            "conditions": [
+                                {
+                                    "type": "if",
+                                    "logic": "and",
+                                    "comparisons": [
+                                        {
+                                            "op": "==",
+                                            "param": "",
+                                            "value": "",
+                                            "comparisonKey": "comparison_key_0"
+                                        }
+                                    ],
+                                    "conditionKey": "condition_key_0",
+                                    "conditionIndex": 0
+                                }
+                            ],
+                            "pauseValue": 2,
+                            "exitAfterUnit": "m",
+                            "exitLoopAfter": 2,
+                            "exitAfterValue": 10,
+                            "exitConditionEnabled": false
+                        },
                         "type": "playbook",
                         "inputs": {},
                         "advanced": {
                             "join": [],
                             "customName": "run attachments",
-                            "description": "Extract attachments, Cc recipients and the Email Content note from each email detail downloaded.",
+                            "description": "Download each new alert's email: attachments, Cc, the Email Content and Attachment Extraction notes.",
                             "customNameId": 0
                         },
-                        "functionId": 1,
+                        "functionId": 2,
                         "synchronous": true,
                         "functionName": "run_attachments",
                         "playbookName": "proofpoint_trap_attachments",
@@ -135,15 +192,40 @@
                     "id": "4",
                     "data": {
                         "id": "4",
+                        "loop": {
+                            "enabled": false,
+                            "pauseUnit": "m",
+                            "conditions": [
+                                {
+                                    "type": "if",
+                                    "logic": "and",
+                                    "comparisons": [
+                                        {
+                                            "op": "==",
+                                            "param": "",
+                                            "value": "",
+                                            "comparisonKey": "comparison_key_0"
+                                        }
+                                    ],
+                                    "conditionKey": "condition_key_0",
+                                    "conditionIndex": 0
+                                }
+                            ],
+                            "pauseValue": 2,
+                            "exitAfterUnit": "m",
+                            "exitLoopAfter": 2,
+                            "exitAfterValue": 10,
+                            "exitConditionEnabled": false
+                        },
                         "type": "playbook",
                         "inputs": {},
                         "advanced": {
                             "join": [],
                             "customName": "run triage",
-                            "description": "Set the container severity from TRAP, after every artifact has been written.",
+                            "description": "Set the case severity and verdict tag, after every artifact has been written.",
                             "customNameId": 0
                         },
-                        "functionId": 1,
+                        "functionId": 3,
                         "synchronous": true,
                         "functionName": "run_triage",
                         "playbookName": "proofpoint_trap_triage",
@@ -161,15 +243,40 @@
                     "id": "5",
                     "data": {
                         "id": "5",
+                        "loop": {
+                            "enabled": false,
+                            "pauseUnit": "m",
+                            "conditions": [
+                                {
+                                    "type": "if",
+                                    "logic": "and",
+                                    "comparisons": [
+                                        {
+                                            "op": "==",
+                                            "param": "",
+                                            "value": "",
+                                            "comparisonKey": "comparison_key_0"
+                                        }
+                                    ],
+                                    "conditionKey": "condition_key_0",
+                                    "conditionIndex": 0
+                                }
+                            ],
+                            "pauseValue": 2,
+                            "exitAfterUnit": "m",
+                            "exitLoopAfter": 2,
+                            "exitAfterValue": 10,
+                            "exitConditionEnabled": false
+                        },
                         "type": "playbook",
                         "inputs": {},
                         "advanced": {
                             "join": [],
                             "customName": "run summary",
-                            "description": "Write or rewrite the TRAP Summary note from every artifact on the container.",
+                            "description": "Write the TRAP Summary in place.",
                             "customNameId": 0
                         },
-                        "functionId": 1,
+                        "functionId": 4,
                         "synchronous": true,
                         "functionName": "run_summary",
                         "playbookName": "proofpoint_trap_summary",
@@ -180,10 +287,61 @@
                     "type": "playbook",
                     "errors": {},
                     "warnings": {}
+                },
+                "6": {
+                    "x": 170,
+                    "y": 750,
+                    "id": "6",
+                    "data": {
+                        "id": "6",
+                        "loop": {
+                            "enabled": false,
+                            "pauseUnit": "m",
+                            "conditions": [
+                                {
+                                    "type": "if",
+                                    "logic": "and",
+                                    "comparisons": [
+                                        {
+                                            "op": "==",
+                                            "param": "",
+                                            "value": "",
+                                            "comparisonKey": "comparison_key_0"
+                                        }
+                                    ],
+                                    "conditionKey": "condition_key_0",
+                                    "conditionIndex": 0
+                                }
+                            ],
+                            "pauseValue": 2,
+                            "exitAfterUnit": "m",
+                            "exitLoopAfter": 2,
+                            "exitAfterValue": 10,
+                            "exitConditionEnabled": false
+                        },
+                        "type": "playbook",
+                        "inputs": {},
+                        "advanced": {
+                            "join": [],
+                            "customName": "run comment link",
+                            "description": "Comment on the TRAP incident with a link to this case, once.",
+                            "customNameId": 0
+                        },
+                        "functionId": 5,
+                        "synchronous": true,
+                        "functionName": "run_comment_link",
+                        "playbookName": "proofpoint_trap_comment_add_link_to_soar_case",
+                        "playbookRepo": 1,
+                        "playbookType": "automation",
+                        "playbookRepoName": "local"
+                    },
+                    "type": "playbook",
+                    "errors": {},
+                    "warnings": {}
                 }
             },
             "notes": "",
-            "description": "Automation playbook for label proofpoint_trap, the only UC2 playbook active at ingest. Runs proofpoint_trap_detail, proofpoint_trap_attachments, proofpoint_trap_triage and proofpoint_trap_summary in turn, each after the previous one finishes; those four stay inactive."
+            "description": "Automation playbook for label proofpoint_trap, the only UC2 playbook active at ingest. Runs proofpoint_trap_detail, proofpoint_trap_attachments, proofpoint_trap_triage, proofpoint_trap_summary and proofpoint_trap_comment_add_link_to_soar_case in turn, each after the previous one finishes; those five stay inactive."
         },
         "input_spec": [],
         "output_spec": [],
@@ -193,7 +351,7 @@
         "version": "8.6.0.530",
         "playbook_trigger": "artifact_created"
     },
-    "create_time": "2026-10-13T12:03:20.448958Z",
+    "create_time": "2026-10-15T14:59:41.879315Z",
     "draft_mode": false,
     "labels": [
         "proofpoint_trap"
