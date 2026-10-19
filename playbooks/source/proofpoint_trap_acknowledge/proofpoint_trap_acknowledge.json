@@ -28,7 +28,7 @@
                     "targetPort": "4_in"
                 },
                 {
-                    "id": "port_4_to_port_5",
+                    "id": "port_4_to_port_9",
                     "conditions": [
                         {
                             "index": 0,
@@ -37,6 +37,20 @@
                     ],
                     "sourceNode": "4",
                     "sourcePort": "4_out",
+                    "targetNode": "9",
+                    "targetPort": "9_in"
+                },
+                {
+                    "id": "port_9_to_port_10",
+                    "sourceNode": "9",
+                    "sourcePort": "9_out",
+                    "targetNode": "10",
+                    "targetPort": "10_in"
+                },
+                {
+                    "id": "port_10_to_port_5",
+                    "sourceNode": "10",
+                    "sourcePort": "10_out",
                     "targetNode": "5",
                     "targetPort": "5_in"
                 },
@@ -174,11 +188,11 @@
                     "data": {
                         "id": "3",
                         "type": "prompt",
-                        "message": "**TRAP incident {0}**\n\nYour comment is posted on the TRAP incident, which is assigned to SOAR and moved from new to open.",
+                        "message": "**TRAP incident {0}**\n\nYour comment is posted on the TRAP incident, which is assigned to the SOAR team and moved from new to open.",
                         "advanced": {
                             "join": [],
                             "customName": "prompt comment",
-                            "description": "Ask the analyst who launched the playbook for an acknowledgement comment (30 minutes).",
+                            "description": "Ask the analyst who launched the playbook for an acknowledgement comment (6 hours).",
                             "customNameId": 0
                         },
                         "approver": {
@@ -197,7 +211,7 @@
                             "extract_incident_id:custom_function_result.data.incident_id"
                         ],
                         "functionName": "prompt_comment",
-                        "responseTime": 30
+                        "responseTime": 360
                     },
                     "type": "prompt",
                     "errors": {},
@@ -278,16 +292,17 @@
                         "action": "update team and assignee",
                         "advanced": {
                             "join": [],
-                            "note": "On hold: the connector sends assignee only. Pick your Proofpoint TRAP asset here after import.",
+                            "note": "Team and assignee come from the format blocks trap team / trap assignee. Pick your Proofpoint TRAP asset here after import.",
                             "customName": "update incident assignee",
-                            "description": "Assign the TRAP incident to SOAR (on hold: the connector also needs a team).",
+                            "description": "Assign the TRAP incident to the team and assignee set in the two format blocks.",
                             "customNameId": 0
                         },
                         "connector": "Proofpoint TRAP",
                         "actionType": "generic",
                         "functionId": 1,
                         "parameters": {
-                            "assignee": "SOAR",
+                            "team": "trap_team:formatted_data",
+                            "assignee": "trap_assignee:formatted_data",
                             "incident_id": "extract_incident_id:custom_function_result.data.incident_id"
                         },
                         "connectorId": "a7c41f8e-3b2d-4e9a-bf56-1d8e9a4c2f7b",
@@ -306,7 +321,6 @@
                     },
                     "type": "action",
                     "errors": {},
-                    "userCode": "    ################################################################################\n\n    # On hold: TRAP needs team and assignee together and the connector sends\n    # assignee only, so SOAR refuses this step until the connector is fixed;\n    # the next blocks still run.\n\n    ################################################################################\n",
                     "warnings": {}
                 },
                 "6": {
@@ -522,12 +536,56 @@
                     },
                     "type": "action",
                     "errors": {},
-                    "userCode": "    ################################################################################\n\n    # A missing action result is a failure, not a skipped step: SOAR refusing to\n    # dispatch creates no app_run, and the playbook run records it as failed.\n    def _status(block):\n        rows = phantom.collect2(container=container, datapath=[\"{}:action_result.status\".format(block)])\n        return rows[0][0] if rows and rows[0] and rows[0][0] else \"failed - not dispatched (reason in the playbook run's actions)\"\n\n    answer = phantom.collect2(container=container, datapath=[\"prompt_comment:action_result.summary.responses.0\"])\n    incident = phantom.collect2(container=container, datapath=[\"extract_incident_id:custom_function_result.data.incident_id\"])\n    lines = [\"# TRAP Acknowledgement\",\n             \"**Incident ID:** {}\".format(incident[0][0] if incident and incident[0] else \"?\"),\n             \"**Comment:** {}\".format(answer[0][0] if answer and answer[0] else \"\"),\n             \"**TRAP assign to SOAR:** {}\".format(_status(\"update_incident_assignee\")),\n             \"**TRAP set open:** {}\".format(_status(\"set_incident_open\")),\n             \"**TRAP add comment:** {}\".format(_status(\"add_trap_comment\"))]\n    parameters = [{\"title\": \"TRAP Acknowledge\", \"content\": \"\\n\".join(lines), \"container_id\": container.get(\"id\")}]\n\n    ################################################################################\n",
+                    "userCode": "    ################################################################################\n\n    # A missing action result is a failure, not a skipped step: SOAR refusing to\n    # dispatch creates no app_run, and the playbook run records it as failed.\n    def _status(block):\n        rows = phantom.collect2(container=container, datapath=[\"{}:action_result.status\".format(block)])\n        return rows[0][0] if rows and rows[0] and rows[0][0] else \"failed - not dispatched (reason in the playbook run's actions)\"\n\n    answer = phantom.collect2(container=container, datapath=[\"prompt_comment:action_result.summary.responses.0\"])\n    incident = phantom.collect2(container=container, datapath=[\"extract_incident_id:custom_function_result.data.incident_id\"])\n    lines = [\"# TRAP Acknowledgement\",\n             \"**Incident ID:** {}\".format(incident[0][0] if incident and incident[0] else \"?\"),\n             \"**Comment:** {}\".format(answer[0][0] if answer and answer[0] else \"\"),\n             \"**TRAP team and assignee:** {}\".format(_status(\"update_incident_assignee\")),\n             \"**TRAP set open:** {}\".format(_status(\"set_incident_open\")),\n             \"**TRAP add comment:** {}\".format(_status(\"add_trap_comment\"))]\n    parameters = [{\"title\": \"TRAP Acknowledge\", \"content\": \"\\n\".join(lines), \"container_id\": container.get(\"id\")}]\n\n    ################################################################################\n",
+                    "warnings": {}
+                },
+                "9": {
+                    "x": 190,
+                    "y": 475,
+                    "id": "9",
+                    "data": {
+                        "id": "9",
+                        "type": "format",
+                        "advanced": {
+                            "join": [],
+                            "customName": "trap team",
+                            "description": "TRAP team the incident is assigned to: set your own (a team that exists in TRAP).",
+                            "customNameId": 0
+                        },
+                        "template": "SOAR",
+                        "functionId": 1,
+                        "parameters": [],
+                        "functionName": "trap_team"
+                    },
+                    "type": "format",
+                    "errors": {},
+                    "warnings": {}
+                },
+                "10": {
+                    "x": 190,
+                    "y": 500,
+                    "id": "10",
+                    "data": {
+                        "id": "10",
+                        "type": "format",
+                        "advanced": {
+                            "join": [],
+                            "customName": "trap assignee",
+                            "description": "TRAP user the incident is assigned to: set your own (a user of that team in TRAP).",
+                            "customNameId": 0
+                        },
+                        "template": "SOAR",
+                        "functionId": 2,
+                        "parameters": [],
+                        "functionName": "trap_assignee"
+                    },
+                    "type": "format",
+                    "errors": {},
                     "warnings": {}
                 }
             },
             "notes": "",
-            "description": "Automation playbook (PB7), kept inactive: an analyst runs it from the case with Run Playbook. Asks the analyst who launched it for a comment, then assigns the TRAP incident to SOAR (on hold: the connector also needs a team), moves it from new to open, posts the comment and adds a note. An unanswered prompt does nothing."
+            "description": "Automation playbook (PB7), kept inactive: an analyst runs it from the case with Run Playbook. Asks the analyst who launched it for a comment, then assigns the TRAP incident to the team and assignee set in the format blocks trap team and trap assignee, moves it from new to open, posts the comment and adds a note. An unanswered prompt does nothing."
         },
         "input_spec": [],
         "output_spec": [],
@@ -537,7 +595,7 @@
         "version": "8.6.0.530",
         "playbook_trigger": "artifact_created"
     },
-    "create_time": "2026-10-15T14:59:25.766914Z",
+    "create_time": "2026-10-17T17:23:22.159101Z",
     "draft_mode": false,
     "labels": [
         "proofpoint_trap"

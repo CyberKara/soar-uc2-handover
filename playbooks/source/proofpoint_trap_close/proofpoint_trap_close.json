@@ -184,7 +184,7 @@
                         "advanced": {
                             "join": [],
                             "customName": "prompt close reason",
-                            "description": "Ask the analyst who launched the playbook for the close reason (30 minutes).",
+                            "description": "Ask the analyst who launched the playbook for the close reason (6 hours).",
                             "customNameId": 0
                         },
                         "approver": {
@@ -203,7 +203,7 @@
                             "extract_incident_id:custom_function_result.data.incident_id"
                         ],
                         "functionName": "prompt_close_reason",
-                        "responseTime": 30
+                        "responseTime": 360
                     },
                     "type": "prompt",
                     "errors": {},
@@ -531,7 +531,7 @@
         "version": "8.6.0.530",
         "playbook_trigger": "artifact_created"
     },
-    "create_time": "2026-10-15T14:59:28.284613Z",
+    "create_time": "2026-10-17T17:23:24.948924Z",
     "draft_mode": false,
     "labels": [
         "proofpoint_trap"

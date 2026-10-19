@@ -224,8 +224,8 @@ def build_updates(action=None, success=None, container=None, results=None, handl
     phantom.debug("build_updates() called")
 
     ################################################################################
-    # Build one Event Info Update per changed incident with a case, then save the 
-    # signatures.
+    # Build one Event Info Update per changed incident whose case is open (a closed 
+    # case gets none), then save the signatures.
     ################################################################################
 
     build_updates__container_id = None
@@ -239,10 +239,12 @@ def build_updates(action=None, success=None, container=None, results=None, handl
 
     # The case of each incident: the container of an Event Info carrying its
     # incidentId. A changed incident with no case keeps its old signature, so
-    # the change is still pending once on_poll has ingested it.
+    # the change is still pending once on_poll has ingested it. Every column is
+    # read from the hits themselves (matched = the incident id): collect2 lines
+    # up a parameter and the hits of several results by position, not per result.
     containers = {}
     for row in phantom.collect2(container=container, datapath=[
-            "find_cases:action_result.parameter.values", "find_cases:action_result.data.*.container",
+            "find_cases:action_result.data.*.matched", "find_cases:action_result.data.*.container",
             "find_cases:action_result.data.*.name"]) or []:
         if row and row[0] and row[1] and row[2] in ("Event Info", "Event Info Update"):
             containers.setdefault(str(row[0]), row[1])
@@ -256,6 +258,12 @@ def build_updates(action=None, success=None, container=None, results=None, handl
         if inc_id not in containers:
             continue
         new_state[inc_id] = item["signature"]
+        # A case closed in SOAR runs no automation, so an update there would do
+        # nothing but raise the closed case's severity: record the change, add none.
+        case = phantom.get_container(containers[inc_id]) or {}
+        if str(case.get("status") or "").lower() == "closed":
+            phantom.debug("Case {} of TRAP incident {} is closed: no Event Info Update".format(containers[inc_id], inc_id))
+            continue
         cef = dict(item["event_info_cef"])
         cef["message"] = "TRAP incident {} changed since last enrichment".format(inc_id)
         # The tick time makes each update new content, so an incident that

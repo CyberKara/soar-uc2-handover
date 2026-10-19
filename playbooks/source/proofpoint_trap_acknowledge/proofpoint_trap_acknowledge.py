@@ -1,5 +1,5 @@
 """
-Automation playbook (PB7), kept inactive: an analyst runs it from the case with Run Playbook. Asks the analyst who launched it for a comment, then assigns the TRAP incident to SOAR (on hold: the connector also needs a team), moves it from new to open, posts the comment and adds a note. An unanswered prompt does nothing.
+Automation playbook (PB7), kept inactive: an analyst runs it from the case with Run Playbook. Asks the analyst who launched it for a comment, then assigns the TRAP incident to the team and assignee set in the format blocks trap team and trap assignee, moves it from new to open, posts the comment and adds a note. An unanswered prompt does nothing.
 """
 
 
@@ -47,15 +47,15 @@ def prompt_comment(action=None, success=None, container=None, results=None, hand
     phantom.debug("prompt_comment() called")
 
     ################################################################################
-    # Ask the analyst who launched the playbook for an acknowledgement comment (30 
-    # minutes).
+    # Ask the analyst who launched the playbook for an acknowledgement comment (6 
+    # hours).
     ################################################################################
 
     # set approver and message variables for phantom.prompt call
 
     user = phantom.collect2(container=container, datapath=["playbook:launching_user.name"])[0][0]
     role = None
-    message = """**TRAP incident {0}**\n\nYour comment is posted on the TRAP incident, which is assigned to SOAR and moved from new to open."""
+    message = """**TRAP incident {0}**\n\nYour comment is posted on the TRAP incident, which is assigned to the SOAR team and moved from new to open."""
 
     # parameter list for template variable replacement
     parameters = [
@@ -73,7 +73,7 @@ def prompt_comment(action=None, success=None, container=None, results=None, hand
         }
     ]
 
-    phantom.prompt2(container=container, user=user, role=role, message=message, respond_in_mins=30, name="prompt_comment", parameters=parameters, response_types=response_types, callback=answered)
+    phantom.prompt2(container=container, user=user, role=role, message=message, respond_in_mins=360, name="prompt_comment", parameters=parameters, response_types=response_types, callback=answered)
 
     return
 
@@ -96,7 +96,7 @@ def answered(action=None, success=None, container=None, results=None, handle=Non
 
     # call connected blocks if condition 1 matched
     if found_match_1:
-        update_incident_assignee(action=action, success=success, container=container, results=results, handle=handle)
+        trap_team(action=action, success=success, container=container, results=results, handle=handle)
         return
 
     return
@@ -109,10 +109,12 @@ def update_incident_assignee(action=None, success=None, container=None, results=
     # phantom.debug('Action: {0} {1}'.format(action['name'], ('SUCCEEDED' if success else 'FAILED')))
 
     ################################################################################
-    # Assign the TRAP incident to SOAR (on hold: the connector also needs a team).
+    # Assign the TRAP incident to the team and assignee set in the two format blocks.
     ################################################################################
 
     extract_incident_id__result = phantom.collect2(container=container, datapath=["extract_incident_id:custom_function_result.data.incident_id"])
+    trap_team = phantom.get_format_data(name="trap_team")
+    trap_assignee = phantom.get_format_data(name="trap_assignee")
 
     parameters = []
 
@@ -120,20 +122,17 @@ def update_incident_assignee(action=None, success=None, container=None, results=
     for extract_incident_id__result_item in extract_incident_id__result:
         if extract_incident_id__result_item[0] is not None:
             parameters.append({
-                "assignee": "SOAR",
+                "team": trap_team,
+                "assignee": trap_assignee,
                 "incident_id": extract_incident_id__result_item[0],
             })
 
     ################################################################################
     ## Custom Code Start
     ################################################################################
-    ################################################################################
 
-    # On hold: TRAP needs team and assignee together and the connector sends
-    # assignee only, so SOAR refuses this step until the connector is fixed;
-    # the next blocks still run.
+    # Write your custom code here...
 
-    ################################################################################
     ################################################################################
     ## Custom Code End
     ################################################################################
@@ -257,7 +256,7 @@ def add_note(action=None, success=None, container=None, results=None, handle=Non
     lines = ["# TRAP Acknowledgement",
              "**Incident ID:** {}".format(incident[0][0] if incident and incident[0] else "?"),
              "**Comment:** {}".format(answer[0][0] if answer and answer[0] else ""),
-             "**TRAP assign to SOAR:** {}".format(_status("update_incident_assignee")),
+             "**TRAP team and assignee:** {}".format(_status("update_incident_assignee")),
              "**TRAP set open:** {}".format(_status("set_incident_open")),
              "**TRAP add comment:** {}".format(_status("add_trap_comment"))]
     parameters = [{"title": "TRAP Acknowledge", "content": "\n".join(lines), "container_id": container.get("id")}]
@@ -268,6 +267,67 @@ def add_note(action=None, success=None, container=None, results=None, handle=Non
     ################################################################################
 
     phantom.act("add note", parameters=parameters, name="add_note", assets=["soar8"])
+
+    return
+
+
+@phantom.playbook_block()
+def trap_team(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
+    phantom.debug("trap_team() called")
+
+    ################################################################################
+    # TRAP team the incident is assigned to: set your own (a team that exists in TRAP).
+    ################################################################################
+
+    template = """SOAR"""
+
+    # parameter list for template variable replacement
+    parameters = []
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+
+    # Write your custom code here...
+
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
+    phantom.format(container=container, template=template, parameters=parameters, name="trap_team")
+
+    trap_assignee(container=container)
+
+    return
+
+
+@phantom.playbook_block()
+def trap_assignee(action=None, success=None, container=None, results=None, handle=None, filtered_artifacts=None, filtered_results=None, custom_function=None, loop_state_json=None, **kwargs):
+    phantom.debug("trap_assignee() called")
+
+    ################################################################################
+    # TRAP user the incident is assigned to: set your own (a user of that team in 
+    # TRAP).
+    ################################################################################
+
+    template = """SOAR"""
+
+    # parameter list for template variable replacement
+    parameters = []
+
+    ################################################################################
+    ## Custom Code Start
+    ################################################################################
+
+    # Write your custom code here...
+
+    ################################################################################
+    ## Custom Code End
+    ################################################################################
+
+    phantom.format(container=container, template=template, parameters=parameters, name="trap_assignee")
+
+    update_incident_assignee(container=container)
 
     return
 

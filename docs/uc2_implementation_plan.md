@@ -26,7 +26,7 @@ not shipped in the handover. Open work: the Splunk project's `docs/next-steps.md
 | PB4 `proofpoint_trap_summary` | automation | `proofpoint_trap` | no | TRAP Summary note |
 | PB5 `proofpoint_trap_isolation_notify` | automation | `proofpoint_trap` | no | Analyst: email isolation-browser links |
 | PB6 `proofpoint_trap_comment_add_link_to_soar_case` | automation | `proofpoint_trap` | no | TRAP comment linking the case, once |
-| PB7 `proofpoint_trap_acknowledge` | automation | `proofpoint_trap` | no | Analyst: comment, assign to SOAR, set open in TRAP (**on hold**, not reworked) |
+| PB7 `proofpoint_trap_acknowledge` | automation | `proofpoint_trap` | no | Analyst: comment, assign the TRAP team and assignee, set open in TRAP |
 | PB8 `proofpoint_trap_close` | automation | `proofpoint_trap` | no | Analyst: close in TRAP with a reason, then the case |
 | PB9 `proofpoint_trap_recheck` | automation | `proofpoint_trap_recheck` | **yes** | Timer-driven: finds ingested incidents that changed |
 | CF `proofpoint_trap_extract_incident_id` | custom function | — | — | Incident ID + TRAP Severity from the latest Event Info (Update) |
@@ -164,13 +164,14 @@ both led by Address. No timestamp, so an unchanged case leaves the note alone.
 
 `extract incident id` → `isolation browser url` (format block: set the real prefix there,
 placeholder `https://www.domain.tld/browser?url=`) → `build links` → `send isolation email`.
-Requires the case to have an owner and status `open`; the owner's email comes from
-`GET /rest/ph_user?_filter_username=` (inside a playbook `container['owner']` is the username).
-One link per `Threat Domain` `cef.url`, as prefix + `urllib.parse.quote(target, safe="")`; a
+The email goes to the analyst who launched it (`playbook:launching_user.name`, email from
+`GET /rest/ph_user?_filter_username=`); no case owner or status needed.
+One link per distinct threat URL — `Threat Domain` `cef.url` (URLs in the emails) and `URL Artifact`
+`cef.requestURL` (the incident's `hosts.url`) — as prefix + `urllib.parse.quote(target, safe="")`; a
 Microsoft Safe Links URL is unwrapped first. HTML email `TRAP Incident <id> - Isolation Browser
 Links` through the `smtp` asset: its first line links directly to the case, each threat URL is
 shown defanged beside its isolation link. The send action's result is the record on the case (no
-note). Error paths (no owner, not open, blank prefix, no threat URL) add a note. Outputs `status`,
+note). Error paths (no email for the launching analyst, blank prefix, no threat URL) add a note. Outputs `status`,
 `incident_id`, `recipient_email`, `link_count`. The receiving Exchange still wraps the email's
 links in Safe Links unless the tenant's policy lists the isolation-browser and SOAR hosts under
 "Do not rewrite the following URLs".
@@ -182,18 +183,18 @@ links in Safe Links unless the tenant's policy lists the isolation-browser and S
 `comment ok` → `update state` (`linkComment: posted`, severity `low`). A failed comment is retried
 on the next run.
 
-### PB7 — `proofpoint_trap_acknowledge` (on hold, not reworked)
+### PB7 — `proofpoint_trap_acknowledge`
 
-Prompts the case owner, else `soar_local_admin` (30 minutes), for a comment, then
-`update team and assignee` (assignee SOAR), `set incident field value` (state open), `add comment`
-and a `TRAP Acknowledge` note. **On hold:** it sends `assignee` only while the connector requires
-`team` too, so SOAR refuses that step on every run; only the user's reassignment test in TRAP's own
-web UI clears it.
+`extract incident id` → `prompt comment` (native prompt to the analyst who launched it, 6
+hours) → `answered` → `trap team` → `trap assignee` (format blocks: set a team that exists in
+TRAP and one of its users, both preset `SOAR`; TRAP requires team and assignee together) →
+`update incident assignee` → `set incident open` → `add trap comment` (the answer) → `add note`
+(`TRAP Acknowledge`: the comment and each TRAP result). Unanswered → nothing done, no note.
 
 ### PB8 — `proofpoint_trap_close`
 
-`extract incident id` → `prompt close reason` (native prompt to the analyst who launched it, 30
-minutes) → `approved` → `close trap incident` (`summary` + the reason as `detail`, both required)
+`extract incident id` → `prompt close reason` (native prompt to the analyst who launched it, 6
+hours) → `approved` → `close trap incident` (`summary` + the reason as `detail`, both required)
 → `add note` (`TRAP Close`: reason and TRAP's result) → `trap closed` → `set status` (closed).
 Unanswered → nothing done, no note. The case is closed only when TRAP closed the incident.
 
@@ -208,6 +209,8 @@ Event Info fields) is compared with custom list `proofpoint_trap_recheck_state` 
 - unseen incident → recorded, not rechecked (so the first tick does not re-enrich the backlog);
 - changed with a case → an `Event Info Update` on that case (`run_automation: True`, incident id
   typed `proofpoint trap incident id`, `recheckTime`), which re-runs the orchestrator;
+- changed with a case closed in SOAR → recorded, no update (a closed case runs no automation, and a
+  new artifact would only raise its severity);
 - changed with no case yet → left pending until `on_poll` ingests it.
 
 The signature code mirrors the connector's Event Info CEF; keep both in sync. Never closes a case
@@ -276,6 +279,8 @@ login; the appliance where noted):
    active flags back: a redeploy keeps each playbook's own state.
 7. **SOAR base URL** (Administration > Company Settings) must be the address analysts open: PB6's
    TRAP comment and PB5's case link are built from it.
+8. **Format blocks to set** (open the playbook, edit the block's template, save): PB5
+   `isolation browser url`, PB7 `trap team` and `trap assignee`.
 
 ## Verification
 
@@ -301,5 +306,4 @@ login; the appliance where noted):
 - Field names follow this UC (`emailAddress`, `messageId`, `emailSubject`), not the names community
   phishing playbooks read (`fromEmail`, `toEmail`, `emailHeaders.*`).
 - A note updated in place keeps no earlier version.
-- PB7 acknowledge is on hold (see PB7).
 - Lab only: about 309 cases ingested before 2026-09-22 were never enriched (no backfill).

@@ -1,5 +1,5 @@
 """
-Automation playbook (PB5), kept inactive: an analyst runs it from the case with Run Playbook. Emails the case owner one isolation-browser link per threat URL on the case; the send action&#39;s result is the record on the case.
+Automation playbook (PB5), kept inactive: an analyst runs it from the case with Run Playbook. Emails the analyst who launched it one isolation-browser link per threat URL on the case; the send action&#39;s result is the record on the case.
 """
 
 
@@ -78,7 +78,7 @@ def build_links(action=None, success=None, container=None, results=None, handle=
     phantom.debug("build_links() called")
 
     ################################################################################
-    # Check owner and status, find the owner email, build the isolation links.
+    # Find the launching analyst's email, build the isolation links.
     ################################################################################
 
     build_links__recipient_email = None
@@ -95,40 +95,24 @@ def build_links(action=None, success=None, container=None, results=None, handle=
     incident_id = str(rows[0][0]) if rows and rows[0] and rows[0][0] else ""
     phantom.save_run_data(key="playbook_output", value=json.dumps({"status": "failed", "incident_id": incident_id}))
 
-    owner_id = container.get("owner")
-    status = container.get("status")
-
-    if not owner_id or status != "open":
-        msg = (
-            "Container has no assigned owner or is not status 'open' "
-            "(owner={}, status={}) -- self-assign this container as owner "
-            "and set its status to Open in the SOAR UI first, so a real "
-            "recipient can be resolved.".format(owner_id, status)
-        )
-        phantom.error(msg)
-        phantom.add_note(
-            container=container,
-            note_type="general",
-            title="TRAP Isolation Notify - Error",
-            content=msg
-        )
-        return
-
-    # Inside a playbook container['owner'] is the username, not the numeric id
-    # REST shows: look the user up by username.
-    try:
-        resp = phantom.requests.get(
-            uri=phantom.build_phantom_rest_url("ph_user") + '?_filter_username="{}"&page_size=1'.format(owner_id),
-            verify=False,
-        ).json()
-        rows = resp.get("data") or []
-        recipient_email = rows[0].get("email") if rows else None
-    except Exception as e:
-        recipient_email = None
-        phantom.debug("Could not fetch ph_user for owner '{}': {}".format(owner_id, str(e)))
+    # The links go to the analyst who launched the playbook (Run Playbook on the
+    # case): no owner or status needed. Look the user up by username for the email.
+    launcher_rows = phantom.collect2(container=container, datapath=["playbook:launching_user.name"])
+    launcher = launcher_rows[0][0] if launcher_rows and launcher_rows[0] and launcher_rows[0][0] else ""
+    recipient_email = None
+    if launcher:
+        try:
+            resp = phantom.requests.get(
+                uri=phantom.build_phantom_rest_url("ph_user") + '?_filter_username="{}"&page_size=1'.format(launcher),
+                verify=False,
+            ).json()
+            users = resp.get("data") or []
+            recipient_email = users[0].get("email") if users else None
+        except Exception as e:
+            phantom.debug("Could not fetch ph_user for '{}': {}".format(launcher, str(e)))
 
     if not recipient_email:
-        msg = "Could not resolve an email address for owner user id {}".format(owner_id)
+        msg = "Could not resolve an email address for the user who launched the playbook ({})".format(launcher or "unknown")
         phantom.error(msg)
         phantom.add_note(
             container=container,
@@ -152,14 +136,17 @@ def build_links(action=None, success=None, container=None, results=None, handle=
         )
         return
 
-    # Threat Domain artifacts are the only ones with cef.url set -- collect
-    # across the whole container (scope="all", required when re-running on
-    # an existing container per constraints.md) and drop the Nones instead
-    # of also fetching artifact:*.name to filter by. A URL the mail system
-    # already wrapped in Safe Links is unwrapped first, or the isolation
-    # browser would go through Safe Links before reaching it.
-    url_rows = phantom.collect2(container=container, datapath=["artifact:*.cef.url"], scope="all")
-    threat_urls = sorted({_unwrap_safelinks(row[0]) for row in url_rows if row and row[0]}) if url_rows else []
+    # Threat URLs come from two artifacts: Threat Domain cef.url (URLs in the
+    # emails) and URL Artifact cef.requestURL (the incident's hosts.url, often
+    # the only ones on a real incident). scope="all" is required when
+    # re-running on an existing container (constraints.md). A URL the mail
+    # system already wrapped in Safe Links is unwrapped first, or the isolation
+    # browser would go through Safe Links before reaching it; the set drops a
+    # URL both artifacts carry.
+    url_rows = phantom.collect2(container=container, datapath=["artifact:*.name", "artifact:*.cef.url", "artifact:*.cef.requestURL"], scope="all") or []
+    threat_urls = sorted({_unwrap_safelinks(url) for row in url_rows if row
+                          for name, url in (("Threat Domain", row[1]), ("URL Artifact", row[2]))
+                          if row[0] == name and url})
 
     if not threat_urls:
         phantom.add_note(

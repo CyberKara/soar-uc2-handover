@@ -47,7 +47,7 @@ def prompt_close_reason(action=None, success=None, container=None, results=None,
     phantom.debug("prompt_close_reason() called")
 
     ################################################################################
-    # Ask the analyst who launched the playbook for the close reason (30 minutes).
+    # Ask the analyst who launched the playbook for the close reason (6 hours).
     ################################################################################
 
     # set approver and message variables for phantom.prompt call
@@ -72,7 +72,7 @@ def prompt_close_reason(action=None, success=None, container=None, results=None,
         }
     ]
 
-    phantom.prompt2(container=container, user=user, role=role, message=message, respond_in_mins=30, name="prompt_close_reason", parameters=parameters, response_types=response_types, callback=approved)
+    phantom.prompt2(container=container, user=user, role=role, message=message, respond_in_mins=360, name="prompt_close_reason", parameters=parameters, response_types=response_types, callback=approved)
 
     return
 
