@@ -8,22 +8,24 @@
             "name": "container_id",
             "description": "Case to write the note on.",
             "placeholder": "container:id",
-            "contains": [],
-            "required": false
+            "contains_type": [
+                "phantom container id"
+            ],
+            "input_type": "item"
         },
         {
             "name": "title",
             "description": "Note title; identifies the note on the case.",
             "placeholder": "TRAP Summary",
-            "contains": [],
-            "required": false
+            "contains_type": [],
+            "input_type": "item"
         },
         {
             "name": "content",
             "description": "Note content, markdown.",
             "placeholder": "format_note:formatted_data",
-            "contains": [],
-            "required": false
+            "contains_type": [],
+            "input_type": "item"
         }
     ],
     "outputs": [

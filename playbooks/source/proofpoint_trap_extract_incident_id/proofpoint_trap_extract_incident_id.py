@@ -12,7 +12,7 @@ def proofpoint_trap_extract_incident_id(**kwargs):
     from phantom.decided.context import get_current_container_id_
 
     # The incident ID and raw TRAP Severity sit on the "Event Info" artifact (connector on_poll)
-    # and on any later "Event Info Update" (proofpoint_trap_recheck, PB7); the highest artifact id
+    # and on any later "Event Info Update" (connector on_poll recheck); the highest artifact id
     # wins, so an update overrides the original. A custom function gets no container object for
     # phantom.collect2(), so artifacts are read over REST -- every artifact on the container, the
     # same view as collect2(scope="all"). Used by proofpoint_trap_triage/_acknowledge/_close.
