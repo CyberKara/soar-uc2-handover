@@ -34,4 +34,4 @@ jobs:
             --title "${TAG}" \
             --target "${GITHUB_SHA}" \
             --generate-notes \
-            connectors/*.tgz playbooks/*.tgz
+            connectors/*.tgz custom_functions/*.tgz playbooks/*.tgz
