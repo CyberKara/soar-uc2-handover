@@ -521,6 +521,7 @@ def read_emails(action=None, success=None, container=None, results=None, handle=
     import email
     import email.policy
     from email.utils import getaddresses, parseaddr
+    from email.header import decode_header, make_header
 
     container_id = container.get("id")
     incident_rows = phantom.collect2(container=container, datapath=["get_trap_incident:action_result.data"])
@@ -572,11 +573,16 @@ def read_emails(action=None, success=None, container=None, results=None, handle=
         # report); a report from a shared mailbox comes alone, naming the sender
         # in X-PhishAlarm-Sender. A report's Cc are the reporter's, not the
         # reported email's: none is kept (same rule as proofpoint_trap_detail).
+        # The header can arrive RFC 2047-encoded as a whole, address included.
         emails = event.get("emails") or []
         has_reported_email = any((e or {}).get("abuseCopy") is False for e in emails)
         for item in emails:
             headers = (item or {}).get("headers") or {}
             header_sender = next((str(v) for k, v in headers.items() if str(k).lower() == "x-phishalarm-sender"), "")
+            try:
+                header_sender = str(make_header(decode_header(header_sender)))
+            except Exception:
+                pass
             if (item or {}).get("abuseCopy") is True and has_reported_email:
                 return True
             if (item or {}).get("abuseCopy") is not False and not has_reported_email and "@" in header_sender:

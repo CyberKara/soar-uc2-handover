@@ -204,10 +204,19 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
         ("X-PhishAlarm-Sender", "phishAlarmSender"),
     )
 
+    from email.header import decode_header, make_header  # local import, same reason as urllib.parse above
+
     def _header_value(headers, name):
+        # A header with a non-ASCII character can arrive RFC 2047-encoded as a
+        # whole (=?utf-8?b?...?=), address included: decode it before reading it.
         for header_name, header_value in (headers or {}).items():
             if str(header_name).lower() == name.lower():
-                return " ".join(str(header_value or "").split())
+                text = str(header_value or "")
+                try:
+                    text = str(make_header(decode_header(text)))
+                except Exception:
+                    pass
+                return " ".join(text.split())
         return ""
 
     def _flat_header_cef(headers):
@@ -225,11 +234,14 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
         # On the appliance X-PhishAlarm-Sender reads `"Name <addr>`, with an
         # unclosed quote, and parseaddr returns the whole text as the address.
         # Take the address inside the last <...> first, else parseaddr's, and
-        # keep it only if it is one plain address.
+        # keep it only if it is one plain address. An apostrophe is valid before
+        # the @ (jean.d'arc@...), so only quotes around the whole address go.
         value = str(value or "")
         bracketed = re.findall(r"<([^<>\s]+)>", value)
-        candidate = (bracketed[-1] if bracketed else parseaddr(value)[1]).strip().strip("\"'")
-        return candidate if re.fullmatch(r"[^@\s<>\"',;]+@[^@\s<>\"',;]+\.[^@\s<>\"',;]+", candidate) else ""
+        candidate = (bracketed[-1] if bracketed else parseaddr(value)[1]).strip().strip('"')
+        if len(candidate) > 1 and candidate[0] == candidate[-1] == "'":
+            candidate = candidate[1:-1]
+        return candidate if re.fullmatch(r"[^@\s<>\",;]+@[^@\s<>\"',;]+\.[^@\s<>\"',;]+", candidate) else ""
 
     def _stringify_delivery_time(value):
         # messageDeliveryTime can be a Joda-time object ({"millis": ..., "zone": ...})

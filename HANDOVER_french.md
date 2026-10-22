@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Paquet de transfert (déploiement air-gapped)
 
-Généré le 2026-10-22 16:00 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
+Généré le 2026-10-22 17:54 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
 
 Ce paquet est autonome — tout ce qu'il faut pour déployer ce cas d'usage manuellement
 dans un environnement sans accès réseau vers ce dépôt ni vers `soar8`.
@@ -13,9 +13,10 @@ dans un environnement sans accès réseau vers ce dépôt ni vers `soar8`.
 |--------|---------|
 | `connectors/` | Paquet(s) applicatif(s) connecteur : proofpoint_trap-v1.0.45.tgz |
 | `connectors/source/` | Même(s) connecteur(s), extrait(s) — pour lecture, pas pour import |
-| `playbooks/*.tgz` (CF) | proofpoint_trap_extract_incident_id, proofpoint_trap_note_upsert, container_update |
-| `playbooks/*.tgz` (PB) | proofpoint_trap_detail, proofpoint_trap_triage, proofpoint_trap_attachments, proofpoint_trap_acknowledge, proofpoint_trap_close, proofpoint_trap_isolation_notify, proofpoint_trap_summary, proofpoint_trap_comment_add_link_to_soar_case, proofpoint_trap_orchestrator |
-| `playbooks/source/` | Mêmes CF/playbooks, extraits — pour lecture, pas pour import |
+| `custom_functions/` | Paquet(s) de fonctions personnalisées : proofpoint_trap_extract_incident_id, proofpoint_trap_note_upsert, container_update |
+| `custom_functions/source/` | Même(s) fonction(s) personnalisée(s), extraite(s) — pour lecture, pas pour import |
+| `playbooks/` | Paquet(s) de playbooks : proofpoint_trap_detail, proofpoint_trap_triage, proofpoint_trap_attachments, proofpoint_trap_acknowledge, proofpoint_trap_close, proofpoint_trap_isolation_notify, proofpoint_trap_summary, proofpoint_trap_comment_add_link_to_soar_case, proofpoint_trap_orchestrator |
+| `playbooks/source/` | Même(s) playbook(s), extrait(s) — pour lecture, pas pour import |
 | `assets/*.json` | Modèles de configuration d'assets (identifiants masqués — voir ci-dessous) |
 | `custom_lists/*.json` | Liste(s) personnalisée(s) — les lignes définies par ce paquet, jamais les lignes de données de la source (voir la section dédiée ci-dessous) |
 | `docs/` | Document de plan d'implémentation, pour le contexte de conception complet |
@@ -80,6 +81,8 @@ d'installation.
 
 - **Réimportez les custom functions `proofpoint_trap_note_upsert` et `container_update` (2026-10-22).** Les paquets précédents livraient leurs entrées sans type : après import, l'éditeur SOAR les signalait comme modifiées hors de l'éditeur et verrouillait leurs entrées ; elles s'exécutent quand même. Importez-les à nouveau avec *Import Custom Function*, en remplaçant les existantes. D'ici là, ne cliquez pas sur *generate the custom function header* : il ajoute un second en-tête et chaque enregistrement devient alors un brouillon.
 
+- **Réimportez `proofpoint_trap_detail` et `proofpoint_trap_attachments` (2026-10-22) : l'expéditeur d'un signalement depuis une boîte partagée est de nouveau lu quand son nom contient un accent ou une apostrophe.** Un tel nom peut arriver avec tout l'en-tête `X-PhishAlarm-Sender` encodé (`=?utf-8?b?...?=`), ou avec une apostrophe dans l'adresse (`jean.d'arc@...`) ; le cas n'avait alors aucun Sender Email, gardait le nom `TRAP-<id>: No summary` et son résumé n'avait pas de section Sender. Les deux restent inactifs. Ensuite, sur chaque cas resté ainsi, lancez `proofpoint_trap_orchestrator` avec *Run Playbook* : il ajoute l'expéditeur et renomme le cas.
+
 ## Ordre d'installation
 
 1. **Installer l'application/les applications connecteur** — Apps > Install App, charger
@@ -127,16 +130,15 @@ d'installation.
    (la structure de premier niveau du fichier est `{"name": ..., "content": [...]}` —
    correspond directement au payload REST attendu.)
 4. **Importer les fonctions personnalisées, puis les playbooks** (dans cet ordre — les
-   playbooks référencent les CF). `playbooks/` contient les deux, et chacun passe par son
-   propre import :
-   - **Fonctions personnalisées** — `playbooks/proofpoint_trap_extract_incident_id.tgz`, `playbooks/proofpoint_trap_note_upsert.tgz`, `playbooks/container_update.tgz` : dans l'onglet Custom Functions de la
-     page Playbooks, le bouton d'envoi dont l'infobulle indique *Import Custom Function*.
+   playbooks référencent les CF). Chacun passe par son propre import :
+   - **Fonctions personnalisées** — tous les `custom_functions/*.tgz` : dans l'onglet Custom
+     Functions de la page Playbooks, le bouton d'envoi dont l'infobulle indique *Import Custom Function*.
      L'import de playbook refuse une archive de CF (« failed to identify the import as a
      playbook »). Si la CF apparaît ensuite en brouillon, ouvrez-la dans l'éditeur et
      enregistrez-la.
-   - **Playbooks** — tous les autres `playbooks/*.tgz` : *Import Playbook* sur la page Playbooks.
-   (`playbooks/source/` est le même code extrait pour lecture — ne pas importer depuis
-   ce dossier, l'interface a besoin du `.tgz`.)
+   - **Playbooks** — tous les `playbooks/*.tgz` : *Import Playbook* sur la page Playbooks.
+   (`custom_functions/source/` et `playbooks/source/` sont le même code extrait pour lecture —
+   ne pas importer depuis ces dossiers, l'interface a besoin du `.tgz`.)
 5. **Activer les playbooks d'automatisation** (`proofpoint_trap_orchestrator`) et définir leur utilisateur
    **Run As** selon le guide d'installation du document de plan d'implémentation
    (voir `docs/`).
