@@ -311,8 +311,13 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
         # becomes a Recipient Email, role "reporter". When TRAP gives the report
         # alone with an X-PhishAlarm-Sender header (a report from a shared
         # mailbox), that header names the Sender Email and the report is
-        # otherwise handled as a report copy.
+        # otherwise handled as a report copy. The header also stands in when the
+        # reported email's own sender field holds no address (a report of an
+        # email sent to a shared mailbox).
         has_reported_email = any((e or {}).get("abuseCopy") is False for e in emails)
+        event_header_raw = next((v for v in (_header_value((e or {}).get("headers") or {}, "X-PhishAlarm-Sender")
+                                             for e in emails) if _header_address(v)), "")
+        event_header_sender = _header_address(event_header_raw)
 
         for email in emails:
             subject = email.get("subject", "")
@@ -351,10 +356,14 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
 
             # Sender email
             sender = email.get("sender") or {}
+            named_by_header = sender_from_header
             if sender_from_header:
                 from_addr = header_sender
             else:
                 from_addr = "" if report_copy else sender.get("email", "")
+                if email.get("abuseCopy") is False and "@" not in str(from_addr or "") and event_header_sender:
+                    from_addr = event_header_sender
+                    named_by_header = True
             if from_addr and from_addr.strip().lower() in excluded_addresses:
                 skipped_addresses.add(from_addr.strip().lower())
             elif from_addr and from_addr not in seen_sender_emails:
@@ -373,13 +382,15 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
                     "abuseCopy": abuse_copy_str,
                     "emailHeaders": selected_headers,
                 }
-                if sender_from_header:
+                if named_by_header:
                     sender_cef["senderSource"] = "X-PhishAlarm-Sender"
                 sender_cef.update(_flat_header_cef(headers))
+                if named_by_header and not sender_from_header:
+                    sender_cef["phishAlarmSender"] = event_header_raw
                 artifacts.append({
                     "name": "Sender Email",
                     "description": "{} from alert {} (subject: {})".format(
-                        "Sender named by X-PhishAlarm-Sender" if sender_from_header else "Sender", event_id, subject),
+                        "Sender named by X-PhishAlarm-Sender" if named_by_header else "Sender", event_id, subject),
                     "label": "event",
                     "cef": sender_cef,
                     "cef_types": {"emailAddress": ["email"], "messageId": ["internet message id"],

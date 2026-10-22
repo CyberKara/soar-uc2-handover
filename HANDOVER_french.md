@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Paquet de transfert (déploiement air-gapped)
 
-Généré le 2026-10-22 17:54 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
+Généré le 2026-10-22 21:36 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
 
 Ce paquet est autonome — tout ce qu'il faut pour déployer ce cas d'usage manuellement
 dans un environnement sans accès réseau vers ce dépôt ni vers `soar8`.
@@ -82,6 +82,8 @@ d'installation.
 - **Réimportez les custom functions `proofpoint_trap_note_upsert` et `container_update` (2026-10-22).** Les paquets précédents livraient leurs entrées sans type : après import, l'éditeur SOAR les signalait comme modifiées hors de l'éditeur et verrouillait leurs entrées ; elles s'exécutent quand même. Importez-les à nouveau avec *Import Custom Function*, en remplaçant les existantes. D'ici là, ne cliquez pas sur *generate the custom function header* : il ajoute un second en-tête et chaque enregistrement devient alors un brouillon.
 
 - **Réimportez `proofpoint_trap_detail` et `proofpoint_trap_attachments` (2026-10-22) : l'expéditeur d'un signalement depuis une boîte partagée est de nouveau lu quand son nom contient un accent ou une apostrophe.** Un tel nom peut arriver avec tout l'en-tête `X-PhishAlarm-Sender` encodé (`=?utf-8?b?...?=`), ou avec une apostrophe dans l'adresse (`jean.d'arc@...`) ; le cas n'avait alors aucun Sender Email, gardait le nom `TRAP-<id>: No summary` et son résumé n'avait pas de section Sender. Les deux restent inactifs. Ensuite, sur chaque cas resté ainsi, lancez `proofpoint_trap_orchestrator` avec *Run Playbook* : il ajoute l'expéditeur et renomme le cas.
+
+- **Réimportez encore `proofpoint_trap_detail` (2026-10-22, plus tard le même jour) : le signalement d'un e-mail envoyé à une boîte de service partagée obtient son expéditeur.** TRAP liste ce signalement avec l'e-mail signalé, dont le champ expéditeur peut ne contenir aucune adresse ; l'expéditeur est alors pris dans le `X-PhishAlarm-Sender` du signalement. Il reste inactif. Relancez ensuite `proofpoint_trap_orchestrator` sur chaque cas encore nommé `TRAP-<id>: No summary`.
 
 ## Ordre d'installation
 
