@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Air-Gapped Handover Package
 
-Generated 2026-10-22 21:36 UTC from `proofpoint_trap` (source env: `soar8`).
+Generated 2026-10-22 22:16 UTC from `proofpoint_trap` (source env: `soar8`).
 
 This package is self-contained — everything needed to deploy this use case by hand
 in an environment with no network access back to this repo or to `soar8`.
@@ -83,6 +83,8 @@ previous package. On a completely fresh target, skip to Install order.
 - **Re-import `proofpoint_trap_detail` and `proofpoint_trap_attachments` (2026-10-22): the sender of a shared-mailbox report is read again when its name has an accent or apostrophe.** Such a name can arrive with the whole `X-PhishAlarm-Sender` header encoded (`=?utf-8?b?...?=`), or with an apostrophe in the address (`jean.d'arc@...`); the case then got no Sender Email, kept its name `TRAP-<id>: No summary` and its summary had no Sender section. Both stay inactive. Then, on each case left that way, run `proofpoint_trap_orchestrator` with *Run Playbook*: it adds the sender and renames the case.
 
 - **Re-import `proofpoint_trap_detail` once more (2026-10-22, later the same day): a report of an email sent to a shared service mailbox gets its sender.** TRAP lists such a report together with the reported email, whose own sender field can hold no address; the sender is then taken from the report's `X-PhishAlarm-Sender`. It stays inactive. Then run `proofpoint_trap_orchestrator` again on each case still named `TRAP-<id>: No summary`.
+
+- **Re-import `proofpoint_trap_detail` again (package r38): the same reports, when TRAP shows the analyzer as the sender of both copies.** The analyzer is in `proofpoint_trap_excluded_email`, so it was dropped and nothing replaced it; the sender is now taken from `X-PhishAlarm-Sender` whenever the reported email's own sender is empty or excluded. It stays inactive. Then run `proofpoint_trap_orchestrator` on each case still named `TRAP-<id>: No summary`.
 
 ## Install order
 

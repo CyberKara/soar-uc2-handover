@@ -312,8 +312,9 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
         # alone with an X-PhishAlarm-Sender header (a report from a shared
         # mailbox), that header names the Sender Email and the report is
         # otherwise handled as a report copy. The header also stands in when the
-        # reported email's own sender field holds no address (a report of an
-        # email sent to a shared mailbox).
+        # reported email's own sender field holds no address or an excluded one:
+        # for a report of an email sent to a shared mailbox, TRAP shows the
+        # analyzer as the sender of both copies.
         has_reported_email = any((e or {}).get("abuseCopy") is False for e in emails)
         event_header_raw = next((v for v in (_header_value((e or {}).get("headers") or {}, "X-PhishAlarm-Sender")
                                              for e in emails) if _header_address(v)), "")
@@ -361,7 +362,11 @@ def build_artifact_list(action=None, success=None, container=None, results=None,
                 from_addr = header_sender
             else:
                 from_addr = "" if report_copy else sender.get("email", "")
-                if email.get("abuseCopy") is False and "@" not in str(from_addr or "") and event_header_sender:
+                field_addr = str(from_addr or "").strip().lower()
+                if (email.get("abuseCopy") is False and event_header_sender
+                        and ("@" not in field_addr or field_addr in excluded_addresses)):
+                    if field_addr in excluded_addresses:
+                        skipped_addresses.add(field_addr)
                     from_addr = event_header_sender
                     named_by_header = True
             if from_addr and from_addr.strip().lower() in excluded_addresses:

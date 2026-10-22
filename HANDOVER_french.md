@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Paquet de transfert (déploiement air-gapped)
 
-Généré le 2026-10-22 21:36 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
+Généré le 2026-10-22 22:16 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
 
 Ce paquet est autonome — tout ce qu'il faut pour déployer ce cas d'usage manuellement
 dans un environnement sans accès réseau vers ce dépôt ni vers `soar8`.
@@ -84,6 +84,8 @@ d'installation.
 - **Réimportez `proofpoint_trap_detail` et `proofpoint_trap_attachments` (2026-10-22) : l'expéditeur d'un signalement depuis une boîte partagée est de nouveau lu quand son nom contient un accent ou une apostrophe.** Un tel nom peut arriver avec tout l'en-tête `X-PhishAlarm-Sender` encodé (`=?utf-8?b?...?=`), ou avec une apostrophe dans l'adresse (`jean.d'arc@...`) ; le cas n'avait alors aucun Sender Email, gardait le nom `TRAP-<id>: No summary` et son résumé n'avait pas de section Sender. Les deux restent inactifs. Ensuite, sur chaque cas resté ainsi, lancez `proofpoint_trap_orchestrator` avec *Run Playbook* : il ajoute l'expéditeur et renomme le cas.
 
 - **Réimportez encore `proofpoint_trap_detail` (2026-10-22, plus tard le même jour) : le signalement d'un e-mail envoyé à une boîte de service partagée obtient son expéditeur.** TRAP liste ce signalement avec l'e-mail signalé, dont le champ expéditeur peut ne contenir aucune adresse ; l'expéditeur est alors pris dans le `X-PhishAlarm-Sender` du signalement. Il reste inactif. Relancez ensuite `proofpoint_trap_orchestrator` sur chaque cas encore nommé `TRAP-<id>: No summary`.
+
+- **Réimportez de nouveau `proofpoint_trap_detail` (paquet r38) : les mêmes signalements, quand TRAP montre l'analyseur comme expéditeur des deux copies.** L'analyseur est dans `proofpoint_trap_excluded_email` : il était écarté et rien ne le remplaçait ; l'expéditeur est désormais pris dans `X-PhishAlarm-Sender` dès que l'expéditeur de l'e-mail signalé est vide ou exclu. Il reste inactif. Lancez ensuite `proofpoint_trap_orchestrator` sur chaque cas encore nommé `TRAP-<id>: No summary`.
 
 ## Ordre d'installation
 
