@@ -16,6 +16,7 @@
     "poll_state": "new",
     "verify_ssl": false,
     "sensitivity": "amber",
+    "recheck_days": 30,
     "sub_disposition": "",
     "abuse_disposition": "Unknown,Suspicious,Malicious,Spam,Bulk,Low Risk"
   },

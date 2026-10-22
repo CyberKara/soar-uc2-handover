@@ -28,7 +28,6 @@ not shipped in the handover. Open work: the Splunk project's `docs/next-steps.md
 | PB6 `proofpoint_trap_comment_add_link_to_soar_case` | automation | `proofpoint_trap` | no | TRAP comment linking the case, once |
 | PB7 `proofpoint_trap_acknowledge` | automation | `proofpoint_trap` | no | Analyst: comment, assign the TRAP team and assignee, set open in TRAP |
 | PB8 `proofpoint_trap_close` | automation | `proofpoint_trap` | no | Analyst: close in TRAP with a reason, then the case |
-| PB9 `proofpoint_trap_recheck` | automation | `proofpoint_trap_recheck` | **yes** | Timer-driven: finds ingested incidents that changed |
 | CF `proofpoint_trap_extract_incident_id` | custom function | — | — | Incident ID + TRAP Severity from the latest Event Info (Update) |
 | CF `proofpoint_trap_note_upsert` | custom function | — | — | Writes a note by title, updated in place |
 | CF `container_update` | custom function (Splunk community) | — | — | Case name, severity, tags in one call |
@@ -46,9 +45,9 @@ TRAP on_poll ─► case "TRAP-<id>: <summary>" + Event Info artifact   (label p
          4. PB4 summary       TRAP Summary note
          5. PB6 comment link  TRAP comment with the case link, once
 
-Timer asset (15 min) ─► case on label proofpoint_trap_recheck ─► PB9 recheck
-         list incidents (new, open, closed; last 168 h) → changed + already ingested →
-         find artifacts (incidentId) → Event Info Update on that case → the orchestrator runs again
+TRAP on_poll, each scheduled poll (connector 1.0.41+) ─► recheck of the cases it ingested
+         list new + open (created in the last recheck_days) and closed since the last poll →
+         state or Event Info changed → Event Info Update on that case → the orchestrator runs again
 
 Analyst ─► Run Playbook on the case ─► PB5 isolation notify │ PB7 acknowledge │ PB8 close
 ```
@@ -67,7 +66,7 @@ Rules behind this shape (detail in `docs/vpe-dev/constraints.md`):
   leftovers blanked as "Title (unused)".
 - **One active orchestrator.** Automation playbooks on one label start together on the same
   trigger and race; the five children stay inactive, and no artifact a child writes runs
-  automation. The exception is PB9's `Event Info Update`, which is meant to.
+  automation. The exception is the connector's `Event Info Update`, which is meant to.
 - **Analyst playbooks are inactive automation playbooks.** A case's *Run Playbook* lists
   automation playbooks only (active or not), never Input ones.
 - **A VPE save never breaks a playbook**, and an unchanged save keeps its id: the repo `.py` is
@@ -198,23 +197,29 @@ hours) → `approved` → `close trap incident` (`summary` + the reason as `deta
 → `add note` (`TRAP Close`: reason and TRAP's result) → `trap closed` → `set status` (closed).
 Unanswered → nothing done, no note. The case is closed only when TRAP closed the incident.
 
-### PB9 — `proofpoint_trap_recheck`
+### Recheck — connector `on_poll` (1.0.41+)
 
-`list incidents` (one parameter set per state `new`, `open`, `closed` — SOAR drops an empty
-`state`) over the last 168 hours → `process incidents` → `find cases` (Phantom `find artifacts`,
-`incidentId`) → `build updates` → `add event info updates`. Each incident's signature (state + the
-Event Info fields) is compared with custom list `proofpoint_trap_recheck_state` (`incident_id`,
-`signature`):
+Each scheduled poll, after ingesting, rechecks the cases this asset ingested (kept in the
+connector's state with each incident's signature: state + the Event Info fields). It lists new and
+open incidents created in the last `recheck_days` (asset field, default 30, 0 = off) and incidents
+closed since the last recheck:
 
-- unseen incident → recorded, not rechecked (so the first tick does not re-enrich the backlog);
-- changed with a case → an `Event Info Update` on that case (`run_automation: True`, incident id
-  typed `proofpoint trap incident id`, `recheckTime`), which re-runs the orchestrator;
-- changed with a case closed in SOAR → recorded, no update (a closed case runs no automation, and a
-  new artifact would only raise its severity);
-- changed with no case yet → left pending until `on_poll` ingests it.
+- changed with an open case → an `Event Info Update` on that case (`run_automation: True`,
+  severity `low`, incident id typed `proofpoint trap incident id`, `recheckTime`), which re-runs the
+  orchestrator;
+- changed with a case closed in SOAR → recorded, no update (a closed case runs no automation);
+- case created or updated less than 10 minutes ago → left for the next poll, so two orchestrator
+  runs do not overlap;
+- closed in TRAP → its last update, then no longer tracked; older than `recheck_days` or case
+  deleted → no longer tracked.
 
-The signature code mirrors the connector's Event Info CEF; keep both in sync. Never closes a case
-and writes no note.
+A failed listing fails the poll (what it ingested stays) and changes nothing in the state. Poll Now
+ingests and tracks but does not recheck. Cases ingested before 1.0.41 are not tracked: the
+connector cannot look up existing cases.
+
+Before 1.0.41 the playbook `proofpoint_trap_recheck` (PB9, a Timer asset and custom list
+`proofpoint_trap_recheck_state`) did this; removed 2026-10-22. On a target upgrading from it, delete
+that playbook, its Timer asset and its custom list: both active would add an update per change.
 
 ## Data model
 
@@ -223,7 +228,7 @@ Every artifact is labelled `event`. Free-text fields stay untyped; artifact `typ
 | Artifact | Key CEF fields (data type) | Written by |
 |---|---|---|
 | Event Info | `incidentId` (`proofpoint trap incident id`, connector 1.0.39+), `abuseDisposition`, `subDisposition`, `classification`, `trapSeverity`, `threatScore`, `eventIds`, `message` | connector `on_poll` |
-| Event Info Update | same fields + `recheckTime` | PB9 |
+| Event Info Update | same fields + `recheckTime` | connector `on_poll` recheck |
 | Sender Email | `emailAddress` (email), `emailRole: sender`, `senderSource`, `emailSubject`, `messageId` / `inReplyTo` (internet message id), `deliveryTime`, `bodyType`, `abuseCopy`, `emailHeaders`, `receivedSpf`, `dkimSignature`, `received`, `phishAlarmSender` | PB1 |
 | Sender Domain | `sourceDnsDomain` (domain) | PB1 |
 | Recipient Email | `emailAddress` (email), `emailRole`: `recipient`, `reporter` (PB1), `cc` (PB2) | PB1, PB2 |
@@ -261,25 +266,20 @@ login; the appliance where noted):
 
    | Asset | App | Settings |
    |---|---|---|
-   | `proofpoint_trap_mock` | Proofpoint TRAP | `base_url`, `api_key`, `verify_ssl`; ingest label `proofpoint_trap`, polling on; `poll_state` `new`, `abuse_disposition` `Unknown,Suspicious,Malicious,Spam,Bulk,Low Risk`, `sub_disposition` empty (only meaningful with Unknown), `severity`/`sensitivity` defaults `low`/`amber` |
-   | `soar8` | Phantom (SOAR) | Every artifact write and `find artifacts` (PB1, PB2, PB6, PB8, PB9). Its automation user needs the `Automation` role, or every write returns 403 |
+   | `proofpoint_trap_mock` | Proofpoint TRAP | `base_url`, `api_key`, `verify_ssl`; ingest label `proofpoint_trap`, polling on; `poll_state` `new`, `recheck_days` `30`, `abuse_disposition` `Unknown,Suspicious,Malicious,Spam,Bulk,Low Risk`, `sub_disposition` empty (only meaningful with Unknown), `severity`/`sensitivity` defaults `low`/`amber` |
+   | `soar8` | Phantom (SOAR) | Every artifact write and `find artifacts` (PB1, PB2, PB6, PB8). Its automation user needs the `Automation` role, or every write returns 403 |
    | `smtp` | SMTP | PB5 only |
 
-3. **Timer asset** `proofpoint_trap_recheck`: every 15 minutes, container label
-   `proofpoint_trap_recheck` (creating the asset creates the label).
-4. **Custom lists:**
-   - `proofpoint_trap_recheck_state` — create it empty and leave it alone; PB9 owns it
-     (`incident_id`, `signature`).
-   - `proofpoint_trap_excluded_email` — `email`, `date` (DD/MM/YYYY), `reason`, `enabled`
-     (`yes` applies the row). For addresses on every incident; ships with example rows only.
-5. **Import** the three CFs (*Import Custom Function*): `proofpoint_trap_extract_incident_id`,
+3. **Custom list** `proofpoint_trap_excluded_email` — `email`, `date` (DD/MM/YYYY), `reason`,
+   `enabled` (`yes` applies the row). For addresses on every incident; ships with example rows only.
+4. **Import** the three CFs (*Import Custom Function*): `proofpoint_trap_extract_incident_id`,
    `proofpoint_trap_note_upsert`, `container_update`; then the playbooks.
-6. **Activate** `proofpoint_trap_orchestrator` and `proofpoint_trap_recheck` only; leave PB1–PB8
-   inactive. **Run As:** leave the default (the automation user). After any redeploy, read the
-   active flags back: a redeploy keeps each playbook's own state.
-7. **SOAR base URL** (Administration > Company Settings) must be the address analysts open: PB6's
+5. **Activate** `proofpoint_trap_orchestrator` only; leave PB1–PB8 inactive. **Run As:** leave
+   the default (the automation user). After any redeploy, read the active flags back: a redeploy
+   keeps each playbook's own state.
+6. **SOAR base URL** (Administration > Company Settings) must be the address analysts open: PB6's
    TRAP comment and PB5's case link are built from it.
-8. **Format blocks to set** (open the playbook, edit the block's template, save): PB5
+7. **Format blocks to set** (open the playbook, edit the block's template, save): PB5
    `isolation browser url`, PB7 `trap team` and `trap assignee`.
 
 ## Verification
@@ -294,8 +294,11 @@ login; the appliance where noted):
   TRAP Summary notes once each; the case at the mapped severity; one comment on the TRAP incident.
 - **Re-run:** a second orchestrator run on the same case adds nothing, changes no note and shows no
   failed action.
-- **Change:** `add_event` on an ingested incident → within one Timer tick an `Event Info Update` and
-  one more orchestrator run: PB1 posts only the new alert's artifacts, PB2 downloads only its email.
+- **Change:** `add_event` on an incident ingested by 1.0.41+ → on the first scheduled poll 10
+  minutes or more after its last update, an `Event Info Update` and one more orchestrator run: PB1
+  posts only the new alert's artifacts, PB2 downloads only its email. A disposition change or a TRAP
+  close does the same; after the close the incident is no longer tracked. A manual
+  `POST /rest/action_run` of `on poll` takes the scheduled branch.
 - **Analyst actions:** on a TRAP case, *Run Playbook* lists PB5/PB7/PB8; run each and answer its
   prompt. The Run button sends `POST /rest/playbook_run` `{container_id, playbook_id, scope, run}`.
 - **Logs** on the SOAR host (as `phantom`): `spawn.log` (playbooks), `actiond.log` (actions),
@@ -306,4 +309,6 @@ login; the appliance where noted):
 - Field names follow this UC (`emailAddress`, `messageId`, `emailSubject`), not the names community
   phishing playbooks read (`fromEmail`, `toEmail`, `emailHeaders.*`).
 - A note updated in place keeps no earlier version.
+- An incident still new or open `recheck_days` after its creation is no longer rechecked (TRAP lists
+  only by creation or close date).
 - Lab only: about 309 cases ingested before 2026-09-22 were never enriched (no backfill).

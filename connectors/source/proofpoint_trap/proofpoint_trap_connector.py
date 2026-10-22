@@ -1,5 +1,6 @@
 # File: proofpoint_trap_connector.py
 import email.policy
+import hashlib
 import json
 import sys
 from datetime import datetime, timedelta, timezone
@@ -47,6 +48,9 @@ class ProofpointTrapConnector(BaseConnector):
             )
             return phantom.APP_ERROR
 
+        # trust_env stays on (requests' default, as in Splunk's own apps): SOAR
+        # passes its proxy settings and certificate store (REQUESTS_CA_BUNDLE)
+        # to the action through the environment.
         self._session = requests.Session()
         retry = urllib3.Retry(
             total=MAX_RETRIES,
@@ -292,11 +296,13 @@ class ProofpointTrapConnector(BaseConnector):
 
     def _fetch_and_filter_incidents(self, action_result, state, window_start, window_end,
                                      allowed_dispositions, allowed_sub_dispositions,
-                                     expand_events="false"):
+                                     expand_events="false", date_field="created"):
         """Fetch incidents in <=30-day chunks (TRAP's date-range cap, see
         MAX_POLL_WINDOW_HOURS) and apply the same client-side Abuse/Sub
         Disposition filtering as on_poll. Shared by on_poll and the
-        'list incidents' action so both stay in sync.
+        'list incidents' action so both stay in sync. date_field "closed"
+        windows on the close date instead (TRAP takes one family per call);
+        state None lists every state.
 
         Returns:
             tuple: (status, incidents) — RetVal pattern; incidents is a
@@ -309,8 +315,8 @@ class ProofpointTrapConnector(BaseConnector):
             chunk_end = min(chunk_start + timedelta(hours=MAX_POLL_WINDOW_HOURS), window_end)
             params = {
                 "state": state,
-                "created_after": chunk_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "created_before": chunk_end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                date_field + "_after": chunk_start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+                date_field + "_before": chunk_end.strftime("%Y-%m-%dT%H:%M:%SZ"),
                 "expand_events": expand_events,
             }
 
@@ -489,7 +495,7 @@ class ProofpointTrapConnector(BaseConnector):
             if last_poll:
                 window_start = datetime.strptime(
                     last_poll, "%Y-%m-%dT%H:%M:%SZ"
-                ).replace(tzinfo=timezone.utc)
+                ).replace(tzinfo=timezone.utc) - timedelta(minutes=POLL_OVERLAP_MINUTES)
             else:
                 window_start = now - timedelta(hours=poll_hours)
 
@@ -524,35 +530,200 @@ class ProofpointTrapConnector(BaseConnector):
         severity = config.get(SEVERITY_KEY, DEFAULT_SEVERITY)
         sensitivity = config.get(SENSITIVITY_KEY, DEFAULT_SENSITIVITY)
 
+        recheck_days = self._recheck_days(config)
+
         # Create containers
         created = 0
+        failed = []
         for incident in filtered:
             status, container_id = self._ingest_incident(incident, container_label, severity, sensitivity)
             if status == "created":
                 created += 1
             elif status == "duplicate":
                 self.debug_print("Duplicate container skipped for incident {}".format(incident.get("id", "")))
+            else:
+                failed.append(str(incident.get("id", "")))
+            # A case missing its Event Info is tracked too: its next change
+            # adds an Event Info Update, which starts the orchestrator.
+            if recheck_days and status in ("created", "duplicate", "artifact_failed"):
+                self._track_incident(incident, container_id, now, replace=(status != "duplicate"))
 
-        # Changes to an already-ingested incident are detected by the
-        # proofpoint_trap_recheck playbook, not here: on_poll only moves forward.
+        # Changes to an already-ingested incident: scheduled polls only, like
+        # the checkpoint. A failed recheck fails the poll but keeps what was ingested.
+        recheck_error = None
+        if recheck_days and not self.is_poll_now():
+            recheck_error = self._recheck_tracked_incidents(now, recheck_days, window_start)
 
         # Update poll checkpoint (skip on Poll Now — manual polls don't advance cursor)
         if not self.is_poll_now():
             self._state["last_poll_time"] = now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
+        # The checkpoint has moved past a failed incident: only the failed poll
+        # (and the progress lines above) report it.
+        errors = []
+        if failed:
+            errors.append("ingest failed for incident(s) {}".format(", ".join(failed)))
+        if recheck_error:
+            errors.append("recheck failed: {}".format(recheck_error))
+        if errors:
+            return self.set_status(
+                phantom.APP_ERROR,
+                "{} containers created; {}".format(created, "; ".join(errors)),
+            )
         self.save_progress(
             "on_poll complete — {} containers created".format(created)
         )
         return self.set_status(phantom.APP_SUCCESS)
+
+    # ------------------------------------------------------------------
+    # on_poll recheck: changes to ingested incidents
+    # ------------------------------------------------------------------
+
+    def _recheck_days(self, config):
+        """recheck_days from the asset; an invalid value falls back to the default."""
+        value = config.get(RECHECK_DAYS_KEY, DEFAULT_RECHECK_DAYS)
+        try:
+            if not float(value).is_integer() or int(value) < 0:
+                raise ValueError()
+            return int(value)
+        except (TypeError, ValueError):
+            self.save_progress("Invalid recheck_days {!r}: using {}".format(value, DEFAULT_RECHECK_DAYS))
+            return DEFAULT_RECHECK_DAYS
+
+    def _incident_signature(self, incident):
+        """Hash of the incident's state and Event Info fields: a new alert
+        changes eventIds, a TRAP edit the other fields."""
+        payload = json.dumps(
+            {"state": incident.get("state", ""), "event_info": self._build_event_info_cef(incident)},
+            sort_keys=True,
+        )
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+    def _track_incident(self, incident, container_id, now, replace):
+        """Record the case of an ingested incident and its signature as
+        ingested. replace=False keeps an existing entry, so a duplicate hit
+        does not hide a change not yet rechecked."""
+        tracked = self._state.setdefault(RECHECK_STATE_KEY, {})
+        inc_id = str(incident.get("id", ""))
+        if not inc_id or not container_id or (inc_id in tracked and not replace):
+            return
+        tracked[inc_id] = {
+            "container_id": container_id,
+            "created_at": incident.get("created_at", ""),
+            "signature": self._incident_signature(incident),
+            "touched": now.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+
+    def _recheck_tracked_incidents(self, now, recheck_days, closed_since):
+        """Add an Event Info Update (run_automation, which re-runs the
+        orchestrator) to each tracked case whose incident changed in TRAP.
+        Lists new and open incidents created in the last recheck_days, and
+        incidents closed since the last successful recheck; a closed incident
+        gets its last update and is no longer tracked.
+
+        Returns:
+            str: the error message when TRAP could not be listed, else None.
+            Tracked state and the closed window are then left unchanged.
+        """
+        fmt = "%Y-%m-%dT%H:%M:%SZ"
+        tracked = self._state.setdefault(RECHECK_STATE_KEY, {})
+        tick = now.strftime(fmt)
+        if not tracked:
+            self._state[RECHECK_CLOSED_TIME_KEY] = tick
+            return None
+        window_start = now - timedelta(days=recheck_days)
+        last_closed = self._state.get(RECHECK_CLOSED_TIME_KEY)
+        if last_closed:
+            closed_since = datetime.strptime(last_closed, fmt).replace(
+                tzinfo=timezone.utc) - timedelta(minutes=POLL_OVERLAP_MINUTES)
+        closed_since = max(closed_since, window_start)
+
+        listed = {}
+        for state, date_field, since in (("new", "created", window_start),
+                                         ("open", "created", window_start),
+                                         (None, "closed", closed_since)):
+            ret_val, incidents = self._fetch_and_filter_incidents(
+                None, state, since, now, set(), set(), date_field=date_field,
+            )
+            if phantom.is_fail(ret_val):
+                return "listing {} incidents: {}".format(state or "closed", self.get_status_message())
+            for incident in incidents:
+                listed[str(incident.get("id", ""))] = incident
+
+        settle_cutoff = (now - timedelta(minutes=RECHECK_SETTLE_MINUTES)).strftime(fmt)
+        window_start_str = window_start.strftime(fmt)
+        updated = 0
+        for inc_id, entry in list(tracked.items()):
+            incident = listed.get(inc_id)
+            if incident is None:
+                if entry.get("created_at", "") < window_start_str:
+                    del tracked[inc_id]
+                continue
+            closed = incident.get("state") == "closed"
+            signature = self._incident_signature(incident)
+            if signature == entry["signature"]:
+                if closed:
+                    del tracked[inc_id]
+                continue
+            if entry.get("touched", "") > settle_cutoff:
+                continue
+
+            try:
+                ret_val, case, status_code = self.get_container_info(entry["container_id"])
+            except Exception as e:  # a non-JSON error body raises inside get_container_info
+                ret_val, case, status_code = phantom.APP_ERROR, str(e), 0
+            if phantom.is_fail(ret_val):
+                if status_code == 404:
+                    del tracked[inc_id]
+                else:
+                    self.save_progress("Recheck: case {} of incident {} unreadable, retried next poll -- {}".format(
+                        entry["container_id"], inc_id, case))
+                continue
+            # A case closed in SOAR runs no automation; an update would only raise its severity.
+            if str(case.get("status") or "").lower() != "closed":
+                cef = self._build_event_info_cef(incident)
+                cef["message"] = "TRAP incident {} changed since last enrichment".format(inc_id)
+                # The tick makes each update new content, so a change back to an
+                # earlier state still re-runs the orchestrator.
+                cef["recheckTime"] = tick
+                ret_val, message, _artifact_id = self.save_artifact({
+                    "name": "Event Info Update",
+                    "container_id": entry["container_id"],
+                    "source_data_identifier": "trap-{}-recheck-{}".format(inc_id, tick),
+                    "label": "event",
+                    # low never raises the case's severity; triage owns it.
+                    "severity": "low",
+                    "cef": cef,
+                    "cef_types": {"incidentId": ["proofpoint trap incident id"]},
+                    "run_automation": True,
+                })
+                if phantom.is_fail(ret_val):
+                    self.save_progress("Recheck: Event Info Update on case {} failed, retried next poll -- {}".format(
+                        entry["container_id"], message))
+                    continue
+                updated += 1
+            if closed:
+                del tracked[inc_id]
+            else:
+                entry["signature"] = signature
+                entry["touched"] = tick
+
+        # A closed incident still tracked (settling, or its update failed) must
+        # be listed again: the closed window moves on only once none is left.
+        if not any(listed.get(inc_id, {}).get("state") == "closed" for inc_id in tracked):
+            self._state[RECHECK_CLOSED_TIME_KEY] = tick
+        self.save_progress("Recheck: {} case(s) tracked, {} Event Info Update(s) added".format(len(tracked), updated))
+        return None
 
     def _ingest_incident(self, incident, container_label, severity, sensitivity):
         """Create a container + artifacts for one incident.
 
         Returns:
             tuple: (status, container_id). status is "created", "duplicate",
-            or "failed". container_id is set for "created" and "duplicate"
+            "artifact_failed" (case created, Event Info not saved) or
+            "failed" (no case). container_id is set for all but "failed"
             (save_container returns the existing container's id on a
-            duplicate hit), None for "failed".
+            duplicate hit).
         """
         inc_id = incident.get("id", "")
         # Real incidents often carry an empty summary, which .get()'s default
@@ -576,7 +747,7 @@ class ProofpointTrapConnector(BaseConnector):
         ret_val, msg, container_id = self.save_container(container)
 
         if phantom.is_fail(ret_val):
-            self.debug_print("Failed to save container for incident {}: {}".format(inc_id, msg))
+            self.save_progress("Incident {}: case not created -- {}".format(inc_id, msg))
             return "failed", None
 
         if "duplicate container found" in msg.lower():
@@ -587,13 +758,18 @@ class ProofpointTrapConnector(BaseConnector):
 
         if artifacts:
             artifacts[-1]["run_automation"] = True
-            self.save_artifacts(artifacts)
+            ret_val, msg, _artifact_ids = self.save_artifacts(artifacts)
+            # Without its Event Info the case never starts the orchestrator.
+            if phantom.is_fail(ret_val):
+                self.save_progress("Incident {}: Event Info not saved on case {} -- {}".format(
+                    inc_id, container_id, msg))
+                return "artifact_failed", container_id
 
         return "created", container_id
 
     def _build_event_info_cef(self, incident):
-        """CEF fields of the "Event Info" artifact. proofpoint_trap_recheck
-        builds the same fields for "Event Info Update"; keep both in sync."""
+        """CEF fields of the "Event Info" artifact, and of the "Event Info
+        Update" the recheck adds when they change."""
         inc_id = incident.get("id", "")
         disposition = self._get_disposition(incident)
         sub_disposition = self._get_field_value(incident, "Sub Disposition")

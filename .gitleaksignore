@@ -1,8 +1,8 @@
-playbooks/source/proofpoint_trap_acknowledge/proofpoint_trap_acknowledge.json:generic-api-key:125
-playbooks/source/proofpoint_trap_acknowledge/proofpoint_trap_acknowledge.json:generic-api-key:264
-playbooks/source/proofpoint_trap_acknowledge/proofpoint_trap_acknowledge.json:generic-api-key:331
-playbooks/source/proofpoint_trap_acknowledge/proofpoint_trap_acknowledge.json:generic-api-key:408
-playbooks/source/proofpoint_trap_acknowledge/proofpoint_trap_acknowledge.json:generic-api-key:480
+playbooks/source/proofpoint_trap_acknowledge/proofpoint_trap_acknowledge.json:generic-api-key:139
+playbooks/source/proofpoint_trap_acknowledge/proofpoint_trap_acknowledge.json:generic-api-key:278
+playbooks/source/proofpoint_trap_acknowledge/proofpoint_trap_acknowledge.json:generic-api-key:345
+playbooks/source/proofpoint_trap_acknowledge/proofpoint_trap_acknowledge.json:generic-api-key:422
+playbooks/source/proofpoint_trap_acknowledge/proofpoint_trap_acknowledge.json:generic-api-key:494
 playbooks/source/proofpoint_trap_attachments/proofpoint_trap_attachments.json:generic-api-key:172
 playbooks/source/proofpoint_trap_attachments/proofpoint_trap_attachments.json:generic-api-key:238
 playbooks/source/proofpoint_trap_attachments/proofpoint_trap_attachments.json:generic-api-key:343
@@ -29,9 +29,6 @@ playbooks/source/proofpoint_trap_orchestrator/proofpoint_trap_orchestrator.json:
 playbooks/source/proofpoint_trap_orchestrator/proofpoint_trap_orchestrator.json:generic-api-key:207
 playbooks/source/proofpoint_trap_orchestrator/proofpoint_trap_orchestrator.json:generic-api-key:258
 playbooks/source/proofpoint_trap_orchestrator/proofpoint_trap_orchestrator.json:generic-api-key:309
-playbooks/source/proofpoint_trap_recheck/proofpoint_trap_recheck.json:generic-api-key:106
-playbooks/source/proofpoint_trap_recheck/proofpoint_trap_recheck.json:generic-api-key:192
-playbooks/source/proofpoint_trap_recheck/proofpoint_trap_recheck.json:generic-api-key:286
 playbooks/source/proofpoint_trap_summary/proofpoint_trap_summary.json:generic-api-key:110
 playbooks/source/proofpoint_trap_triage/proofpoint_trap_triage.json:generic-api-key:189
 playbooks/source/proofpoint_trap_triage/proofpoint_trap_triage.json:generic-api-key:368

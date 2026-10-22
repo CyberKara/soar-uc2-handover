@@ -10,6 +10,7 @@ POLL_STATE_KEY = "poll_state"
 ABUSE_DISPOSITION_KEY = "abuse_disposition"
 SUB_DISPOSITION_KEY = "sub_disposition"
 POLL_HOURS_KEY = "poll_hours"
+RECHECK_DAYS_KEY = "recheck_days"
 SEVERITY_KEY = "severity"
 SENSITIVITY_KEY = "sensitivity"
 
@@ -33,11 +34,27 @@ DEFAULT_POLL_STATE = "new"
 DEFAULT_ABUSE_DISPOSITION = "Unknown"
 DEFAULT_SUB_DISPOSITION = ""  # empty = no Sub Disposition filtering
 DEFAULT_POLL_HOURS = 1
+DEFAULT_RECHECK_DAYS = 30  # 0 = no recheck
 MAX_RETRIES = 3
 RETRYABLE_STATUS_CODES = [500, 502, 503, 504]
 
 # On-prem Threat Response caps a created_after/created_before window at 30 days
 MAX_POLL_WINDOW_HOURS = 24 * 30
+
+# Each scheduled poll, and the recheck's closed listing, starts this far before
+# the last checkpoint. The checkpoint is SOAR's clock while TRAP filters on its
+# own created_at/closed_at: a TRAP clock behind SOAR's, its boundary second or a
+# late commit would otherwise drop an incident for good. Re-listed incidents are
+# duplicates (same source_data_identifier) and unchanged signatures: harmless.
+POLL_OVERLAP_MINUTES = 5
+
+# Recheck state (self._state): tracked cases by incident id, and where the
+# next closed_after window starts.
+RECHECK_STATE_KEY = "recheck"
+RECHECK_CLOSED_TIME_KEY = "recheck_closed_time"
+# A case created or updated less than this ago may still have an orchestrator
+# run going; its change waits for the next poll so two runs do not overlap.
+RECHECK_SETTLE_MINUTES = 10
 
 # Initial container severity/sensitivity when the asset sets none;
 # proofpoint_trap_triage maps the TRAP Severity to the real one later.

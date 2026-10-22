@@ -1,9 +1,0 @@
-{
-  "name": "proofpoint_trap_recheck_state",
-  "content": [
-    [
-      "incident_id",
-      "signature"
-    ]
-  ]
-}

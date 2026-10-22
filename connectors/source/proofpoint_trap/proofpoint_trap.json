@@ -10,8 +10,8 @@
     "logo_dark": "logo_dark.svg",
     "publisher": "Ted",
     "license": "Copyright (c) 2026",
-    "app_version": "1.0.39",
-    "utctime_updated": "2026-08-20T00:00:00.000000Z",
+    "app_version": "1.0.45",
+    "utctime_updated": "2026-10-22T00:00:00.000000Z",
     "package_name": "phantom_proofpoint_trap",
     "main_module": "proofpoint_trap_connector.py",
     "min_phantom_version": "6.4.1",
@@ -79,12 +79,19 @@
             "default": 1,
             "order": 8
         },
+        "recheck_days": {
+            "description": "Days of new/open incidents to recheck for changes (new alerts, field edits, a TRAP close) on each scheduled poll; 0 = no recheck",
+            "data_type": "numeric",
+            "required": false,
+            "default": 30,
+            "order": 9
+        },
         "severity": {
             "description": "Initial severity of a new container",
             "data_type": "string",
             "required": false,
             "default": "low",
-            "order": 9
+            "order": 10
         },
         "sensitivity": {
             "description": "Sensitivity of the created container",
@@ -92,7 +99,7 @@
             "required": false,
             "value_list": ["white", "green", "amber", "red"],
             "default": "amber",
-            "order": 10
+            "order": 11
         }
     },
     "actions": [
@@ -109,7 +116,7 @@
         {
             "action": "on poll",
             "identifier": "on_poll",
-            "description": "Ingest incidents from Proofpoint TRAP (Incidents API, /api/incidents)",
+            "description": "Ingest incidents from Proofpoint TRAP (Incidents API, /api/incidents); on scheduled polls, add an Event Info Update to each case whose incident changed",
             "type": "ingest",
             "read_only": true,
             "parameters": {},

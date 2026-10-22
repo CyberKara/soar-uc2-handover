@@ -1,6 +1,6 @@
 # UC2 — Proofpoint TRAP Incident Triage — Paquet de transfert (déploiement air-gapped)
 
-Généré le 2026-10-19 09:15 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
+Généré le 2026-10-22 11:14 UTC à partir de `proofpoint_trap` (environnement source : `soar8`).
 
 Ce paquet est autonome — tout ce qu'il faut pour déployer ce cas d'usage manuellement
 dans un environnement sans accès réseau vers ce dépôt ni vers `soar8`.
@@ -11,10 +11,10 @@ dans un environnement sans accès réseau vers ce dépôt ni vers `soar8`.
 
 | Chemin | Contenu |
 |--------|---------|
-| `connectors/` | Paquet(s) applicatif(s) connecteur : proofpoint_trap-v1.0.39.tgz |
+| `connectors/` | Paquet(s) applicatif(s) connecteur : proofpoint_trap-v1.0.45.tgz |
 | `connectors/source/` | Même(s) connecteur(s), extrait(s) — pour lecture, pas pour import |
 | `playbooks/*.tgz` (CF) | proofpoint_trap_extract_incident_id, proofpoint_trap_note_upsert, container_update |
-| `playbooks/*.tgz` (PB) | proofpoint_trap_detail, proofpoint_trap_triage, proofpoint_trap_attachments, proofpoint_trap_acknowledge, proofpoint_trap_close, proofpoint_trap_isolation_notify, proofpoint_trap_recheck, proofpoint_trap_summary, proofpoint_trap_comment_add_link_to_soar_case, proofpoint_trap_orchestrator |
+| `playbooks/*.tgz` (PB) | proofpoint_trap_detail, proofpoint_trap_triage, proofpoint_trap_attachments, proofpoint_trap_acknowledge, proofpoint_trap_close, proofpoint_trap_isolation_notify, proofpoint_trap_summary, proofpoint_trap_comment_add_link_to_soar_case, proofpoint_trap_orchestrator |
 | `playbooks/source/` | Mêmes CF/playbooks, extraits — pour lecture, pas pour import |
 | `assets/*.json` | Modèles de configuration d'assets (identifiants masqués — voir ci-dessous) |
 | `custom_lists/*.json` | Liste(s) personnalisée(s) — les lignes définies par ce paquet, jamais les lignes de données de la source (voir la section dédiée ci-dessous) |
@@ -76,6 +76,8 @@ d'installation.
 
 - **Refonte UC2 (2026-10-15) : plus de notes ni d'artefacts en double, un téléchargement d'e-mail par alerte.** Chaque exécution traite toutes les alertes de l'incident et ne publie que ce qui est nouveau ; les notes récurrentes (TRAP Detail, Email Content, Attachment Extraction, TRAP Triage - Severity, TRAP Summary) sont mises à jour sur place au lieu d'être ajoutées à nouveau. Ce qui change : `proofpoint_trap_attachments` télécharge l'e-mail de chaque alerte une seule fois (le MIME Body, écrit en dernier, marque l'alerte comme traitée ; si le téléchargement échoue, la liste de pièces jointes et le Cc de TRAP sont utilisés, puis complétés par un téléchargement ultérieur) ; `proofpoint_trap_triage` fixe sévérité et tags en une étape, en gardant les tags de vos analystes ; le commentaire TRAP qui pointe vers le cas est un nouveau playbook, `proofpoint_trap_comment_add_link_to_soar_case`, publié une seule fois (un artefact `TRAP Run State` l'enregistre) ; `proofpoint_trap_recheck` retrouve les cas avec *find artifacts* et n'ajoute rien à un cas fermé dans SOAR (qui n'exécute aucune automatisation ; un artefact ne ferait qu'en relever la sévérité) ; `proofpoint_trap_close` et `proofpoint_trap_acknowledge` interrogent l'analyste qui les a lancés (le prompt attend 6 heures ; un prompt sans réponse ne fait rien ; cela remplace la règle propriétaire du cas / `soar_local_admin` du 2026-10-12) : close ne ferme le cas qu'une fois l'incident fermé dans TRAP, acknowledge assigne l'incident à l'équipe et à l'assigné définis dans ses blocs format `trap team` et `trap assignee` (TRAP exige les deux ; préréglés à `SOAR`) ; `proofpoint_trap_isolation_notify` envoie à l'analyste qui l'a lancé (plus besoin de propriétaire ni de statut), avec des liens pour les URL de menace de l'incident lui-même comme pour celles des e-mails, et n'ajoute plus de note (l'action d'envoi fait foi). **Pour mettre à jour :** 1. importez les deux nouvelles custom functions `proofpoint_trap_note_upsert` et `container_update` (gardez `proofpoint_trap_extract_incident_id`) ; 2. réimportez tous les playbooks UC2, et importez `proofpoint_trap_comment_add_link_to_soar_case` ; 3. activez uniquement `proofpoint_trap_orchestrator` et `proofpoint_trap_recheck`, laissez tous les autres inactifs ; 4. si vos assets SOAR (app Phantom), TRAP ou SMTP portent d'autres noms, refaites pointer les blocs d'action et enregistrez. Après la réimportation, mettez vos valeurs dans trois blocs format (ouvrez le playbook, modifiez le modèle du bloc, enregistrez) : `isolation browser url` dans `proofpoint_trap_isolation_notify`, `trap team` et `trap assignee` (une équipe qui existe dans TRAP et un de ses utilisateurs) dans `proofpoint_trap_acknowledge`.
 
+- **Le connecteur v1.0.41+ revérifie lui-même les incidents TRAP ; le playbook `proofpoint_trap_recheck` est supprimé.** Chaque poll planifié liste les incidents qu'il a ingérés (ceux nouveaux et ouverts créés dans les derniers `recheck_days`, un nouveau champ de l'asset, 30 par défaut, 0 = désactivé ; ceux fermés depuis le dernier poll) et ajoute un `Event Info Update` au cas dont l'incident a changé, ce qui relance `proofpoint_trap_orchestrator`. Installez le connecteur par-dessus l'app existante (mise à jour sur place), puis **supprimez** le playbook `proofpoint_trap_recheck`, son asset Timer `proofpoint_trap_recheck` et la custom list `proofpoint_trap_recheck_state` : laissé actif, il ajoute une seconde mise à jour pour chaque changement. Seul `proofpoint_trap_orchestrator` reste actif, quoi qu'en dise une note précédente sur `proofpoint_trap_recheck`. Les cas ingérés avant la mise à jour ne sont pas revérifiés (le connecteur ne peut pas retrouver les cas existants). Également dans ce connecteur : un cas ou un Event Info refusé par SOAR fait désormais échouer le poll en nommant l'incident (1.0.42), et chaque poll reliste les 5 minutes précédant son point de reprise, de sorte qu'un incident daté par TRAP juste avant n'est plus manqué (1.0.43).
+
 ## Ordre d'installation
 
 1. **Installer l'application/les applications connecteur** — Apps > Install App, charger
@@ -108,9 +110,9 @@ d'installation.
 
    | Nom de l'asset | Application | Utilisé par | Modèle |
    |---|---|---|---|
-   | `proofpoint_trap_mock` | Proofpoint TRAP | `proofpoint_trap_acknowledge`, `proofpoint_trap_attachments`, `proofpoint_trap_close`, `proofpoint_trap_comment_add_link_to_soar_case`, `proofpoint_trap_detail`, `proofpoint_trap_recheck` | `assets/proofpoint_trap_mock.json` |
+   | `proofpoint_trap_mock` | Proofpoint TRAP | `proofpoint_trap_acknowledge`, `proofpoint_trap_attachments`, `proofpoint_trap_close`, `proofpoint_trap_comment_add_link_to_soar_case`, `proofpoint_trap_detail` | `assets/proofpoint_trap_mock.json` |
    | `smtp` | SMTP | `proofpoint_trap_isolation_notify` | `assets/smtp.json` |
-   | `soar8` | Phantom | `proofpoint_trap_acknowledge`, `proofpoint_trap_attachments`, `proofpoint_trap_close`, `proofpoint_trap_comment_add_link_to_soar_case`, `proofpoint_trap_detail`, `proofpoint_trap_recheck` | `assets/soar8.json` |
+   | `soar8` | Phantom | `proofpoint_trap_acknowledge`, `proofpoint_trap_attachments`, `proofpoint_trap_close`, `proofpoint_trap_comment_add_link_to_soar_case`, `proofpoint_trap_detail` | `assets/soar8.json` |
 
 3. **Créer la/les liste(s) personnalisée(s)** à partir de `custom_lists/*.json` — chaque
    fichier contient le tableau `content` exact (les lignes définies par ce paquet, jamais les lignes de données de la source) à
@@ -133,7 +135,7 @@ d'installation.
    - **Playbooks** — tous les autres `playbooks/*.tgz` : *Import Playbook* sur la page Playbooks.
    (`playbooks/source/` est le même code extrait pour lecture — ne pas importer depuis
    ce dossier, l'interface a besoin du `.tgz`.)
-5. **Activer les playbooks d'automatisation** (`proofpoint_trap_recheck`, `proofpoint_trap_orchestrator`) et définir leur utilisateur
+5. **Activer les playbooks d'automatisation** (`proofpoint_trap_orchestrator`) et définir leur utilisateur
    **Run As** selon le guide d'installation du document de plan d'implémentation
    (voir `docs/`).
    **Laissez-les inactifs :** `proofpoint_trap_detail`, `proofpoint_trap_triage`, `proofpoint_trap_attachments`, `proofpoint_trap_summary`, `proofpoint_trap_comment_add_link_to_soar_case` — un playbook orchestrateur ci-dessus les appelle l'un
@@ -141,18 +143,6 @@ d'installation.
    Désactivez-les si un paquet précédent les avait activés.
    **Laissez aussi inactifs :** `proofpoint_trap_acknowledge`, `proofpoint_trap_close`, `proofpoint_trap_isolation_notify` — un analyste lance chacun depuis un cas avec
    *Run Playbook*. Actifs, ils se lanceraient aussi sur chaque nouveau cas.
-
-## Listes personnalisées appartenant à ce cas d'usage
-
-Ces listes constituent **l'état interne des playbooks** : créez-les vides (étape
-ci-dessus), puis n'y touchez plus. Le playbook les remplit et les entretient lui-même ;
-une ligne saisie à la main est relue comme un état réel et le fera réagir à des
-événements qui n'ont jamais eu lieu.
-
-- `proofpoint_trap_recheck_state` : `incident_id, signature` — écrite par le playbook, pas par vous.
-
-Consultez le document de plan d'implémentation dans `docs/` pour savoir ce que le
-playbook y stocke et à quel moment.
 
 ## Listes personnalisées à remplir
 
@@ -164,13 +154,13 @@ avec les listes telles que livrées.
 
 ## Vérification
 
-Une fois tout importé et les playbooks d'automatisation activés, déclenchez une exécution
-manuelle (par ex. le poll manuel de l'asset Timer, ou selon la section de déclenchement du
-document de plan d'implémentation)
-et vérifiez : qu'un container est créé, que le(s)
-playbook(s) enfant(s) attendu(s) s'exécute(nt), et que la/les liste(s) personnalisée(s)
-reflète(nt) un résultat réel. Consultez `spawn.log`/`decided.log`/`actiond.log` sur l'hôte
-SOAR cible si quelque chose ne se déclenche pas comme prévu.
+1. **Test Connectivity** sur l'asset Proofpoint TRAP. `Auth Error` vient de la clé d'API, `Connection error` de `base_url` ou du réseau, `SSL error` d'un certificat non reconnu.
+
+2. **Nouvel incident :** Poll Now sur cet asset (augmentez `poll_hours` pour atteindre un incident existant), ou attendez le poll planifié. Attendez-vous à un cas par incident, label `proofpoint_trap`, nommé `TRAP-<id>: ...`, et à une exécution de `proofpoint_trap_orchestrator` dont les cinq playbooks enfants réussissent. Le cas reçoit ses artefacts, un `TRAP Run State` et un `Enrichment Complete`, les notes TRAP Detail, Email Content, Attachment Extraction, TRAP Triage - Severity et TRAP Summary une fois chacune, la sévérité correspondante, et l'incident TRAP reçoit un commentaire avec le lien vers le cas.
+
+3. **Changement :** modifiez cet incident dans TRAP (sa disposition, ou fermez-le). Le premier poll planifié au moins 10 minutes après sa dernière mise à jour ajoute un artefact `Event Info Update` au cas et relance l'orchestrateur, qui ne publie que ce qui est nouveau. Poll Now ne revérifie pas : attendez le planning.
+
+Si rien ne se déclenche, lisez les lignes de progression du poll sur l'asset (un poll en échec avec `ingest failed for incident(s) <ids>` est traité dans le README du connecteur, `connectors/source/proofpoint_trap/README.md`), puis `spawn.log`/`decided.log`/`actiond.log` sur l'hôte SOAR.
 
 ## Ce qui n'a volontairement PAS été exporté
 
